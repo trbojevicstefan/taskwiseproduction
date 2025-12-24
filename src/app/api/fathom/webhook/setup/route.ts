@@ -15,6 +15,8 @@ export async function POST() {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
+  console.log("Fathom webhook setup requested", { userId });
+
   const installation = await getFathomInstallation(userId);
   if (!installation) {
     return NextResponse.json(
@@ -34,12 +36,28 @@ export async function POST() {
     await updateUserById(userId, { fathomWebhookToken: webhookToken });
   }
 
-  const accessToken = await getValidFathomAccessToken(userId);
-  const result = await ensureFathomWebhook(userId, accessToken, webhookToken);
+  try {
+    const accessToken = await getValidFathomAccessToken(userId);
+    const result = await ensureFathomWebhook(userId, accessToken, webhookToken);
+    console.log("Fathom webhook setup result", {
+      userId,
+      status: result.status,
+      webhookId: result.webhookId,
+    });
 
-  return NextResponse.json({
-    status: result.status,
-    webhookId: result.webhookId,
-    webhookUrl: getFathomWebhookUrl(webhookToken),
-  });
+    return NextResponse.json({
+      status: result.status,
+      webhookId: result.webhookId,
+      webhookUrl: getFathomWebhookUrl(webhookToken),
+    });
+  } catch (error) {
+    console.error("Fathom webhook setup failed", {
+      userId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : "Webhook setup failed." },
+      { status: 500 }
+    );
+  }
 }

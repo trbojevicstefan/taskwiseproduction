@@ -59,6 +59,12 @@ export async function DELETE(
     return NextResponse.json({ error: "Meeting not found." }, { status: 404 });
   }
 
+  if (meeting?.recordingId) {
+    await db
+      .collection<any>("meetings")
+      .deleteMany({ userId: userIdQuery, recordingId: meeting.recordingId });
+  }
+
   if (meeting?.chatSessionId) {
     await db.collection<any>("chatSessions").deleteOne({
       _id: buildIdQuery(meeting.chatSessionId),
