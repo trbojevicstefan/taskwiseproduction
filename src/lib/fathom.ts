@@ -186,15 +186,6 @@ const fathomApiFetch = async <T>(
   return (await response.json()) as T;
 };
 
-const listFathomWebhooks = async (accessToken: string) => {
-  const payload = await fathomApiFetch<any>(
-    "/external/v1/webhooks",
-    accessToken
-  );
-  if (Array.isArray(payload)) return payload;
-  return payload?.webhooks || payload?.data || payload?.items || [];
-};
-
 const createFathomWebhook = async (
   accessToken: string,
   url: string
@@ -227,49 +218,51 @@ const createFathomWebhook = async (
   return (await response.json()) as any;
 };
 
-const normalizeWebhookUrl = (webhook: any) =>
-  webhook?.url || webhook?.destination_url || webhook?.endpoint || webhook?.webhook_url || null;
-
 export const ensureFathomWebhook = async (
   userId: string,
   accessToken: string,
   token: string
 ) => {
   const webhookUrl = getFathomWebhookUrl(token);
-  const webhooks = await listFathomWebhooks(accessToken);
-
-  const existing = webhooks.find((webhook: any) => {
-    const url = normalizeWebhookUrl(webhook);
-    return url === webhookUrl;
-  });
 
   const installation = await getFathomInstallation(userId);
   if (!installation) {
     throw new Error("Fathom installation missing while creating webhook.");
   }
 
-  if (existing) {
+  try {
+    const created = await createFathomWebhook(accessToken, webhookUrl);
     await saveFathomInstallation({
       ...installation,
-      webhookId: existing.id || existing.webhook_id || installation.webhookId || null,
+      webhookId: created.id || created.webhook_id || null,
       webhookUrl,
       webhookEvent: FATHOM_WEBHOOK_EVENT,
-      webhookSecret: existing.secret || existing.webhook_secret || installation.webhookSecret || null,
+      webhookSecret: created.secret || created.webhook_secret || null,
       updatedAt: new Date(),
     });
-    return { status: "existing", webhookId: existing.id || existing.webhook_id || null };
-  }
+    return { status: "created", webhookId: created.id || created.webhook_id || null };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    const isDuplicate =
+      message.includes("already") ||
+      message.includes("duplicate") ||
+      message.includes("exists") ||
+      message.includes("taken") ||
+      message.includes("409");
 
-  const created = await createFathomWebhook(accessToken, webhookUrl);
-  await saveFathomInstallation({
-    ...installation,
-    webhookId: created.id || created.webhook_id || null,
-    webhookUrl,
-    webhookEvent: FATHOM_WEBHOOK_EVENT,
-    webhookSecret: created.secret || created.webhook_secret || null,
-    updatedAt: new Date(),
-  });
-  return { status: "created", webhookId: created.id || created.webhook_id || null };
+    if (!isDuplicate) {
+      throw error;
+    }
+
+    await saveFathomInstallation({
+      ...installation,
+      webhookUrl,
+      webhookEvent: FATHOM_WEBHOOK_EVENT,
+      webhookSecret: installation.webhookSecret || null,
+      updatedAt: new Date(),
+    });
+    return { status: "existing", webhookId: installation.webhookId || null };
+  }
 };
 
 export const fetchFathomTranscript = async (
