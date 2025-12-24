@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { randomUUID } from "crypto";
 import { getDb } from "@/lib/db";
 import { getSessionUserId } from "@/lib/server-auth";
+import { buildIdQuery } from "@/lib/mongo-id";
 
 const serializeMeeting = (meeting: any) => ({
   ...meeting,
@@ -17,10 +18,11 @@ export async function GET() {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
+  const userIdQuery = buildIdQuery(userId);
   const db = await getDb();
   const meetings = await db
     .collection<any>("meetings")
-    .find({ userId })
+    .find({ userId: userIdQuery })
     .sort({ lastActivityAt: -1 })
     .toArray();
 

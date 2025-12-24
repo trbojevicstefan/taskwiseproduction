@@ -25,15 +25,14 @@ export async function PATCH(
 
   const db = await getDb();
   const idQuery = buildIdQuery(params.id);
-  await db.collection<any>("meetings").updateOne(
-    { _id: idQuery, userId },
-    { $set: update }
-  );
+  const userIdQuery = buildIdQuery(userId);
+  const filter = {
+    userId: userIdQuery,
+    $or: [{ _id: idQuery }, { id: params.id }],
+  };
+  await db.collection<any>("meetings").updateOne(filter, { $set: update });
 
-  const meeting = await db.collection<any>("meetings").findOne({
-    _id: idQuery,
-    userId,
-  });
+  const meeting = await db.collection<any>("meetings").findOne(filter);
   return NextResponse.json(serializeMeeting(meeting));
 }
 
@@ -48,23 +47,29 @@ export async function DELETE(
 
   const db = await getDb();
   const idQuery = buildIdQuery(params.id);
-  const meeting = await db.collection<any>("meetings").findOne({
-    _id: idQuery,
-    userId,
-  });
+  const userIdQuery = buildIdQuery(userId);
+  const filter = {
+    userId: userIdQuery,
+    $or: [{ _id: idQuery }, { id: params.id }],
+  };
+  const meeting = await db.collection<any>("meetings").findOne(filter);
 
-  const result = await db
-    .collection<any>("meetings")
-    .deleteOne({ _id: idQuery, userId });
+  const result = await db.collection<any>("meetings").deleteOne(filter);
   if (!result.deletedCount) {
     return NextResponse.json({ error: "Meeting not found." }, { status: 404 });
   }
 
   if (meeting?.chatSessionId) {
-    await db.collection<any>("chatSessions").deleteOne({ _id: meeting.chatSessionId, userId });
+    await db.collection<any>("chatSessions").deleteOne({
+      _id: buildIdQuery(meeting.chatSessionId),
+      userId: userIdQuery,
+    });
   }
   if (meeting?.planningSessionId) {
-    await db.collection<any>("planningSessions").deleteOne({ _id: meeting.planningSessionId, userId });
+    await db.collection<any>("planningSessions").deleteOne({
+      _id: buildIdQuery(meeting.planningSessionId),
+      userId: userIdQuery,
+    });
   }
 
   return NextResponse.json({ ok: true });

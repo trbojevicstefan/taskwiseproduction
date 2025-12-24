@@ -158,7 +158,7 @@ export const MeetingHistoryProvider = ({ children }: { children: ReactNode }) =>
       setMeetings(prev => [created, ...prev]);
       return created;
     } catch (error) {
-      console.error("Failed to create new meeting in Firestore", error);
+      console.error("Failed to create new meeting in database", error);
       toast({ title: "Error", description: "Could not create new meeting record.", variant: "destructive" });
       return undefined;
     }
@@ -179,7 +179,7 @@ export const MeetingHistoryProvider = ({ children }: { children: ReactNode }) =>
       });
       setMeetings(prev => prev.map(meeting => meeting.id === updated.id ? updated : meeting));
     } catch (error) {
-      console.error(`Failed to update meeting ${sessionId} in Firestore`, error);
+      console.error(`Failed to update meeting ${sessionId} in database`, error);
       toast({ title: "Error", description: "Could not save meeting changes.", variant: "destructive" });
     }
   }, [user, toast]);
@@ -201,7 +201,7 @@ export const MeetingHistoryProvider = ({ children }: { children: ReactNode }) =>
       }
       toast({ title: "Meeting Deleted", description: "The meeting and its linked sessions have been removed." });
     } catch (error) {
-      console.error("Failed to delete meeting from Firestore", error);
+      console.error("Failed to delete meeting from database", error);
       toast({ title: "Error", description: "Could not delete meeting.", variant: "destructive" });
     }
   }, [user, toast, activeMeetingId]);

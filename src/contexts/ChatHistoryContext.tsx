@@ -164,7 +164,7 @@ export const ChatHistoryProvider = ({ children }: { children: ReactNode }) => {
       setSessions(prev => [created, ...prev]);
       return created;
     } catch (error) {
-      console.error("Failed to create new session in Firestore", error);
+      console.error("Failed to create new session in database", error);
       toast({ title: "Error", description: "Could not create new chat session.", variant: "destructive" });
       return undefined;
     }
@@ -180,7 +180,7 @@ export const ChatHistoryProvider = ({ children }: { children: ReactNode }) => {
         setSessions(prev => prev.map(session => session.id === updated.id ? updated : session));
         
       } catch (error) {
-        console.error(`Failed to update session ${sessionId} in Firestore`, error);
+        console.error(`Failed to update session ${sessionId} in database`, error);
         // Do not show toast for every background save. Let caller decide.
         // toast({ title: "Error", description: "Could not save session changes.", variant: "destructive" });
       }
@@ -223,7 +223,7 @@ export const ChatHistoryProvider = ({ children }: { children: ReactNode }) => {
               method: "PATCH",
               body: JSON.stringify({ messages: updatedSession.messages }),
             }).catch(error => {
-                console.error("Failed to update session messages in Firestore", error);
+                console.error("Failed to update session messages in database", error);
                 toast({ title: "Error", description: "Could not save message.", variant: "destructive" });
             });
         }
@@ -246,7 +246,7 @@ export const ChatHistoryProvider = ({ children }: { children: ReactNode }) => {
       });
       setSessions(prev => prev.map(session => session.id === sessionId ? { ...session, title: newTitle } : session));
     } catch (error) {
-      console.error("Failed to update session title in Firestore", error);
+      console.error("Failed to update session title in database", error);
       toast({ title: "Error", description: "Could not update session title.", variant: "destructive" });
     }
   }, [user, toast]);
@@ -266,7 +266,7 @@ export const ChatHistoryProvider = ({ children }: { children: ReactNode }) => {
       setSessions(prev => prev.filter(session => session.id !== sessionId));
       toast({ title: "Session Deleted", description: "The chat session has been removed." });
     } catch (error) {
-      console.error("Failed to delete session from Firestore", error);
+      console.error("Failed to delete session from database", error);
       toast({ title: "Error", description: "Could not delete session.", variant: "destructive" });
     }
   }, [user, toast, sessions]);
@@ -277,7 +277,7 @@ export const ChatHistoryProvider = ({ children }: { children: ReactNode }) => {
       const sanitizedSuggestions = newSuggestions.map(sanitizeTaskForFirestore);
       await updateSession(activeSessionId, { suggestedTasks: sanitizedSuggestions });
     } catch (error) {
-      console.error("Failed to update session suggestions in Firestore", error);
+      console.error("Failed to update session suggestions in database", error);
     }
   }, [user, activeSessionId, updateSession]);
 
@@ -291,7 +291,7 @@ export const ChatHistoryProvider = ({ children }: { children: ReactNode }) => {
       const sanitizedUpdatedSuggestions = updatedSuggestions.map(sanitizeTaskForFirestore); 
       await updateSession(activeSessionId, { suggestedTasks: sanitizedUpdatedSuggestions });
     } catch (error) {
-      console.error("Failed to remove suggestion in Firestore", error);
+      console.error("Failed to remove suggestion in database", error);
       toast({ title: "Error", description: "Could not remove AI suggestion.", variant: "destructive" });
     }
   }, [user, activeSessionId, sessions, toast, updateSession]);

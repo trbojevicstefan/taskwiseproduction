@@ -114,6 +114,7 @@ export default function SettingsPageContent() {
   const [customAvatarUrl, setCustomAvatarUrl] = useState('');
   const randomSeed = useMemo(() => user?.uid || Math.random().toString(36).substring(7), [user]);
   const webhookUrlInputRef = useRef<HTMLInputElement>(null);
+  const [isCreatingFathomWebhook, setIsCreatingFathomWebhook] = useState(false);
 
   useEffect(() => {
     // This function will run when the component mounts and when searchParams change.
@@ -248,6 +249,41 @@ export default function SettingsPageContent() {
         setTimeout(() => setHasCopied(false), 2500);
         toast({ title: "Selected!", description: "URL selected. Press Ctrl+C to copy." });
       }
+  };
+
+  const handleRecreateFathomWebhook = async () => {
+    if (!user?.fathomConnected) {
+      toast({
+        title: "Fathom Not Connected",
+        description: "Connect Fathom before creating a webhook.",
+        variant: "destructive",
+      });
+      return;
+    }
+    setIsCreatingFathomWebhook(true);
+    try {
+      const response = await fetch("/api/fathom/webhook/setup", { method: "POST" });
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}));
+        throw new Error(payload.error || "Failed to create webhook.");
+      }
+      const payload = await response.json();
+      toast({
+        title: "Webhook Ready",
+        description: `Status: ${payload.status || "created"}`,
+      });
+      await refreshUserProfile();
+      await triggerTokenFetch();
+    } catch (error) {
+      console.error("Failed to create Fathom webhook:", error);
+      toast({
+        title: "Webhook Failed",
+        description: error instanceof Error ? error.message : "Could not create webhook.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsCreatingFathomWebhook(false);
+    }
   };
 
   const getInitials = (name: string | null | undefined) => {
@@ -430,6 +466,28 @@ export default function SettingsPageContent() {
                                     </Button>
                                 )}
                             </div>
+                            {user?.fathomConnected && user?.fathomWebhookToken && (
+                                <div className="mt-3">
+                                    <Button
+                                        variant="outline"
+                                        size="sm"
+                                        onClick={handleRecreateFathomWebhook}
+                                        disabled={isCreatingFathomWebhook}
+                                    >
+                                        {isCreatingFathomWebhook ? (
+                                            <>
+                                                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                                Creating...
+                                            </>
+                                        ) : (
+                                            <>
+                                                <RefreshCw className="mr-2 h-4 w-4" />
+                                                Recreate Webhook
+                                            </>
+                                        )}
+                                    </Button>
+                                </div>
+                            )}
                             {user?.fathomWebhookToken && (
                                 <div className="mt-4 flex items-start gap-3 p-3 bg-background rounded-lg border border-border/30">
                                     <InfoIcon className="h-5 w-5 mt-0.5 text-muted-foreground flex-shrink-0" />

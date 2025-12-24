@@ -157,7 +157,7 @@ export const PlanningHistoryProvider = ({ children }: { children: ReactNode }) =
       setPlanningSessions(prev => [created, ...prev]);
       return created;
     } catch (error) {
-      console.error("Failed to create new planning session in Firestore", error);
+      console.error("Failed to create new planning session in database", error);
       toast({ title: "Error", description: "Could not create new plan.", variant: "destructive" });
       return undefined;
     }
@@ -176,7 +176,7 @@ export const PlanningHistoryProvider = ({ children }: { children: ReactNode }) =
       });
       setPlanningSessions(prev => prev.map(session => session.id === updated.id ? updated : session));
     } catch (error) {
-      console.error(`Failed to update planning session ${sessionId} in Firestore`, error);
+      console.error(`Failed to update planning session ${sessionId} in database`, error);
       toast({ title: "Error", description: "Could not save plan changes.", variant: "destructive" });
     }
   }, [user, toast]);
@@ -200,7 +200,7 @@ export const PlanningHistoryProvider = ({ children }: { children: ReactNode }) =
       });
       setPlanningSessions(prev => prev.map(session => session.id === updated.id ? updated : session));
     } catch (error) {
-      console.error("Failed to update plan title in Firestore", error);
+      console.error("Failed to update plan title in database", error);
       toast({ title: "Error", description: "Could not update plan title.", variant: "destructive" });
     }
   }, [user, toast]);
@@ -224,7 +224,7 @@ export const PlanningHistoryProvider = ({ children }: { children: ReactNode }) =
       }
       toast({ title: "Plan Deleted", description: "The planning session has been removed." });
     } catch (error) {
-      console.error("Failed to delete plan from Firestore", error);
+      console.error("Failed to delete plan from database", error);
       toast({ title: "Error", description: "Could not delete plan.", variant: "destructive" });
     }
   }, [user, toast, activePlanningSessionId, planningSessions]);
