@@ -7,6 +7,7 @@ import {
   fetchFathomSummary,
   fetchFathomTranscript,
   formatFathomTranscript,
+  getFathomInstallation,
   getValidFathomAccessToken,
 } from "@/lib/fathom";
 import { findUserByFathomWebhookToken } from "@/lib/db/users";
@@ -21,9 +22,9 @@ const getSignaturesFromHeader = (headerValue: string) => {
 
 const verifyWebhookSignature = (
   rawBody: string,
-  signatureHeader: string | null
+  signatureHeader: string | null,
+  secret: string | null
 ) => {
-  const secret = process.env.FATHOM_WEBHOOK_SECRET;
   if (!secret) return true;
   if (!signatureHeader) return false;
 
@@ -63,8 +64,17 @@ export async function POST(request: Request) {
   }
 
   const rawBody = await request.text();
+
+  const user = await findUserByFathomWebhookToken(token);
+  if (!user) {
+    return NextResponse.json({ error: "Unknown webhook token." }, { status: 404 });
+  }
+
   const signatureHeader = request.headers.get("webhook-signature");
-  if (!verifyWebhookSignature(rawBody, signatureHeader)) {
+  const installation = await getFathomInstallation(user._id.toString());
+  const secret =
+    installation?.webhookSecret || process.env.FATHOM_WEBHOOK_SECRET || null;
+  if (!verifyWebhookSignature(rawBody, signatureHeader, secret)) {
     return NextResponse.json(
       { error: "Invalid webhook signature." },
       { status: 401 }
@@ -88,11 +98,6 @@ export async function POST(request: Request) {
       { error: "Missing recording ID." },
       { status: 400 }
     );
-  }
-
-  const user = await findUserByFathomWebhookToken(token);
-  if (!user) {
-    return NextResponse.json({ error: "Unknown webhook token." }, { status: 404 });
   }
 
   const db = await getDb();
