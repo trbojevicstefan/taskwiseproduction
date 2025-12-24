@@ -167,9 +167,15 @@ export const MeetingHistoryProvider = ({ children }: { children: ReactNode }) =>
   const updateMeeting = useCallback(async (sessionId: string, updatedFields: Partial<Omit<Meeting, 'id' | 'userId' | 'createdAt' | 'lastActivityAt'>>) => {
     if (!user?.uid) return;
     try {
+      const sanitizedFields = { ...updatedFields };
+      if (sanitizedFields.extractedTasks) {
+        sanitizedFields.extractedTasks = sanitizedFields.extractedTasks.map(task =>
+          sanitizeTaskForFirestore(task as ExtractedTaskSchema)
+        );
+      }
       const updated = await apiFetch<Meeting>(`/api/meetings/${sessionId}`, {
         method: "PATCH",
-        body: JSON.stringify(updatedFields),
+        body: JSON.stringify(sanitizedFields),
       });
       setMeetings(prev => prev.map(meeting => meeting.id === updated.id ? updated : meeting));
     } catch (error) {

@@ -1594,6 +1594,7 @@ function MeetingDetailSheet({ id, onClose, onNavigateToChat }: { id: string | nu
 }
 
 type FilterOption = "all" | "today" | "this_week";
+type FathomSyncRange = "today" | "this_week" | "last_week" | "this_month" | "all";
 
 export default function MeetingsPageContent() {
   const { meetings, isLoadingMeetingHistory, updateMeeting, deleteMeeting, refreshMeetings } = useMeetingHistory();
@@ -1606,6 +1607,7 @@ export default function MeetingsPageContent() {
   const [searchQuery, setSearchQuery] = useState("");
   const [filter, setFilter] = useState<FilterOption>("all");
   const [isSyncingFathom, setIsSyncingFathom] = useState(false);
+  const [fathomSyncRange, setFathomSyncRange] = useState<FathomSyncRange>("this_week");
 
   useEffect(() => {
     const meetingToOpen = searchParams.get('open');
@@ -1643,7 +1645,7 @@ export default function MeetingsPageContent() {
     if (isSyncingFathom) return;
     setIsSyncingFathom(true);
     try {
-      const response = await fetch("/api/fathom/sync", { method: "POST" });
+      const response = await fetch(`/api/fathom/sync?range=${fathomSyncRange}`, { method: "POST" });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) {
         throw new Error(payload.error || "Fathom sync failed.");
@@ -1782,18 +1784,48 @@ export default function MeetingsPageContent() {
                              Quick Paste
                         </Button>
                         {isFathomConnected && (
-                          <Button
-                            variant="outline"
-                            onClick={handleSyncFathom}
-                            disabled={isSyncingFathom}
-                          >
-                            {isSyncingFathom ? (
-                              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                            ) : (
-                              <RefreshCw className="mr-2 h-4 w-4" />
-                            )}
-                            Sync Fathom
-                          </Button>
+                          <>
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <Button variant="outline">
+                                  <CalendarDays className="mr-2 h-4 w-4" />
+                                  {fathomSyncRange === "today"
+                                    ? "Today"
+                                    : fathomSyncRange === "this_week"
+                                      ? "This Week"
+                                      : fathomSyncRange === "last_week"
+                                        ? "Last Week"
+                                        : fathomSyncRange === "this_month"
+                                          ? "This Month"
+                                          : "All Time"}
+                                </Button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="start">
+                                <DropdownMenuRadioGroup
+                                  value={fathomSyncRange}
+                                  onValueChange={(value) => setFathomSyncRange(value as FathomSyncRange)}
+                                >
+                                  <DropdownMenuRadioItem value="today">Today</DropdownMenuRadioItem>
+                                  <DropdownMenuRadioItem value="this_week">This Week</DropdownMenuRadioItem>
+                                  <DropdownMenuRadioItem value="last_week">Last Week</DropdownMenuRadioItem>
+                                  <DropdownMenuRadioItem value="this_month">This Month</DropdownMenuRadioItem>
+                                  <DropdownMenuRadioItem value="all">All Time</DropdownMenuRadioItem>
+                                </DropdownMenuRadioGroup>
+                              </DropdownMenuContent>
+                            </DropdownMenu>
+                            <Button
+                              variant="outline"
+                              onClick={handleSyncFathom}
+                              disabled={isSyncingFathom}
+                            >
+                              {isSyncingFathom ? (
+                                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                              ) : (
+                                <RefreshCw className="mr-2 h-4 w-4" />
+                              )}
+                              Sync Fathom
+                            </Button>
+                          </>
                         )}
                     </div>
                 </CardContent>
@@ -1812,20 +1844,50 @@ export default function MeetingsPageContent() {
                 <Input placeholder="Search meetings..." className="pl-9 h-9" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} />
             </div>
             {isFathomConnected && (
-              <Button
-                variant="outline"
-                size="sm"
-                className="h-9"
-                onClick={handleSyncFathom}
-                disabled={isSyncingFathom}
-              >
-                {isSyncingFathom ? (
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                ) : (
-                  <RefreshCw className="mr-2 h-4 w-4" />
-                )}
-                Sync Fathom
-              </Button>
+              <>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="outline" size="sm" className="h-9">
+                      <CalendarDays className="mr-2 h-4 w-4" />
+                      {fathomSyncRange === "today"
+                        ? "Today"
+                        : fathomSyncRange === "this_week"
+                          ? "This Week"
+                          : fathomSyncRange === "last_week"
+                            ? "Last Week"
+                            : fathomSyncRange === "this_month"
+                              ? "This Month"
+                              : "All Time"}
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="start">
+                    <DropdownMenuRadioGroup
+                      value={fathomSyncRange}
+                      onValueChange={(value) => setFathomSyncRange(value as FathomSyncRange)}
+                    >
+                      <DropdownMenuRadioItem value="today">Today</DropdownMenuRadioItem>
+                      <DropdownMenuRadioItem value="this_week">This Week</DropdownMenuRadioItem>
+                      <DropdownMenuRadioItem value="last_week">Last Week</DropdownMenuRadioItem>
+                      <DropdownMenuRadioItem value="this_month">This Month</DropdownMenuRadioItem>
+                      <DropdownMenuRadioItem value="all">All Time</DropdownMenuRadioItem>
+                    </DropdownMenuRadioGroup>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-9"
+                  onClick={handleSyncFathom}
+                  disabled={isSyncingFathom}
+                >
+                  {isSyncingFathom ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <RefreshCw className="mr-2 h-4 w-4" />
+                  )}
+                  Sync Fathom
+                </Button>
+              </>
             )}
             <DropdownMenu>
               <DropdownMenuTrigger asChild>

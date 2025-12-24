@@ -13,7 +13,6 @@ import {
   type ProcessPastedContentInput,
   ProcessPastedContentOutputSchema,
   type ProcessPastedContentOutput,
-  AnalyzeMeetingInputSchema,
   type AnalyzeMeetingOutput,
   ExtractTasksFromMessageInputSchema,
   type ExtractTasksFromMessageOutput,
@@ -114,10 +113,10 @@ const processPastedContentFlow = ai.defineFlow(
         if (isMeeting) {
             const analysisResult: AnalyzeMeetingOutput = await analyzeMeeting({
                 transcript: input.pastedText,
-                requestedDetailLevel: input.requestedDetailLevel,
+                requestedDetailLevel: "light",
             });
 
-            const primaryTasks = analysisResult.allTaskLevels[input.requestedDetailLevel] || [];
+            const primaryTasks = analysisResult.allTaskLevels.light || [];
             
             const attendees = (analysisResult.attendees || []).map((p: NonNullable<AnalyzeMeetingOutput['attendees']>[number]) => ({ ...p, role: 'attendee' as const }));
             const mentioned = (analysisResult.mentionedPeople || []).map((p: NonNullable<AnalyzeMeetingOutput['attendees']>[number]) => ({ ...p, role: 'mentioned' as const }));
@@ -149,7 +148,7 @@ const processPastedContentFlow = ai.defineFlow(
             const generalResult: ExtractTasksFromMessageOutput = await extractTasksFromMessage({
                 message: input.pastedText,
                 isFirstMessage: true,
-                requestedDetailLevel: input.requestedDetailLevel,
+                requestedDetailLevel: "light",
             });
              return {
                 isMeeting: false,

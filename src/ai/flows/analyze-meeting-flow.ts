@@ -8,7 +8,7 @@
  */
 
 import { ai } from '@/ai/genkit';
-import { 
+import {
   AnalyzeMeetingInputSchema,
   type AnalyzeMeetingInput,
   AnalyzeMeetingOutputSchema,
@@ -16,7 +16,7 @@ import {
   type TaskType,
 } from './schemas';
 import { extractJsonValue } from './parse-json-output';
-import { alignTasksToLight, annotateTasksWithProvider, applyTaskMetadata, hasMeaningfulTasks, normalizeAiTasks } from '@/lib/ai-utils';
+import { annotateTasksWithProvider, applyTaskMetadata, hasMeaningfulTasks, normalizeAiTasks } from '@/lib/ai-utils';
 import {
   attachEvidenceToTasks,
   extractTranscriptAttendees,
@@ -48,13 +48,10 @@ You are a Principal Analyst & Strategist. Your sole purpose is to perform a deep
 **Your Instructions:**
 
 1.  **Full Meeting Analysis:** You MUST perform a complete analysis of the transcript.
-    *   **Generate Task Levels:** Create three complete, hierarchical task lists and place them in the \`allTaskLevels\` object. This is a mandatory step.
-        *   \`allTaskLevels.light\`: Generate only top-level, high-level macro tasks. These should be the most critical action items.
-        *   \`allTaskLevels.medium\`: Use the SAME top-level tasks as \`light\`, but add one level of meaningful subtasks.
-        *   \`allTaskLevels.detailed\`: Use the SAME top-level tasks as \`light\`, but break subtasks down one level deeper where discussed.
-        *   **CRITICAL:** Do NOT use placeholder titles like "Action item", "Task 1", or "Step 2". Every task title must include a clear verb and object (e.g., "Send DPA clause to legal").
-        *   **CRITICAL:** Do NOT invent tasks or pad the list to hit a quota. Only include tasks explicitly mentioned in the transcript.
-        *   **Granularity Targets (guidelines only):** Light should have 3-7 tasks. Medium should have 5-12 tasks with 1 level of subtasks. Detailed should have 10-20 tasks across two levels of subtasks.
+    *   **Generate Tasks:** Create a single, high-quality task list and place it in \`allTaskLevels.light\`.
+        *   **CRITICAL:** Every task title must include a clear verb and object (e.g., "Send DPA clause to legal").
+        *   **CRITICAL:** Do NOT invent tasks or pad the list. Only include tasks explicitly mentioned or strongly implied by the transcript.
+        *   **Descriptions:** Every task MUST include a concise description in your own words. Do NOT quote the transcript. Explain what needs to be done and the intended outcome.
     *   **Identify People (CRITICAL):**
         *   \`attendees\`: Identify all individuals who have dialogue (i.e., they spoke) in the transcript.
         *   \`mentionedPeople\`: Identify all individuals who are mentioned by name but DO NOT have any dialogue in the transcript.
@@ -64,7 +61,7 @@ You are a Principal Analyst & Strategist. Your sole purpose is to perform a deep
     *   **Sentiment & Activity**: Analyze the transcript for overall sentiment and return it as a score from 0.0 to 1.0 in \`overallSentiment\`. Also, calculate the word count for each speaker and return it in \`speakerActivity\`.
     *   **Meeting Title**: Examine the transcript for an explicit title (e.g., "Meeting: Q3 Planning"). If found, use it for the \`sessionTitle\`. If not, create a concise, descriptive title based on the content.
 
-2.  **CRITICAL**: Do not invent information. All outputs must be grounded in the provided transcript. Ensure all fields in the output schema are populated. Do not return empty arrays for tasks unless there are absolutely no tasks.
+2.  **CRITICAL**: Do not invent information. All outputs must be grounded in the provided transcript. Do not return empty arrays for tasks unless there are absolutely no tasks.
 3.  **Chat Response**: Formulate a concise \`chatResponseText\` that confirms the action taken (e.g., "I've summarized the meeting and extracted the action items.").
 4.  **Output Requirement:** Your final output MUST be a single, valid JSON object that strictly adheres to the provided output schema.
   `,
@@ -130,9 +127,10 @@ const analyzeMeetingFlow = ai.defineFlow(
       .filter(Boolean);
 
     const allTaskLevelsObject = getObject(rawObject.allTaskLevels) || {};
-    const aiLightTasks = normalizeAiTasks(allTaskLevelsObject.light, "Meeting action");
-    const aiMediumTasks = normalizeAiTasks(allTaskLevelsObject.medium, "Meeting action");
-    const aiDetailedTasks = normalizeAiTasks(allTaskLevelsObject.detailed, "Meeting action");
+    const aiLightTasks = normalizeAiTasks(
+      allTaskLevelsObject.light || rawObject.tasks,
+      "Meeting action"
+    );
 
     const transcriptText = getString(input.transcript) || "";
     const transcriptTasks = extractTranscriptTasks(transcriptText);
@@ -147,12 +145,7 @@ const analyzeMeetingFlow = ai.defineFlow(
     };
 
     const lightTasks = mergeTasks(aiLightTasks, transcriptTasks);
-    const mediumTasks = mergeTasks(aiMediumTasks, transcriptTasks);
-    const detailedTasks = mergeTasks(aiDetailedTasks, transcriptTasks);
-
     const lightWithEvidence = attachEvidenceToTasks(lightTasks, transcriptText);
-    const mediumWithEvidence = attachEvidenceToTasks(mediumTasks, transcriptText);
-    const detailedWithEvidence = attachEvidenceToTasks(detailedTasks, transcriptText);
 
     const hasTranscript = Boolean(transcriptText);
 
@@ -166,11 +159,6 @@ const analyzeMeetingFlow = ai.defineFlow(
     };
 
     const rewrittenLight = await rewriteTasksSafely(lightWithEvidence);
-    const rewrittenMedium = await rewriteTasksSafely(mediumWithEvidence);
-    const rewrittenDetailed = await rewriteTasksSafely(detailedWithEvidence);
-
-    const alignedMedium = alignTasksToLight(rewrittenLight, rewrittenMedium);
-    const alignedDetailed = alignTasksToLight(rewrittenLight, rewrittenDetailed);
     const defaultTasks = hasTranscript
       ? normalizeAiTasks(
           [{ title: "Review meeting transcript and confirm action items" }],
@@ -204,57 +192,34 @@ const analyzeMeetingFlow = ai.defineFlow(
       [...speakerNameSet, ...validMentionNameSet].filter(Boolean)
     );
 
-    const finalLight = applyTaskMetadata(
-      sanitizeTaskDescriptions(
-        sanitizeTaskAssignees(
-          assignAssigneesFromTranscript(rewrittenLight, transcriptText),
-          validNameSet
-        )
-      )
-    );
-    const finalMedium = applyTaskMetadata(
-      sanitizeTaskDescriptions(
-        sanitizeTaskAssignees(
-          assignAssigneesFromTranscript(alignedMedium, transcriptText),
-          validNameSet
-        )
-      )
-    );
-    const finalDetailed = applyTaskMetadata(
-      sanitizeTaskDescriptions(
-        sanitizeTaskAssignees(
-          assignAssigneesFromTranscript(alignedDetailed, transcriptText),
-          validNameSet
-        )
-      )
-    );
+    const ensureTaskDescriptions = (tasks: TaskType[]): TaskType[] =>
+      tasks.map((task) => ({
+        ...task,
+        description:
+          task.description && task.description.trim().length >= 8
+            ? task.description
+            : `Complete: ${task.title}.`,
+        subtasks: task.subtasks ? ensureTaskDescriptions(task.subtasks) : task.subtasks,
+      }));
 
-    const countTasksDeep = (tasks: TaskType[]): number =>
-      tasks.reduce(
-        (sum, task) => sum + 1 + (task.subtasks ? countTasksDeep(task.subtasks) : 0),
-        0
-      );
-    const ensureMoreDetailed = (candidate: TaskType[], fallback: TaskType[]): TaskType[] =>
-      countTasksDeep(candidate) >= countTasksDeep(fallback) ? candidate : fallback;
-    const normalizedLight = finalLight;
-    const normalizedMedium = ensureMoreDetailed(finalMedium, normalizedLight);
-    const normalizedDetailed = ensureMoreDetailed(finalDetailed, normalizedMedium);
+    const finalLight = applyTaskMetadata(
+      ensureTaskDescriptions(
+        sanitizeTaskDescriptions(
+          sanitizeTaskAssignees(
+            assignAssigneesFromTranscript(rewrittenLight, transcriptText),
+            validNameSet
+          )
+        )
+      )
+    );
 
     const tagProvider = (tasks: TaskType[]) =>
       annotateTasksWithProvider(tasks, provider);
-    const taggedLight = tagProvider(normalizedLight);
-    const taggedMedium = tagProvider(normalizedMedium);
-    const taggedDetailed = tagProvider(normalizedDetailed);
+    const taggedLight = tagProvider(finalLight);
     const taggedDefaultTasks = tagProvider(defaultTasks);
 
     const fallbackTasks =
-      taggedLight.length || taggedMedium.length || taggedDetailed.length
-        ? taggedLight.length
-          ? taggedLight
-          : taggedMedium.length
-            ? taggedMedium
-            : taggedDetailed
-        : taggedDefaultTasks;
+      taggedLight.length ? taggedLight : taggedDefaultTasks;
 
     const mergePeople = (
       primary: Array<{ name: string; email?: string; title?: string }>,
@@ -290,7 +255,7 @@ const analyzeMeetingFlow = ai.defineFlow(
       });
 
     const assigneeNames = new Set(
-      [...taggedLight, ...taggedMedium, ...taggedDetailed]
+      taggedLight
         .map((task) => task.assigneeName)
         .filter((name): name is string => Boolean(name))
         .map((name) => normalizeName(name))
@@ -360,8 +325,8 @@ const analyzeMeetingFlow = ai.defineFlow(
       sessionTitle: getString(rawObject.sessionTitle),
       allTaskLevels: {
         light: taggedLight.length ? taggedLight : fallbackTasks,
-        medium: taggedMedium.length ? taggedMedium : fallbackTasks,
-        detailed: taggedDetailed.length ? taggedDetailed : fallbackTasks,
+        medium: taggedLight.length ? taggedLight : fallbackTasks,
+        detailed: taggedLight.length ? taggedLight : fallbackTasks,
       },
       attendees: attendees.length ? attendees : [],
       mentionedPeople: mentionedPeople.length ? mentionedPeople : [],

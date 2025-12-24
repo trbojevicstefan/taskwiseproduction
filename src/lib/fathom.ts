@@ -27,14 +27,14 @@ export const FATHOM_SCOPES = "public_api";
 export const FATHOM_WEBHOOK_EVENT = "new-meeting-content-ready";
 export const FATHOM_WEBHOOK_TRIGGERED_FOR = [
   "my_recordings",
-  "shared_external_recordings",
+  "shared_with_me_external_recordings",
   "my_shared_with_team_recordings",
   "shared_team_recordings",
 ] as const;
 
 const FATHOM_WEBHOOK_TRIGGERED_FOR_FALLBACK = [
   "my_recordings",
-  "shared_with_me_external_recordings",
+  "shared_external_recordings",
   "my_shared_with_team_recordings",
   "shared_team_recordings",
 ] as const;

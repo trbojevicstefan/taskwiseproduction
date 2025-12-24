@@ -105,6 +105,8 @@ export default function SettingsPageContent() {
 
   const [displayName, setDisplayName] = useState('');
   const [isSaving, setIsSaving] = useState(false);
+  const [workspaceName, setWorkspaceName] = useState('');
+  const [isSavingWorkspace, setIsSavingWorkspace] = useState(false);
   const [hasCopied, setHasCopied] = useState(false);
   
   const [isAvatarDialogOpen, setIsAvatarDialogOpen] = useState(false);
@@ -186,6 +188,7 @@ export default function SettingsPageContent() {
     if (user) {
       setDisplayName(user.displayName || '');
       setSelectedAvatarUrl(user.photoURL || '');
+      setWorkspaceName(user.workspace?.name || '');
     }
   }, [user]);
 
@@ -204,6 +207,23 @@ export default function SettingsPageContent() {
       toast({ title: 'Error', description: 'Could not save your profile changes.', variant: 'destructive' });
     } finally {
       setIsSaving(false);
+    }
+  };
+
+  const handleWorkspaceSave = async () => {
+    if (!workspaceName.trim()) {
+      toast({ title: 'Invalid Workspace Name', description: 'Workspace name cannot be empty.', variant: 'destructive' });
+      return;
+    }
+    setIsSavingWorkspace(true);
+    try {
+      await updateUserProfile({ workspace: { name: workspaceName.trim() } });
+      toast({ title: 'Workspace Updated', description: 'Your workspace name has been saved.' });
+    } catch (error) {
+      console.error("Failed to save workspace:", error);
+      toast({ title: 'Error', description: 'Could not save workspace settings.', variant: 'destructive' });
+    } finally {
+      setIsSavingWorkspace(false);
     }
   };
   
@@ -305,6 +325,34 @@ export default function SettingsPageContent() {
                             Save Profile
                         </Button>
                     </CardFooter>
+                </Card>
+
+                <Card className="shadow-lg rounded-xl mt-8">
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-3 font-headline text-xl">
+                      <Building className="text-emerald-400 drop-shadow-[0_2px_4px_rgba(16,185,129,0.5)]" />
+                      Workspace
+                    </CardTitle>
+                    <CardDescription>Manage your workspace name and identity.</CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    <div>
+                      <Label htmlFor="workspaceName">Workspace Name</Label>
+                      <Input
+                        id="workspaceName"
+                        value={workspaceName}
+                        onChange={(e) => setWorkspaceName(e.target.value)}
+                        className="mt-1"
+                        disabled={isSavingWorkspace || authLoading}
+                      />
+                    </div>
+                  </CardContent>
+                  <CardFooter>
+                    <Button onClick={handleWorkspaceSave} disabled={isSavingWorkspace || authLoading}>
+                      {isSavingWorkspace ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4"/>}
+                      Save Workspace
+                    </Button>
+                  </CardFooter>
                 </Card>
 
                  {/* Integrations Settings */}

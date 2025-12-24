@@ -44,7 +44,12 @@ export async function DELETE(
   const db = await getDb();
   const meeting = await db.collection<any>("meetings").findOne({ _id: params.id, userId });
 
-  await db.collection<any>("meetings").deleteOne({ _id: params.id, userId });
+  const result = await db
+    .collection<any>("meetings")
+    .deleteOne({ _id: params.id, userId });
+  if (!result.deletedCount) {
+    return NextResponse.json({ error: "Meeting not found." }, { status: 404 });
+  }
 
   if (meeting?.chatSessionId) {
     await db.collection<any>("chatSessions").deleteOne({ _id: meeting.chatSessionId, userId });

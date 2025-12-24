@@ -78,7 +78,7 @@ export const ingestFathomMeeting = async ({
     payload?.recording?.summary ||
     (await fetchFathomSummary(recordingId, accessToken).catch(() => null));
 
-  const detailLevel = user.taskGranularityPreference || "medium";
+  const detailLevel = "light";
   const analysisResult = await analyzeMeeting({
     transcript: transcriptText,
     requestedDetailLevel: detailLevel,

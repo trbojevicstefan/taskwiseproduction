@@ -44,7 +44,12 @@ export async function DELETE(
   }
 
   const db = await getDb();
-  await db.collection<any>("planningSessions").deleteOne({ _id: params.id, userId });
+  const result = await db
+    .collection<any>("planningSessions")
+    .deleteOne({ _id: params.id, userId });
+  if (!result.deletedCount) {
+    return NextResponse.json({ error: "Planning session not found." }, { status: 404 });
+  }
 
   return NextResponse.json({ ok: true });
 }

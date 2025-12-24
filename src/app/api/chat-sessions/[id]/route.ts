@@ -48,7 +48,12 @@ export async function DELETE(
   }
 
   const db = await getDb();
-  await db.collection<any>("chatSessions").deleteOne({ _id: params.id, userId });
+  const result = await db
+    .collection<any>("chatSessions")
+    .deleteOne({ _id: params.id, userId });
+  if (!result.deletedCount) {
+    return NextResponse.json({ error: "Chat session not found." }, { status: 404 });
+  }
 
   return NextResponse.json({ ok: true });
 }

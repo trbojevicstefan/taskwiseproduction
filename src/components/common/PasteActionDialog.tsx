@@ -2,7 +2,7 @@
 // src/components/common/PasteActionDialog.tsx
 "use client";
 
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { AnimatePresence, motion } from 'framer-motion';
 import { usePasteAction } from '@/contexts/PasteActionContext';
@@ -11,14 +11,10 @@ import { usePlanningHistory } from '@/contexts/PlanningHistoryContext';
 import { useMeetingHistory } from '@/contexts/MeetingHistoryContext';
 import { useToast } from '@/hooks/use-toast';
 import { processPastedContent } from '@/ai/flows/process-pasted-content';
-import type { DetailLevel } from '@/contexts/PlanningHistoryContext'; 
 import { Button } from '@/components/ui/button';
-import { X, Users, Bot, FileText, CheckCircle2 } from 'lucide-react';
-import { cn } from '@/lib/utils';
-import { Progress } from '@/components/ui/progress';
+import { X, Users } from 'lucide-react';
 import { Logo } from '../ui/logo';
 import CreatingMeetingAnimation from '../auth/CreatingMeetingAnimation';
-import { useAuth } from '@/contexts/AuthContext';
 
 
 const Step = ({ children }: { children: React.ReactNode }) => (
@@ -41,16 +37,8 @@ const PasteActionDialog = () => {
     const { createNewSession: createNewChatSession } = useChatHistory();
     const { createNewPlanningSession } = usePlanningHistory();
     const { createNewMeeting, updateMeeting, setActiveMeetingId } = useMeetingHistory();
-    const { user, updateUserProfile } = useAuth();
 
     const [isProcessing, setIsProcessing] = useState(false);
-    const [meetingGranularity, setMeetingGranularity] = useState<DetailLevel>('medium');
-
-    useEffect(() => {
-        if (user?.taskGranularityPreference) {
-            setMeetingGranularity(user.taskGranularityPreference);
-        }
-    }, [user?.taskGranularityPreference]);
 
     const handleClose = () => {
         // Don't close if it's processing
@@ -66,9 +54,9 @@ const PasteActionDialog = () => {
 
         try {
             // This now calls the unified, powerful AI flow.
-            const result = await processPastedContent({ 
+            const result = await processPastedContent({
                 pastedText,
-                requestedDetailLevel: meetingGranularity, // Pass the selected granularity
+                requestedDetailLevel: "light",
             });
             
             if (result.isMeeting && result.meeting) {
@@ -145,12 +133,6 @@ const PasteActionDialog = () => {
             );
         }
 
-        const granularityLevels: {level: DetailLevel, label: string}[] = [
-            { level: 'light', label: 'Key Actions' },
-            { level: 'medium', label: 'Standard Plan' },
-            { level: 'detailed', label: 'Detailed Plan' },
-        ];
-
         return (
              <Step key="selection">
                 <div className="animated-glow-shadow h-full">
@@ -170,36 +152,9 @@ const PasteActionDialog = () => {
                         </div>
                         
                         <div className="flex-shrink-0 grid grid-cols-1 gap-4">
-                            <div className='flex flex-col items-start justify-between rounded-lg border p-3 bg-background/30'>
-                                <div>
-                                    <label className="font-semibold text-sm">Task Granularity</label>
-                                    <p className="text-xs text-muted-foreground">Select the level of detail for extracted tasks.</p>
-                                </div>
-                                <div className="flex items-center gap-2 mt-2">
-                                    {granularityLevels.map(item => (
-                                        <Button
-                                            key={item.level}
-                                            variant={meetingGranularity === item.level ? 'default' : 'outline'}
-                                            size="sm"
-                                            onClick={() => {
-                                                setMeetingGranularity(item.level);
-                                                if (user?.taskGranularityPreference !== item.level) {
-                                                    updateUserProfile({ taskGranularityPreference: item.level }, true).catch((error) => {
-                                                        console.error("Failed to save task granularity preference:", error);
-                                                    });
-                                                }
-                                            }}
-                                            className="capitalize"
-                                        >
-                                            {item.label}
-                                        </Button>
-                                    ))}
-                                </div>
-                            </div>
-                           
                             <Button size="lg" onClick={handleProcessMeeting} disabled={isProcessing} className="w-full text-base h-12 bg-gradient-to-br from-blue-500 to-indigo-600 text-white shadow-lg">
                                 <Users size={20} className="mr-3"/>
-                                Process as Meeting
+                                Process
                             </Button>
                         </div>
                     </div>

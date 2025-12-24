@@ -52,7 +52,12 @@ export async function DELETE(
   }
 
   const db = await getDb();
-  await db.collection<any>("folders").deleteOne({ _id: params.id, userId });
+  const result = await db
+    .collection<any>("folders")
+    .deleteOne({ _id: params.id, userId });
+  if (!result.deletedCount) {
+    return NextResponse.json({ error: "Folder not found." }, { status: 404 });
+  }
 
   await db.collection<any>("chatSessions").updateMany(
     { userId, folderId: params.id },

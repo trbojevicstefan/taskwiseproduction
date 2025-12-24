@@ -152,10 +152,10 @@ export async function extractTasksFromChat(input: OrchestratorInput): Promise<Or
   if (sourceMeetingTranscript && (message === sourceMeetingTranscript || input.isFirstMessage)) {
       const analysisResult: AnalyzeMeetingOutput = await analyzeMeeting({
           transcript: sourceMeetingTranscript,
-          requestedDetailLevel: input.requestedDetailLevel,
+          requestedDetailLevel: "light",
       });
 
-      const primaryTasks = analysisResult.allTaskLevels[input.requestedDetailLevel] || [];
+      const primaryTasks = analysisResult.allTaskLevels.light || [];
 
       // Combine attendees and mentioned people, adding a role
       const attendees = (analysisResult.attendees || []).map((p: MeetingPerson) => ({ ...p, role: 'attendee' as const }));

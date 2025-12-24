@@ -58,7 +58,12 @@ export async function DELETE(
 
   findChildren(params.id);
 
-  await db.collection<any>("tasks").deleteMany({ userId, _id: { $in: Array.from(toDelete) } });
+  const result = await db
+    .collection<any>("tasks")
+    .deleteMany({ userId, _id: { $in: Array.from(toDelete) } });
+  if (!result.deletedCount) {
+    return NextResponse.json({ error: "Task not found." }, { status: 404 });
+  }
 
   return NextResponse.json({ ok: true });
 }

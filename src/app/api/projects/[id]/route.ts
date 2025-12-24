@@ -51,7 +51,12 @@ export async function DELETE(
   }
 
   const db = await getDb();
-  await db.collection<any>("projects").deleteOne({ _id: params.id, userId });
+  const result = await db
+    .collection<any>("projects")
+    .deleteOne({ _id: params.id, userId });
+  if (!result.deletedCount) {
+    return NextResponse.json({ error: "Project not found." }, { status: 404 });
+  }
   await db.collection<any>("tasks").deleteMany({ userId, projectId: params.id });
 
   return NextResponse.json({ ok: true });
