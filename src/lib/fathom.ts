@@ -85,11 +85,12 @@ export const saveFathomInstallation = async (
   installation: FathomInstallationDoc
 ) => {
   const db = await getDb();
+  const { createdAt, ...rest } = installation;
   await db
     .collection<FathomInstallationDoc>(INSTALLATIONS_COLLECTION)
     .updateOne(
       { _id: installation.userId },
-      { $set: installation, $setOnInsert: { createdAt: new Date() } },
+      { $set: rest, $setOnInsert: { createdAt: createdAt || new Date() } },
       { upsert: true }
     );
 };
