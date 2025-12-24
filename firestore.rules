@@ -1,0 +1,103 @@
+
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Rule for the 'users' collection itself
+    match /users/{userIdFromPath} {
+      // Users can read and write their own profile document.
+      allow read, write: if request.auth != null && request.auth.uid == userIdFromPath;
+
+      // --- Rules for Subcollections under each user ---
+
+      // Generic rule for all user-owned subcollections.
+      // This function checks if the user is authenticated and is the owner of the parent user document.
+      function isOwner() {
+        return request.auth != null && request.auth.uid == userIdFromPath;
+      }
+
+      // Projects subcollection
+      match /projects/{projectId} {
+        allow list, create: if isOwner();
+        allow read, update, delete: if isOwner();
+      }
+
+      // Folders subcollection
+      match /folders/{folderId} {
+        allow list, create: if isOwner();
+        allow read, update, delete: if isOwner();
+      }
+      
+      // People subcollection
+      match /people/{personId} {
+        allow list, create: if isOwner();
+        allow read, update, delete: if isOwner();
+      }
+
+      // Tasks subcollection
+      match /tasks/{taskId} {
+        allow list, create: if isOwner();
+        allow read, update, delete: if isOwner();
+      }
+
+      // Chat Sessions subcollection
+      match /chatSessions/{sessionId} {
+        allow list, create: if isOwner();
+        allow read, update, delete: if isOwner();
+      }
+
+      // Planning Sessions subcollection
+      match /planningSessions/{sessionId} {
+        allow list, create: if isOwner();
+        allow read, update, delete: if isOwner();
+      }
+
+      // Explore Sessions subcollection
+      match /exploreSessions/{sessionId} {
+        allow list, create: if isOwner();
+        allow read, update, delete: if isOwner();
+      }
+
+      // Canvas Sessions subcollection
+      match /canvasSessions/{sessionId} {
+        allow list, create: if isOwner();
+        allow read, update, delete: if isOwner();
+      }
+      
+      // Meetings subcollection
+      match /meetings/{meetingId} {
+        allow read, write: if isOwner();
+      }
+			// Store integration Details
+      match /integrations/{integrationDocId} { 
+        allow read, write: if isOwner();
+      }
+    }
+
+    // --- Rules for root-level collections ---
+    
+    // Slack Installations collection
+    match /slackInstallations/{teamId} {
+      // Allow a user to read their own team's installation data.
+      // This is secure because it checks the user's own profile for the teamId.
+      allow read: if request.auth != null && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.slackTeamId == teamId;
+
+      // Disallow all client-side writes. These should only happen from the backend Cloud Function.
+      allow write: if false;
+    }
+
+    // Invitations collection
+    match /invitations/{invitationId} {
+      // Allow a user to create an invitation if they are the sender.
+      allow create: if request.auth != null && request.resource.data.fromUserId == request.auth.uid;
+      
+      // Allow a user to read an invitation if they are part of that workspace.
+      // This is necessary for the settings page to list pending invites.
+      allow read: if request.auth != null && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.workspace.id == resource.data.workspaceId;
+      
+      // Add rules for update (accepting/declining) and deleting later as needed.
+      // allow update, delete: if ...
+    }
+  }
+}

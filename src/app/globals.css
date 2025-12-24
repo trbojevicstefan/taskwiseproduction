@@ -1,0 +1,522 @@
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 0 0% 100%; /* Pure White */
+    --foreground: 224 71.4% 4.1%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 224 71.4% 4.1%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 224 71.4% 4.1%;
+
+    --primary: 212 80% 58%; /* A clearer, more vibrant blue */
+    --primary-foreground: 210 20% 98%;
+
+    --secondary: 220 13% 91%; /* Slightly cooler gray */
+    --secondary-foreground: 222.2 47.4% 11.2%;
+
+    --muted: 220 13% 91%;
+    --muted-foreground: 215.4 16.3% 46.9%;
+
+    --accent: 220 13% 91%;
+    --accent-foreground: 222.2 47.4% 11.2%;
+
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 210 40% 98%;
+
+    --border: 220 13% 88%; /* Slightly darker border for contrast */
+    --input: 220 13% 88%;
+    --input-bg: 0 0% 100%;
+    --ring: 212 80% 58%;
+
+    --radius: 0.75rem;
+    
+    --chart-1: 197 71% 73%;
+    --chart-2: 34 100% 65%; /* Bright Orange/Yellow for Flames */
+    --chart-3: 220 50% 60%;
+    --chart-4: 170 50% 55%;
+    --chart-5: 220 15% 70%;
+
+    /* Light Mode Sidebar */
+    --sidebar-background: 0 0% 97%; /* #f7f7f7 */
+    --sidebar-foreground: 224 71.4% 10%;
+    --sidebar-primary: 212 80% 58%; /* #4A90E2 - Vibrant Blue */
+    --sidebar-primary-foreground: 0 0% 100%; /* White text on active */
+    --sidebar-accent: 212 80% 92%; /* Lighter blue for hover */
+    --sidebar-accent-foreground: 212 80% 20%;
+    --sidebar-border: 0 0% 90%; /* #e5e5e5 */
+    --sidebar-ring: 212 80% 58%;
+
+    /* Default UI Scale */
+    font-size: 16px;
+  }
+
+  /* UI Scale Adjustments */
+  html[data-ui-scale="small"] {
+    font-size: 14px;
+  }
+  html[data-ui-scale="medium"] {
+    font-size: 16px;
+  }
+  html[data-ui-scale="large"] {
+    font-size: 18px;
+  }
+  html[data-ui-scale="very-large"] {
+    font-size: 20px;
+  }
+
+  .dark {
+    --background: 240 5% 7%;      /* Almost black */
+    --foreground: 240 5% 95%;    /* Off-white */
+
+    --card: 240 5% 17%;           /* Dark grey card */
+    --card-foreground: 240 5% 95%; 
+
+    --popover: 240 5% 11%;
+    --popover-foreground: 240 5% 95%;
+
+    --primary: 212 80% 58%;        /* Primary actions are vibrant blue */
+    --primary-foreground: 210 20% 98%;
+
+    --secondary: 240 5% 24%;      
+    --secondary-foreground: 240 5% 95%;
+
+    --muted: 240 5% 24%;
+    --muted-foreground: 240 4% 65%;  /* Lighter grey for descriptions */
+
+    --accent: 240 5% 24%;          /* Hover states */
+    --accent-foreground: 240 5% 95%;
+
+    --destructive: 3 87% 61%;      
+    --destructive-foreground: 240 5% 95%;
+
+    --border: 240 4% 25%;         /* Subtle borders */
+    --input: 240 4% 25%;           /* Border color for inputs */
+    --input-bg: 240 5% 14%;
+    --ring: 212 80% 58%;            
+    
+    --chart-1: 240 4% 56%;
+    --chart-2: 30 95% 61%;
+    --chart-3: 340 85% 66%;
+    --chart-4: 170 60% 61%;
+    --chart-5: 200 95% 64%;
+
+    --sidebar-background: 240 5% 11%;
+    --sidebar-foreground: 240 4% 75%;
+    --sidebar-primary: 212 80% 58%; 
+    --sidebar-primary-foreground: 210 20% 98%;
+    --sidebar-accent: 240 5% 20%; 
+    --sidebar-accent-foreground: 240 5% 98%;
+    --sidebar-border: 240 4% 25%;
+    --sidebar-ring: 212 80% 58%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+}
+
+@layer utilities {
+  .animated-glow-shadow {
+    @apply relative;
+  }
+  .animated-glow-shadow::before {
+    content: "";
+    @apply absolute -inset-2 rounded-xl -z-10;
+    background: conic-gradient(from var(--gradient-angle), hsl(var(--chart-2)), hsl(var(--chart-3)), hsl(var(--chart-4)), hsl(var(--chart-2)));
+    filter: blur(24px) opacity(0.8);
+    animation: gradient-rotation 5s linear infinite;
+  }
+
+
+  .animated-gradient-border-wrapper {
+    @apply relative p-px rounded-md;
+  }
+  .animated-gradient-border-wrapper::before {
+    content: "";
+    @apply absolute -inset-px rounded-md opacity-0 transition-opacity duration-300;
+    z-index: -1;
+  }
+  .animated-gradient-border-wrapper:hover::before,
+  .animated-gradient-border-wrapper:has(:focus-visible)::before {
+    @apply opacity-100;
+    background: conic-gradient(from var(--gradient-angle), hsl(var(--chart-2)), hsl(var(--chart-3)), hsl(var(--chart-4)), hsl(var(--chart-2)));
+    animation: gradient-rotation 3s linear infinite;
+  }
+
+  /* Variant for always-on, subtle animation */
+  .animated-gradient-border-wrapper--active {
+     @apply relative p-px rounded-xl;
+  }
+  .animated-gradient-border-wrapper--active::before {
+    content: "";
+    @apply absolute -inset-px rounded-xl opacity-70 transition-opacity duration-300;
+    z-index: -1;
+    background: conic-gradient(from var(--gradient-angle), hsl(var(--chart-2)), hsl(var(--chart-3)), hsl(var(--chart-4)), hsl(var(--chart-2)));
+    animation: gradient-rotation 5s linear infinite;
+  }
+  .animated-gradient-border-wrapper--active:hover::before {
+      @apply opacity-100;
+      animation-duration: 2s;
+  }
+
+  .border-beam {
+    @apply relative p-px rounded-full;
+  }
+  .border-beam::before {
+    content: "";
+    @apply absolute -inset-px rounded-full;
+    z-index: -1;
+    background: linear-gradient(90deg, hsl(var(--chart-2) / 0.7), hsl(var(--chart-3) / 0.7), hsl(var(--chart-4) / 0.7));
+  }
+
+
+  .dark .animated-gradient-border-wrapper:hover::before,
+  .dark .animated-gradient-border-wrapper:has(:focus-visible):-before {
+    background: conic-gradient(from var(--gradient-angle), hsl(var(--chart-2)), hsl(var(--chart-3)), hsl(var(--chart-4)), hsl(var(--chart-2)));
+  }
+  @property --gradient-angle {
+    syntax: "<angle>";
+    initial-value: 0deg;
+    inherits: false;
+  }
+  @keyframes gradient-rotation {
+    0% { --gradient-angle: 0deg; }
+    100% { --gradient-angle: 360deg; }
+  }
+
+  .perspective-container {
+      perspective: 1000px;
+  }
+  .perspective-container-hero {
+      perspective: 1200px;
+      min-height: 400px; /* Ensure it has height */
+  }
+
+  .three-d-card {
+      transform-style: preserve-3d;
+      transition: transform 0.5s cubic-bezier(0.23, 1, 0.32, 1);
+  }
+
+  .perspective-container:hover .three-d-card {
+      transform: scale3d(1.05, 1.05, 1.05) rotateY(var(--rotate-y, 0deg)) rotateX(var(--rotate-x, 0deg));
+  }
+
+  .hero-animation-container {
+    position: relative;
+    width: 100%;
+    height: 400px;
+    transform-style: preserve-3d;
+    transform: rotateX(45deg) rotateZ(-25deg);
+  }
+  
+  .hero-task-card {
+    position: absolute;
+    border-radius: 0.5rem;
+    padding: 0.75rem 1rem;
+    background-color: hsla(var(--card), 0.7);
+    border: 1px solid hsla(var(--border), 0.5);
+    backdrop-filter: blur(4px);
+    will-change: transform, opacity;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+
+  @keyframes merge-tasks {
+    0% {
+      transform: translate3d(var(--start-x), var(--start-y), var(--start-z)) scale(1);
+      opacity: 0;
+    }
+    10%, 60% {
+      transform: translate3d(var(--start-x), var(--start-y), var(--start-z)) scale(1);
+      opacity: 1;
+    }
+    90% {
+      transform: translate3d(var(--end-x), var(--end-y), var(--end-z)) scale(0.1);
+      opacity: 1;
+    }
+    100% {
+      transform: translate3d(var(--end-x), var(--end-y), var(--end-z)) scale(0);
+      opacity: 0;
+    }
+  }
+
+  @keyframes fade-in-main-task {
+     0%, 80% {
+      transform: scale(0.8);
+      opacity: 0;
+     }
+     100% {
+      transform: scale(1);
+      opacity: 1;
+     }
+  }
+
+  .animate-task-merge {
+    animation: merge-tasks 8s ease-in-out infinite;
+  }
+  .animate-main-task-fade-in {
+    animation: fade-in-main-task 8s ease-in-out infinite;
+  }
+
+  /* New animation for the AI typing indicator */
+  @keyframes wave-breath {
+    0%, 100% {
+      transform: translateY(0);
+      opacity: 0.5;
+    }
+    50% {
+      transform: translateY(-6px);
+      opacity: 1;
+    }
+  }
+
+  .animate-wave-breath {
+    animation: wave-breath 1.5s ease-in-out infinite;
+  }
+  
+  /* New animation for the witty lightbulb icon */
+  @keyframes pop-and-wiggle {
+    0% {
+      transform: scale(0) rotate(0deg);
+      opacity: 0;
+    }
+    50% {
+      transform: scale(1.3) rotate(-15deg);
+      opacity: 1;
+    }
+    70% {
+      transform: scale(1) rotate(10deg);
+    }
+    85% {
+        transform: scale(1.1) rotate(-5deg);
+    }
+    100% {
+      transform: scale(1) rotate(0deg);
+      opacity: 1;
+    }
+  }
+
+  .animate-pop-and-wiggle {
+    animation: pop-and-wiggle 0.7s cubic-bezier(0.25, 0.46, 0.45, 0.94) both;
+  }
+
+  /* --- Icon-specific card animations --- */
+
+  /* For Zap Icon - new conic gradient animation */
+  .animate-card-zap::before {
+    content: "";
+    position: absolute;
+    inset: -2px; /* Make it slightly larger than the card */
+    border-radius: inherit;
+    z-index: -1;
+    opacity: 0;
+    background: conic-gradient(
+        from var(--gradient-angle),
+        transparent 0%,
+        transparent 20%,
+        hsl(var(--chart-2)) 25%,
+        hsl(var(--chart-2) / 0.5) 30%,
+        transparent 35%,
+        transparent 70%,
+        hsl(var(--chart-1)) 75%,
+        hsl(var(--chart-1) / 0.5) 80%,
+        transparent 85%,
+        transparent 100%
+      );
+    transition: opacity 0.4s ease-in-out;
+  }
+  .group-hover\/node .animate-card-zap::before {
+    animation: gradient-rotation 3s linear infinite;
+    opacity: 0.8;
+  }
+  .group-hover\/node:hover .animate-card-zap::before {
+    animation-duration: 0.8s; /* Speed up on hover */
+    opacity: 1;
+    background: conic-gradient(
+        from var(--gradient-angle),
+        hsl(var(--chart-2)) 0%,
+        hsl(var(--chart-1)) 25%,
+        hsl(var(--chart-2)) 50%,
+        hsl(var(--chart-1)) 75%,
+        hsl(var(--chart-2)) 100%
+      );
+  }
+
+  /* For BrainCircuit Icon */
+  .animate-card-brain {
+    background: radial-gradient(circle at 20% 30%, hsla(var(--primary), 0.05), transparent 30%),
+                radial-gradient(circle at 80% 70%, hsla(var(--chart-3), 0.05), transparent 30%);
+    background-size: 400% 400%;
+    transition: background-position 0.5s ease-in-out, background-size 0.5s ease-in-out;
+  }
+   .group-hover\/node:hover .animate-card-brain {
+      background: radial-gradient(circle at 20% 30%, hsla(var(--primary), 0.15), transparent 40%),
+                  radial-gradient(circle at 80% 70%, hsla(var(--chart-3), 0.15), transparent 40%);
+      animation: brain-pulse-glow 4s ease-in-out infinite;
+      background-size: 200% 200%;
+  }
+  @keyframes brain-pulse-glow {
+    0%, 100% { background-position: 0% 50%; }
+    50% { background-position: 100% 50%; }
+  }
+
+
+  /* For Wand2 Icon */
+  .animate-card-wind {
+    transition: transform 0.3s ease-out;
+  }
+  .group-hover\/node:hover .animate-card-wind {
+    animation: wind-flutter 5s ease-in-out infinite alternate;
+  }
+  @keyframes wind-flutter {
+    0% { transform: rotate(0.1deg) translateY(0px) skewX(0deg); }
+    25% { transform: rotate(-0.2deg) translateY(-0.5px) skewX(0.5deg); }
+    75% { transform: rotate(0.2deg) translateY(0.2px) skewX(-0.2deg); }
+    100% { transform: rotate(0.1deg) translateY(0px) skewX(0deg); }
+  }
+
+
+  /* For Sparkles Icon */
+  .animate-card-sparkle::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    background: linear-gradient(110deg, transparent 45%, hsla(var(--primary), 0.1), transparent 55%);
+    background-size: 250% 100%;
+    opacity: 0;
+    transition: opacity 0.3s ease-in-out;
+  }
+  .group-hover\/node:hover .animate-card-sparkle::after {
+      animation: shimmer-sweep 2.5s ease-in-out infinite;
+      opacity: 0.8;
+  }
+  @keyframes shimmer-sweep {
+    0% { background-position: -150% 0; }
+    100% { background-position: 150% 0; }
+  }
+
+  .gem-button {
+      @apply shadow-[inset_0_-2px_4px_rgba(0,0,0,0.3),_inset_0_1px_2px_rgba(255,255,255,0.4)];
+      transition: all 0.2s ease-in-out;
+  }
+  .gem-button:hover {
+      @apply shadow-[inset_0_-3px_6px_rgba(0,0,0,0.4),_inset_0_2px_3px_rgba(255,255,255,0.5),0_0_15px_rgba(255,255,255,0.2)];
+      transform: translateY(-1px);
+  }
+   .gem-button:active {
+      @apply shadow-[inset_0_2px_4px_rgba(0,0,0,0.5)] scale-[0.98];
+      transform: translateY(1px);
+  }
+
+  /* For SVG line drawing animation */
+  .animate-line-draw {
+    stroke-dasharray: 1000;
+    stroke-dashoffset: 1000;
+    animation: draw-line 1.5s cubic-bezier(0.45, 0, 0.55, 1) forwards;
+    animation-delay: var(--line-id, 0s);
+  }
+
+  @keyframes draw-line {
+    to {
+      stroke-dashoffset: 0;
+    }
+  }
+
+  /* New Gem Icon Buttons for QuickShare & Radial Menu */
+  .gem-icon-button {
+    @apply h-10 w-10 rounded-full flex items-center justify-center text-white transition-all duration-200 ease-in-out;
+    @apply shadow-[inset_0_1px_1px_rgba(255,255,255,0.3),inset_0_-1px_2px_rgba(0,0,0,0.4),0_2px_4px_rgba(0,0,0,0.2)];
+  }
+  .gem-icon-button:hover {
+    @apply scale-110 shadow-[inset_0_1px_2px_rgba(255,255,255,0.5),inset_0_-2px_4px_rgba(0,0,0,0.5),0_4px_8px_rgba(0,0,0,0.3)];
+  }
+  .gem-icon-button:active {
+    @apply scale-100 shadow-[inset_0_2px_4px_rgba(0,0,0,0.5)];
+  }
+
+  .gem-icon-button-slack {
+    @apply bg-gradient-to-br from-[#4A154B] to-[#36C5F0];
+  }
+  .gem-icon-button-email {
+    @apply bg-gradient-to-br from-blue-500 to-blue-700;
+  }
+  .gem-icon-button-sms {
+    @apply bg-gradient-to-br from-green-500 to-green-700;
+  }
+  .gem-icon-button-n8n {
+    @apply bg-gradient-to-br from-purple-600 to-indigo-700;
+  }
+  
+  /* --- Flame Button Styles --- */
+  .flame-button {
+      @apply h-6 w-6 rounded-md flex items-center justify-center transition-all duration-200 ease-in-out border border-transparent;
+  }
+  .flame-button:hover {
+      @apply bg-muted;
+  }
+  .flame-icon {
+      @apply h-4 w-4 transition-all duration-300;
+      color: hsl(var(--muted-foreground) / 0.6);
+  }
+  .flame-button:hover .flame-icon {
+      color: hsl(var(--muted-foreground));
+  }
+  /* Lit State */
+  .flame-button.is-lit .flame-icon {
+      color: hsl(var(--chart-2));
+      filter: drop-shadow(0 0 4px hsl(var(--chart-2) / 0.6));
+      transform: scale(1.1);
+  }
+  .flame-button.is-lit {
+      animation: flame-pulse 2s infinite ease-in-out;
+  }
+  @keyframes flame-pulse {
+    0%, 100% {
+      background-color: transparent;
+      box-shadow: none;
+    }
+    50% {
+      background-color: hsl(var(--chart-2) / 0.1);
+      box-shadow: 0 0 12px hsl(var(--chart-2) / 0.2);
+    }
+  }
+
+  /* Heatmap Styles */
+    .heat-level-0-header, .heat-level-1-header { background-color: transparent; }
+    .heat-level-2-header { background-image: radial-gradient(circle at 50% 0, hsl(var(--chart-2) / 0.08), transparent 70%); }
+    .heat-level-3-header { background-image: radial-gradient(circle at 50% 0, hsl(var(--chart-2) / 0.12), transparent 70%); }
+    .heat-level-4-header { background-image: radial-gradient(circle at 50% 0, hsl(var(--chart-2) / 0.2), transparent 80%); }
+    .heat-level-5-header { background-image: radial-gradient(circle at 50% -10%, hsl(var(--chart-2) / 0.3), transparent 80%); }
+
+    .heat-level-0-icon, .heat-level-1-icon { @apply h-4 w-4; }
+    .heat-level-2-icon, .heat-level-3-icon { @apply h-5 w-5; }
+    .heat-level-4-icon { @apply h-6 w-6; }
+    .heat-level-5-icon { @apply h-7 w-7; }
+
+    .heat-level-0-badge, .heat-level-1-badge { @apply bg-muted text-muted-foreground border-border; }
+    .heat-level-2-badge { @apply bg-orange-950 text-orange-400 border-orange-500/30; }
+    .heat-level-3-badge { @apply bg-orange-900 text-orange-300 border-orange-500/40; }
+    .heat-level-4-badge { @apply bg-orange-800 text-orange-200 border-orange-500/50 shadow-md shadow-orange-600/20; }
+    .heat-level-5-badge { @apply bg-gradient-to-br from-orange-700 to-red-800 text-orange-100 border-orange-400/60 shadow-lg shadow-orange-500/30; }
+
+
+}
+
+    
+
+    

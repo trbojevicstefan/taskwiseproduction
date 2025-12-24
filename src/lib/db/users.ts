@@ -1,0 +1,90 @@
+import { ObjectId } from "mongodb";
+import { compare, hash } from "bcryptjs";
+import { getDb } from "@/lib/db";
+
+export interface DbUser {
+  _id: ObjectId;
+  email: string;
+  passwordHash: string;
+  name: string;
+  avatarUrl: string | null;
+  sourceSessionIds: string[];
+  createdAt: Date;
+  lastUpdated: Date;
+  lastSeenAt: Date;
+  onboardingCompleted: boolean;
+  workspace: { name: string };
+  firefliesWebhookToken: string | null;
+  slackTeamId?: string | null;
+  taskGranularityPreference?: "light" | "medium" | "detailed";
+}
+
+const USERS_COLLECTION = "users";
+
+const normalizeEmail = (email: string) => email.trim().toLowerCase();
+
+export const findUserByEmail = async (email: string): Promise<DbUser | null> => {
+  const db = await getDb();
+  return db.collection<DbUser>(USERS_COLLECTION).findOne({ email: normalizeEmail(email) });
+};
+
+export const findUserById = async (id: string): Promise<DbUser | null> => {
+  const db = await getDb();
+  return db.collection<DbUser>(USERS_COLLECTION).findOne({ _id: new ObjectId(id) });
+};
+
+export const createUser = async ({
+  email,
+  password,
+  displayName,
+}: {
+  email: string;
+  password: string;
+  displayName?: string | null;
+}): Promise<DbUser> => {
+  const db = await getDb();
+  const now = new Date();
+  const normalizedEmail = normalizeEmail(email);
+  const safeName = (displayName && displayName.trim()) || normalizedEmail.split("@")[0] || "User";
+  const avatarUrl = `https://api.dicebear.com/8.x/initials/svg?seed=${encodeURIComponent(safeName)}`;
+  const passwordHash = await hash(password, 10);
+
+  const doc: Omit<DbUser, "_id"> = {
+    email: normalizedEmail,
+    passwordHash,
+    name: safeName,
+    avatarUrl,
+    sourceSessionIds: [],
+    createdAt: now,
+    lastUpdated: now,
+    lastSeenAt: now,
+    onboardingCompleted: false,
+    workspace: { name: `${safeName}'s Workspace` },
+    firefliesWebhookToken: null,
+    slackTeamId: null,
+    taskGranularityPreference: "medium",
+  };
+
+  const result = await db.collection<DbUser>(USERS_COLLECTION).insertOne(doc as DbUser);
+  return { ...doc, _id: result.insertedId };
+};
+
+export const verifyUserPassword = async (user: DbUser, password: string) => {
+  return compare(password, user.passwordHash);
+};
+
+export const updateUserById = async (id: string, update: Partial<DbUser>) => {
+  const db = await getDb();
+  const now = new Date();
+  const { _id, passwordHash, createdAt, ...safeUpdate } = update;
+
+  await db.collection<DbUser>(USERS_COLLECTION).updateOne(
+    { _id: new ObjectId(id) },
+    {
+      $set: {
+        ...safeUpdate,
+        lastUpdated: now,
+      },
+    }
+  );
+};
