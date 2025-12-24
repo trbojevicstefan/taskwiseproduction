@@ -4,6 +4,7 @@ import { findUserById, updateUserById } from "@/lib/db/users";
 import {
   consumeFathomOAuthState,
   getFathomRedirectUri,
+  ensureFathomWebhook,
   saveFathomInstallation,
 } from "@/lib/fathom";
 
@@ -106,7 +107,23 @@ export async function GET(request: Request) {
       fathomConnected: true,
     });
 
-    return redirectToSettings({ fathom_success: "true" });
+    let webhookStatus = "unknown";
+    try {
+      const result = await ensureFathomWebhook(
+        userId,
+        payload.access_token,
+        webhookToken
+      );
+      webhookStatus = result.status;
+    } catch (webhookError) {
+      console.error("Fathom webhook setup failed:", webhookError);
+      webhookStatus = "failed";
+    }
+
+    return redirectToSettings({
+      fathom_success: "true",
+      fathom_webhook: webhookStatus,
+    });
   } catch (err) {
     console.error("Fathom OAuth callback error:", err);
     return redirectToSettings({

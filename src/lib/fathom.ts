@@ -9,6 +9,10 @@ export interface FathomInstallationDoc {
   expiresAt?: number | null;
   scope?: string | null;
   fathomUserId?: string | null;
+  webhookId?: string | null;
+  webhookUrl?: string | null;
+  webhookEvent?: string | null;
+  webhookSecret?: string | null;
   createdAt?: Date;
   updatedAt?: Date;
 }
@@ -18,8 +22,10 @@ const OAUTH_STATE_COLLECTION = "fathomOauthStates";
 
 const FATHOM_CLIENT_ID = process.env.FATHOM_CLIENT_ID;
 const FATHOM_CLIENT_SECRET = process.env.FATHOM_CLIENT_SECRET;
+const FATHOM_WEBHOOK_SECRET = process.env.FATHOM_WEBHOOK_SECRET || null;
 
 export const FATHOM_SCOPES = "public_api";
+export const FATHOM_WEBHOOK_EVENT = "new-meeting-content-ready";
 
 const getBaseUrl = () => {
   const raw =
@@ -33,6 +39,9 @@ const getBaseUrl = () => {
 
 export const getFathomRedirectUri = () =>
   `${getBaseUrl()}/api/fathom/oauth/callback`;
+
+export const getFathomWebhookUrl = (token: string) =>
+  `${getBaseUrl()}/api/fathom/webhook?token=${token}`;
 
 export const createFathomOAuthState = async (userId: string): Promise<string> => {
   const db = await getDb();
@@ -171,6 +180,116 @@ const fathomApiFetch = async <T>(
     );
   }
   return (await response.json()) as T;
+};
+
+const listFathomWebhooks = async (accessToken: string) => {
+  const payload = await fathomApiFetch<any>(
+    "/external/v1/webhooks",
+    accessToken
+  );
+  if (Array.isArray(payload)) return payload;
+  return payload?.webhooks || payload?.data || [];
+};
+
+const createFathomWebhook = async (
+  accessToken: string,
+  url: string,
+  event: string
+) => {
+  const payloads = [
+    { url, events: [event], secret: FATHOM_WEBHOOK_SECRET },
+    { url, event, secret: FATHOM_WEBHOOK_SECRET },
+    { url, event_type: event, secret: FATHOM_WEBHOOK_SECRET },
+    { url, events: [event] },
+    { url, event },
+  ];
+
+  let lastError: Error | null = null;
+  for (const body of payloads) {
+    try {
+      const response = await fetch(
+        "https://api.fathom.ai/external/v1/webhooks",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${accessToken}`,
+          },
+          body: JSON.stringify(body),
+        }
+      );
+      if (!response.ok) {
+        const errorText = await response.text().catch(() => "");
+        lastError = new Error(
+          `Fathom webhook create failed (${response.status}): ${errorText || response.statusText}`
+        );
+        continue;
+      }
+      return (await response.json()) as any;
+    } catch (error) {
+      lastError = error as Error;
+    }
+  }
+
+  if (lastError) {
+    throw lastError;
+  }
+  throw new Error("Fathom webhook create failed.");
+};
+
+const normalizeWebhookEvent = (webhook: any) =>
+  webhook?.event ||
+  webhook?.event_type ||
+  (Array.isArray(webhook?.events) ? webhook?.events[0] : null);
+
+const normalizeWebhookUrl = (webhook: any) =>
+  webhook?.url || webhook?.endpoint || webhook?.webhook_url || null;
+
+export const ensureFathomWebhook = async (
+  userId: string,
+  accessToken: string,
+  token: string
+) => {
+  const webhookUrl = getFathomWebhookUrl(token);
+  const webhooks = await listFathomWebhooks(accessToken);
+
+  const existing = webhooks.find((webhook: any) => {
+    const url = normalizeWebhookUrl(webhook);
+    const event = normalizeWebhookEvent(webhook);
+    return url === webhookUrl && event === FATHOM_WEBHOOK_EVENT;
+  });
+
+  const installation = await getFathomInstallation(userId);
+  if (!installation) {
+    throw new Error("Fathom installation missing while creating webhook.");
+  }
+
+  if (existing) {
+    await saveFathomInstallation({
+      ...installation,
+      webhookId: existing.id || existing.webhook_id || installation.webhookId || null,
+      webhookUrl,
+      webhookEvent: FATHOM_WEBHOOK_EVENT,
+      webhookSecret: FATHOM_WEBHOOK_SECRET,
+      updatedAt: new Date(),
+    });
+    return { status: "existing", webhookId: existing.id || existing.webhook_id || null };
+  }
+
+  const created = await createFathomWebhook(
+    accessToken,
+    webhookUrl,
+    FATHOM_WEBHOOK_EVENT
+  );
+  await saveFathomInstallation({
+    ...installation,
+    webhookId: created.id || created.webhook_id || null,
+    webhookUrl,
+    webhookEvent: FATHOM_WEBHOOK_EVENT,
+    webhookSecret: FATHOM_WEBHOOK_SECRET,
+    updatedAt: new Date(),
+  });
+  return { status: "created", webhookId: created.id || created.webhook_id || null };
 };
 
 export const fetchFathomTranscript = async (

@@ -120,6 +120,7 @@ export default function SettingsPageContent() {
       const trelloSuccess = searchParams.get('trello_success');
       const googleSuccess = searchParams.get('google_success');
       const fathomSuccess = searchParams.get('fathom_success');
+      const fathomWebhook = searchParams.get('fathom_webhook');
       const error = searchParams.get('error');
       const message = searchParams.get('message');
       
@@ -149,6 +150,13 @@ export default function SettingsPageContent() {
             description: "New Fathom meetings will sync into TaskWiseAI.",
         });
         needsRefresh = true;
+        if (fathomWebhook === 'failed') {
+          toast({
+            title: "Fathom Webhook Not Created",
+            description: "Please add the webhook URL in Fathom to enable automatic imports.",
+            variant: "destructive",
+          });
+        }
       }
       else if (error) {
         toast({
@@ -164,7 +172,7 @@ export default function SettingsPageContent() {
       }
 
       // Clean the URL if any of our params were present
-      if(slackSuccess || trelloSuccess || googleSuccess || fathomSuccess || error) {
+      if(slackSuccess || trelloSuccess || googleSuccess || fathomSuccess || fathomWebhook || error) {
         router.replace('/settings', { scroll: false });
       }
     };
