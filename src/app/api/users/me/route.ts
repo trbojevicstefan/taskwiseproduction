@@ -13,6 +13,9 @@ const updateSchema = z.object({
   onboardingCompleted: z.boolean().optional(),
   firefliesWebhookToken: z.string().optional().nullable(),
   slackTeamId: z.string().optional().nullable(),
+  fathomWebhookToken: z.string().optional().nullable(),
+  fathomConnected: z.boolean().optional(),
+  fathomUserId: z.string().optional().nullable(),
   taskGranularityPreference: z.enum(["light", "medium", "detailed"]).optional(),
 });
 
@@ -35,6 +38,9 @@ const toAppUser = (user: Awaited<ReturnType<typeof findUserById>>) => {
     workspace: user.workspace,
     firefliesWebhookToken: user.firefliesWebhookToken,
     slackTeamId: user.slackTeamId || null,
+    fathomWebhookToken: user.fathomWebhookToken || null,
+    fathomConnected: Boolean(user.fathomConnected),
+    fathomUserId: user.fathomUserId || null,
     sourceSessionIds: user.sourceSessionIds || [],
     taskGranularityPreference: user.taskGranularityPreference,
   };
@@ -86,6 +92,13 @@ export async function PATCH(request: Request) {
       ? { firefliesWebhookToken: update.firefliesWebhookToken }
       : {}),
     ...(update.slackTeamId !== undefined ? { slackTeamId: update.slackTeamId } : {}),
+    ...(update.fathomWebhookToken !== undefined
+      ? { fathomWebhookToken: update.fathomWebhookToken }
+      : {}),
+    ...(update.fathomConnected !== undefined
+      ? { fathomConnected: update.fathomConnected }
+      : {}),
+    ...(update.fathomUserId !== undefined ? { fathomUserId: update.fathomUserId } : {}),
     ...(update.taskGranularityPreference !== undefined
       ? { taskGranularityPreference: update.taskGranularityPreference }
       : {}),

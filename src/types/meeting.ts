@@ -11,6 +11,9 @@ export interface Meeting extends BaseSession {
   // Core Identifiers from APIs
   conferenceId?: string;
   calendarEventId?: string;
+  recordingId?: string;
+  recordingUrl?: string;
+  shareUrl?: string;
   
   // Meeting Details
   organizerEmail?: string;

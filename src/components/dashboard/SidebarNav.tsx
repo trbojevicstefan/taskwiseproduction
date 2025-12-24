@@ -58,7 +58,7 @@ const mainNavItems = [
   { href: '/people', label: 'People', icon: Users },
 ];
 
-const truncateTitle = (title: string | undefined, maxLength: number = 25): string => {
+const truncateTitle = (title: string | undefined, maxLength: number = 22): string => {
   if (!title) return "Untitled";
   if (title.length <= maxLength) {
     return title;
@@ -270,7 +270,7 @@ export default function SidebarNav() {
         : title;
 
      return (
-        <div key={`${type}-${id}`} className="group relative flex items-center w-full rounded-md hover:bg-sidebar-accent/50 pr-1">
+        <div key={`${type}-${id}`} className="group relative flex items-center w-full rounded-md hover:bg-sidebar-accent/50">
             {isEditing ? (
                 <div className="flex items-center gap-1 p-1 w-full">
                     <Input
@@ -284,68 +284,68 @@ export default function SidebarNav() {
                     />
                 </div>
             ) : (
-              <div className="flex items-center w-full group/item">
+              <div className="flex items-center w-full gap-1 group/item">
                 <SidebarMenuButton
                     onClick={() => handleSelectSession(type, id)}
                     isActive={isActive}
                     tooltip={title}
                     size="sm"
-                    className="flex-grow justify-start pr-8 min-w-0"
+                    className="flex-1 justify-start min-w-0 pr-8"
                 >
                     <IconComponent size={12}/>
-                    <span className="truncate">{truncateTitle(displayTitle)}</span>
+                    <span className="truncate" title={displayTitle}>{truncateTitle(displayTitle)}</span>
                 </SidebarMenuButton>
 
-                <div
-                    className={cn(
-                        "flex items-center flex-shrink-0 transition-opacity absolute right-1.5 top-1/2 -translate-y-1/2 bg-sidebar-accent/50 rounded-full z-10",
-                        isCollapsed ? "opacity-0 pointer-events-none" : "opacity-100"
-                    )}
-                >
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                          <Button variant="ghost" size="icon" className="h-6 w-6" title="More options">
-                              <MoreVertical size={12} />
-                          </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end">
-                          <DropdownMenuItem onClick={() => handleEdit('session', session)}>
-                              <Edit3 size={14} className="mr-2"/> Rename
+                {!isCollapsed && (
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="absolute right-1 top-1/2 z-10 h-6 w-6 -translate-y-1/2 rounded-full opacity-80 transition-opacity hover:opacity-100"
+                        title="More options"
+                      >
+                        <MoreVertical size={12} />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end">
+                      <DropdownMenuItem onClick={() => handleEdit('session', session)}>
+                        <Edit3 size={14} className="mr-2"/> Rename
+                      </DropdownMenuItem>
+                      <DropdownMenuSub>
+                        <DropdownMenuSubTrigger>
+                          <FolderOpen size={14} className="mr-2"/> Move to Folder
+                        </DropdownMenuSubTrigger>
+                        <DropdownMenuPortal>
+                          <DropdownMenuSubContent>
+                            {renderFolderMenuItems(folderStructure, (newFolderId) => handleMoveItemToFolder(session, 'session', newFolderId))}
+                            {folders.length === 0 && <DropdownMenuItem disabled>No folders created</DropdownMenuItem>}
+                            {folderId && <DropdownMenuSeparator />}
+                            {folderId && <DropdownMenuItem onClick={() => handleMoveItemToFolder(session, 'session', null)}>Unfile</DropdownMenuItem>}
+                          </DropdownMenuSubContent>
+                        </DropdownMenuPortal>
+                      </DropdownMenuSub>
+                      <DropdownMenuSeparator />
+                      <AlertDialog>
+                        <AlertDialogTrigger asChild>
+                          <DropdownMenuItem onSelect={(e) => e.preventDefault()} className="text-destructive focus:text-destructive">
+                            <Trash2 size={14} className="mr-2"/> Delete
                           </DropdownMenuItem>
-                          <DropdownMenuSub>
-                              <DropdownMenuSubTrigger>
-                                  <FolderOpen size={14} className="mr-2"/> Move to Folder
-                              </DropdownMenuSubTrigger>
-                              <DropdownMenuPortal>
-                                  <DropdownMenuSubContent>
-                                      {renderFolderMenuItems(folderStructure, (newFolderId) => handleMoveItemToFolder(session, 'session', newFolderId))}
-                                      {folders.length === 0 && <DropdownMenuItem disabled>No folders created</DropdownMenuItem>}
-                                      {folderId && <DropdownMenuSeparator />}
-                                      {folderId && <DropdownMenuItem onClick={() => handleMoveItemToFolder(session, 'session', null)}>Unfile</DropdownMenuItem>}
-                                  </DropdownMenuSubContent>
-                              </DropdownMenuPortal>
-                          </DropdownMenuSub>
-                          <DropdownMenuSeparator />
-                          <AlertDialog>
-                              <AlertDialogTrigger asChild>
-                                  <DropdownMenuItem onSelect={(e) => e.preventDefault()} className="text-destructive focus:text-destructive">
-                                      <Trash2 size={14} className="mr-2"/> Delete
-                                  </DropdownMenuItem>
-                              </AlertDialogTrigger>
-                              <AlertDialogContent>
-                                  <AlertDialogHeader>
-                                      <AlertDialogTitle>Are you sure?</AlertDialogTitle>
-                                      <AlertDialogDescription>This will permanently delete "{truncateTitle(title, 50)}". This action cannot be undone.</AlertDialogDescription>
-                                  </AlertDialogHeader>
-                                  <AlertDialogFooter>
-                                      <AlertDialogCancel>Cancel</AlertDialogCancel>
-                                      <AlertDialogAction onClick={handleDelete} className="bg-destructive hover:bg-destructive/90 text-destructive-foreground">Delete</AlertDialogAction>
-                                  </AlertDialogFooter>
-                              </AlertDialogContent>
-                          </AlertDialog>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                </div>
+                        </AlertDialogTrigger>
+                        <AlertDialogContent>
+                          <AlertDialogHeader>
+                            <AlertDialogTitle>Are you sure?</AlertDialogTitle>
+                            <AlertDialogDescription>This will permanently delete "{truncateTitle(title, 50)}". This action cannot be undone.</AlertDialogDescription>
+                          </AlertDialogHeader>
+                          <AlertDialogFooter>
+                            <AlertDialogCancel>Cancel</AlertDialogCancel>
+                            <AlertDialogAction onClick={handleDelete} className="bg-destructive hover:bg-destructive/90 text-destructive-foreground">Delete</AlertDialogAction>
+                          </AlertDialogFooter>
+                        </AlertDialogContent>
+                      </AlertDialog>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                )}
               </div>
             )}
         </div>
@@ -361,8 +361,8 @@ export default function SidebarNav() {
     return (
         <Accordion type="single" key={folder.id} collapsible className="w-full">
             <AccordionItem value={`folder-content-${folder.id}`} className="border-b-0">
-               <div className="flex items-center group/folder-header rounded-md hover:bg-sidebar-accent/50">
-                   <AccordionTrigger className="py-0 flex-grow pr-2 text-sidebar-foreground/80 hover:no-underline justify-start">
+               <div className="group/folder-header relative flex items-center rounded-md hover:bg-sidebar-accent/50">
+                   <AccordionTrigger className="py-0 flex-grow pr-14 text-sidebar-foreground/80 hover:no-underline justify-start">
                       <div className="flex-1 flex items-center text-sm font-medium min-w-0">
                          {isEditing ? (
                               <div className="flex items-center gap-1 w-full p-1">
@@ -380,63 +380,67 @@ export default function SidebarNav() {
                           ) : (
                               <>
                                 <FolderIcon size={14} className="mr-2 shrink-0"/>
-                                <span className="truncate">{folder.name}</span>
+                                <span className="truncate" title={folder.name}>{truncateTitle(folder.name, 22)}</span>
                               </>
                           )}
                       </div>
                    </AccordionTrigger>
-                   <div
-                      className={cn(
-                        "flex items-center flex-shrink-0 transition-opacity z-10 pr-1",
-                        isCollapsed ? "opacity-0 pointer-events-none" : "opacity-100"
-                      )}
-                   >
-                        <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => setCreatingFolderWithParent(folder.id)} title="Add subfolder" disabled={maxDepthReached}>
-                            <FolderPlus size={12} />
+                   {!isCollapsed && (
+                     <div className="absolute right-1 top-1/2 z-10 flex items-center gap-1 -translate-y-1/2">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-6 w-6 opacity-80 hover:opacity-100"
+                          onClick={() => setCreatingFolderWithParent(folder.id)}
+                          title="Add subfolder"
+                          disabled={maxDepthReached}
+                        >
+                          <FolderPlus size={12} />
                         </Button>
                         <DropdownMenu>
-                            <DropdownMenuTrigger asChild>
-                                <Button variant="ghost" size="icon" className="h-6 w-6" title="More options">
-                                    <MoreVertical size={12} />
-                                </Button>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent>
-                                <DropdownMenuItem onClick={() => handleEdit('folder', folder)}>
-                                    <Edit3 size={14} className="mr-2"/> Rename
+                          <DropdownMenuTrigger asChild>
+                            <Button variant="ghost" size="icon" className="h-6 w-6 opacity-80 hover:opacity-100" title="More options">
+                              <MoreVertical size={12} />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent>
+                            <DropdownMenuItem onClick={() => handleEdit('folder', folder)}>
+                              <Edit3 size={14} className="mr-2"/> Rename
+                            </DropdownMenuItem>
+                            <DropdownMenuSub>
+                              <DropdownMenuSubTrigger>
+                                <FolderOpen size={14} className="mr-2"/> Move Folder
+                              </DropdownMenuSubTrigger>
+                              <DropdownMenuPortal>
+                                <DropdownMenuSubContent>
+                                  {renderFolderMenuItems(folderStructure, (newFolderId) => handleMoveItemToFolder(folder, 'folder', newFolderId), disabledMoveFolderIds, 0, 1)}
+                                  {folder.parentId && <DropdownMenuSeparator />}
+                                  {folder.parentId && <DropdownMenuItem onClick={() => handleMoveItemToFolder(folder, 'folder', null)}>Move to root</DropdownMenuItem>}
+                                </DropdownMenuSubContent>
+                              </DropdownMenuPortal>
+                            </DropdownMenuSub>
+                            <DropdownMenuSeparator/>
+                            <AlertDialog>
+                              <AlertDialogTrigger asChild>
+                                <DropdownMenuItem onSelect={e => e.preventDefault()} className="text-destructive focus:text-destructive">
+                                  <Trash2 size={14} className="mr-2"/> Delete
                                 </DropdownMenuItem>
-                                <DropdownMenuSub>
-                                    <DropdownMenuSubTrigger>
-                                        <FolderOpen size={14} className="mr-2"/> Move Folder
-                                    </DropdownMenuSubTrigger>
-                                    <DropdownMenuPortal>
-                                        <DropdownMenuSubContent>
-                                            {renderFolderMenuItems(folderStructure, (newFolderId) => handleMoveItemToFolder(folder, 'folder', newFolderId), disabledMoveFolderIds, 0, 1)}
-                                            {folder.parentId && <DropdownMenuSeparator />}
-                                            {folder.parentId && <DropdownMenuItem onClick={() => handleMoveItemToFolder(folder, 'folder', null)}>Move to root</DropdownMenuItem>}
-                                        </DropdownMenuSubContent>
-                                    </DropdownMenuPortal>
-                                </DropdownMenuSub>
-                                <DropdownMenuSeparator/>
-                                <AlertDialog>
-                                    <AlertDialogTrigger asChild>
-                                        <DropdownMenuItem onSelect={e => e.preventDefault()} className="text-destructive focus:text-destructive">
-                                            <Trash2 size={14} className="mr-2"/> Delete
-                                        </DropdownMenuItem>
-                                    </AlertDialogTrigger>
-                                    <AlertDialogContent onClick={e => e.stopPropagation()}>
-                                        <AlertDialogHeader>
-                                            <AlertDialogTitle>Are you sure?</AlertDialogTitle>
-                                            <AlertDialogDescription>This will delete the folder "{truncateTitle(folder.name, 50)}". Sessions and subfolders inside will be moved to the root.</AlertDialogDescription>
-                                        </AlertDialogHeader>
-                                        <AlertDialogFooter>
-                                            <AlertDialogCancel>Cancel</AlertDialogCancel>
-                                            <AlertDialogAction onClick={() => deleteFolder(folder.id)} className="bg-destructive hover:bg-destructive/90 text-destructive-foreground">Delete</AlertDialogAction>
-                                        </AlertDialogFooter>
-                                    </AlertDialogContent>
-                                </AlertDialog>
-                            </DropdownMenuContent>
+                              </AlertDialogTrigger>
+                              <AlertDialogContent onClick={e => e.stopPropagation()}>
+                                <AlertDialogHeader>
+                                  <AlertDialogTitle>Are you sure?</AlertDialogTitle>
+                                  <AlertDialogDescription>This will delete the folder "{truncateTitle(folder.name, 50)}". Sessions and subfolders inside will be moved to the root.</AlertDialogDescription>
+                                </AlertDialogHeader>
+                                <AlertDialogFooter>
+                                  <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                  <AlertDialogAction onClick={() => deleteFolder(folder.id)} className="bg-destructive hover:bg-destructive/90 text-destructive-foreground">Delete</AlertDialogAction>
+                                </AlertDialogFooter>
+                              </AlertDialogContent>
+                            </AlertDialog>
+                          </DropdownMenuContent>
                         </DropdownMenu>
-                   </div>
+                     </div>
+                   )}
                </div>
                <AccordionContent className="pl-5 pt-1 space-y-0.5">
                     {creatingFolderWithParent === folder.id && (

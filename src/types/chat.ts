@@ -118,6 +118,9 @@ export interface Meeting extends BaseSession {
   summary: string;
   attendees: AIPersonSchema[];
   extractedTasks: ExtractedTaskSchema[];
+  recordingId?: string;
+  recordingUrl?: string;
+  shareUrl?: string;
   chatSessionId?: string | null;
   planningSessionId?: string | null;
   originalAiTasks?: ExtractedTaskSchema[] | null;

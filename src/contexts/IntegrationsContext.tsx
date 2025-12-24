@@ -48,6 +48,10 @@ interface IntegrationsContextType {
   slackInstallation: SlackInstallation | null;
   connectSlack: () => void;
   disconnectSlack: () => Promise<void>;
+  isFathomConnected: boolean;
+  isLoadingFathomConnection: boolean;
+  connectFathom: () => void;
+  disconnectFathom: () => Promise<void>;
 }
 
 const IntegrationsContext = createContext<IntegrationsContextType | undefined>(undefined);
@@ -59,6 +63,7 @@ export const IntegrationsProvider = ({ children }: { children: ReactNode }) => {
   const [trelloToken] = useState<TrelloTokenInfo | null>(null);
   const [slackInstallation, setSlackInstallation] = useState<SlackInstallation | null>(null);
   const [isLoadingSlackConnection, setIsLoadingSlackConnection] = useState(true);
+  const [isLoadingFathomConnection, setIsLoadingFathomConnection] = useState(true);
 
   const warnDisabled = useCallback(() => {
     toast({
@@ -91,8 +96,27 @@ export const IntegrationsProvider = ({ children }: { children: ReactNode }) => {
     }
   };
 
+  const connectFathom = () => {
+    window.location.href = "/api/fathom/oauth/start";
+  };
+
+  const disconnectFathom = async () => {
+    try {
+      await fetch("/api/fathom/revoke", { method: "POST" });
+      await refreshUserProfile();
+    } catch (error) {
+      console.error("Failed to disconnect Fathom:", error);
+      toast({
+        title: "Fathom Disconnect Failed",
+        description: "Could not disconnect Fathom. Please try again.",
+        variant: "destructive",
+      });
+    }
+  };
+
   useEffect(() => {
     setIsLoadingSlackConnection(loading);
+    setIsLoadingFathomConnection(loading);
     if (!loading && user?.slackTeamId) {
       setSlackInstallation({
         teamId: user.slackTeamId,
@@ -132,6 +156,10 @@ export const IntegrationsProvider = ({ children }: { children: ReactNode }) => {
       slackInstallation,
       connectSlack,
       disconnectSlack,
+      isFathomConnected: Boolean(user?.fathomConnected),
+      isLoadingFathomConnection,
+      connectFathom,
+      disconnectFathom,
     }}>
       {children}
     </IntegrationsContext.Provider>

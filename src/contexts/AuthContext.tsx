@@ -19,6 +19,9 @@ export interface AppUser extends Person {
   workspace?: Workspace;
   onboardingCompleted?: boolean;
   slackTeamId?: string | null;
+  fathomWebhookToken?: string | null;
+  fathomConnected?: boolean;
+  fathomUserId?: string | null;
   displayName?: string | null;
   photoURL?: string | null;
   taskGranularityPreference?: 'light' | 'medium' | 'detailed';

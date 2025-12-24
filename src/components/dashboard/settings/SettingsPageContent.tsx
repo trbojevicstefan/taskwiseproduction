@@ -92,6 +92,10 @@ export default function SettingsPageContent() {
     isLoadingSlackConnection,
     connectSlack,
     disconnectSlack,
+    isFathomConnected,
+    isLoadingFathomConnection,
+    connectFathom,
+    disconnectFathom,
     triggerTokenFetch, 
   } = useIntegrations();
   const { toast } = useToast();
@@ -101,8 +105,6 @@ export default function SettingsPageContent() {
 
   const [displayName, setDisplayName] = useState('');
   const [isSaving, setIsSaving] = useState(false);
-  const [firefliesToken, setFirefliesToken] = useState<string | null>(null);
-  const [isGeneratingToken, setIsGeneratingToken] = useState(false);
   const [hasCopied, setHasCopied] = useState(false);
   
   const [isAvatarDialogOpen, setIsAvatarDialogOpen] = useState(false);
@@ -117,6 +119,7 @@ export default function SettingsPageContent() {
       const slackSuccess = searchParams.get('slack_success');
       const trelloSuccess = searchParams.get('trello_success');
       const googleSuccess = searchParams.get('google_success');
+      const fathomSuccess = searchParams.get('fathom_success');
       const error = searchParams.get('error');
       const message = searchParams.get('message');
       
@@ -140,6 +143,12 @@ export default function SettingsPageContent() {
             description: "Meeting ingestion and task syncing are now active.",
         });
         needsRefresh = true;
+      } else if (fathomSuccess === 'true') {
+        toast({
+            title: "Fathom Connected!",
+            description: "New Fathom meetings will sync into TaskWiseAI.",
+        });
+        needsRefresh = true;
       }
       else if (error) {
         toast({
@@ -155,7 +164,7 @@ export default function SettingsPageContent() {
       }
 
       // Clean the URL if any of our params were present
-      if(slackSuccess || trelloSuccess || googleSuccess || error) {
+      if(slackSuccess || trelloSuccess || googleSuccess || fathomSuccess || error) {
         router.replace('/settings', { scroll: false });
       }
     };
@@ -168,7 +177,6 @@ export default function SettingsPageContent() {
   useEffect(() => {
     if (user) {
       setDisplayName(user.displayName || '');
-      setFirefliesToken(user.firefliesWebhookToken || null);
       setSelectedAvatarUrl(user.photoURL || '');
     }
   }, [user]);
@@ -191,20 +199,6 @@ export default function SettingsPageContent() {
     }
   };
   
-  const handleGenerateWebhook = async () => {
-    setIsGeneratingToken(true);
-    try {
-      toast({
-        title: "Temporarily Disabled",
-        description: "Webhook generation is offline during the Mongo migration.",
-        variant: "destructive",
-      });
-    } finally {
-      setIsGeneratingToken(false);
-    }
-  };
-
-
   const handleSelectAndCopy = () => {
       if (!webhookUrlInputRef.current) return;
       webhookUrlInputRef.current.select();
@@ -233,8 +227,10 @@ export default function SettingsPageContent() {
     return name.split(' ').map(n => n[0]).join('').toUpperCase().substring(0, 2);
   };
   
-  const webhookUrl = firefliesToken
-    ? `https://us-central1-taskwiseai-v0.cloudfunctions.net/generalWebhook?token=${firefliesToken}`
+  const appBaseUrl =
+    typeof window !== "undefined" ? window.location.origin : "";
+  const webhookUrl = user?.fathomWebhookToken
+    ? `${appBaseUrl}/api/fathom/webhook?token=${user.fathomWebhookToken}`
     : "";
 
 
@@ -331,7 +327,7 @@ export default function SettingsPageContent() {
                             onConnect={connectTrello}
                             onDisconnect={disconnectTrello}
                         />
-                         <IntegrationCard 
+                        <IntegrationCard 
                             icon={Slack}
                             title="Slack"
                             description="Post meeting summaries and tasks to channels."
@@ -340,12 +336,21 @@ export default function SettingsPageContent() {
                             onConnect={connectSlack}
                             onDisconnect={disconnectSlack}
                         />
+                        <IntegrationCard 
+                            icon={Video}
+                            title="Fathom"
+                            description="Sync meetings and transcripts from Fathom."
+                            isConnected={isFathomConnected}
+                            isLoading={isLoadingFathomConnection}
+                            onConnect={connectFathom}
+                            onDisconnect={disconnectFathom}
+                        />
                         <div className="p-4 rounded-lg bg-card border border-border/50">
                             <div className="flex items-center gap-4">
                                 <div className="p-2 bg-background rounded-lg"><Webhook className="h-8 w-8 text-green-400" /></div>
                                 <div>
-                                    <h4 className="font-semibold text-foreground">General Webhook</h4>
-                                    <p className="text-sm text-muted-foreground">Push meeting summaries from services like Fathom to create new plans.</p>
+                                    <h4 className="font-semibold text-foreground">Fathom Webhook</h4>
+                                    <p className="text-sm text-muted-foreground">Receive finished Fathom recordings and auto-create meetings.</p>
                                 </div>
                             </div>
                             <div className="mt-4 flex flex-col sm:flex-row items-center gap-2">
@@ -354,26 +359,26 @@ export default function SettingsPageContent() {
                                     id="webhook-url"
                                     type="text"
                                     readOnly
-                                    value={webhookUrl || 'Click "Generate" to create your unique webhook URL.'}
+                                    value={webhookUrl || 'Connect Fathom to create your webhook URL.'}
                                     className="flex-1 bg-muted/50"
                                 />
-                                {firefliesToken ? (
+                                {user?.fathomWebhookToken ? (
                                     <Button variant="ghost" size="sm" onClick={handleSelectAndCopy} className="w-full sm:w-auto">
                                         {hasCopied ? <Check className="mr-2 h-4 w-4 text-green-500"/> : <Copy className="mr-2 h-4 w-4"/>}
                                         {hasCopied ? "Copied!" : "Copy URL"}
                                     </Button>
                                 ) : (
-                                    <Button onClick={handleGenerateWebhook} disabled={isGeneratingToken} className="w-full sm:w-auto">
-                                        {isGeneratingToken ? <Loader2 className="mr-2 h-4 w-4 animate-spin"/> : <Send className="mr-2 h-4 w-4"/>}
-                                        Generate
+                                    <Button onClick={connectFathom} className="w-full sm:w-auto">
+                                        <Send className="mr-2 h-4 w-4"/>
+                                        Connect Fathom
                                     </Button>
                                 )}
                             </div>
-                            {firefliesToken && (
+                            {user?.fathomWebhookToken && (
                                 <div className="mt-4 flex items-start gap-3 p-3 bg-background rounded-lg border border-border/30">
                                     <InfoIcon className="h-5 w-5 mt-0.5 text-muted-foreground flex-shrink-0" />
                                     <p className="text-xs text-muted-foreground">
-                                        To complete the setup, go to your provider's (e.g., Fathom, Fireflies.ai) integrations page, create a new webhook, and paste this URL. TaskWiseAI will automatically create a new plan every time a meeting summary is received.
+                                        In Fathom, create a webhook for the "new meeting content ready" event and paste this URL. TaskWiseAI will automatically create a meeting with tasks and a linked plan.
                                     </p>
                                 </div>
                             )}

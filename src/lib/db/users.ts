@@ -16,6 +16,9 @@ export interface DbUser {
   workspace: { name: string };
   firefliesWebhookToken: string | null;
   slackTeamId?: string | null;
+  fathomWebhookToken?: string | null;
+  fathomConnected?: boolean;
+  fathomUserId?: string | null;
   taskGranularityPreference?: "light" | "medium" | "detailed";
 }
 
@@ -62,6 +65,9 @@ export const createUser = async ({
     workspace: { name: `${safeName}'s Workspace` },
     firefliesWebhookToken: null,
     slackTeamId: null,
+    fathomWebhookToken: null,
+    fathomConnected: false,
+    fathomUserId: null,
     taskGranularityPreference: "medium",
   };
 
@@ -87,4 +93,13 @@ export const updateUserById = async (id: string, update: Partial<DbUser>) => {
       },
     }
   );
+};
+
+export const findUserByFathomWebhookToken = async (
+  token: string
+): Promise<DbUser | null> => {
+  const db = await getDb();
+  return db.collection<DbUser>(USERS_COLLECTION).findOne({
+    fathomWebhookToken: token,
+  });
 };
