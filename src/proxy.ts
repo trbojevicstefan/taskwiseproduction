@@ -1,11 +1,11 @@
-// src/middleware.ts
+// src/proxy.ts
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 
 // This middleware function is currently a placeholder.
 // You can add logic here to handle redirects, authentication checks, etc.
 // For now, it simply allows all requests to proceed.
-export function middleware(request: NextRequest) {
+export function proxy(request: NextRequest) {
   return NextResponse.next();
 }
 
