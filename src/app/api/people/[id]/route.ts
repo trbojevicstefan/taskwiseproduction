@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
 import { getSessionUserId } from "@/lib/server-auth";
+import { buildIdQuery } from "@/lib/mongo-id";
 
 const serializePerson = (person: any) => ({
   ...person,
@@ -20,14 +21,18 @@ export async function GET(
   }
 
   const db = await getDb();
-  const person = await db.collection<any>("people").findOne({ _id: params.id, userId });
+  const idQuery = buildIdQuery(params.id);
+  const person = await db
+    .collection<any>("people")
+    .findOne({ _id: idQuery, userId });
   if (!person) {
     return NextResponse.json({ error: "Person not found" }, { status: 404 });
   }
 
+  const assigneeQuery = buildIdQuery(params.id);
   const taskCount = await db.collection<any>("tasks").countDocuments({
     userId,
-    "assignee.uid": params.id,
+    "assignee.uid": assigneeQuery,
   });
 
   return NextResponse.json({ ...serializePerson(person), taskCount });
@@ -46,15 +51,19 @@ export async function PATCH(
   const update = { ...body, lastSeenAt: new Date() };
 
   const db = await getDb();
+  const idQuery = buildIdQuery(params.id);
   await db.collection<any>("people").updateOne(
-    { _id: params.id, userId },
+    { _id: idQuery, userId },
     { $set: update }
   );
 
-  const person = await db.collection<any>("people").findOne({ _id: params.id, userId });
+  const person = await db
+    .collection<any>("people")
+    .findOne({ _id: idQuery, userId });
+  const assigneeQuery = buildIdQuery(params.id);
   const taskCount = await db.collection<any>("tasks").countDocuments({
     userId,
-    "assignee.uid": params.id,
+    "assignee.uid": assigneeQuery,
   });
 
   return NextResponse.json({ ...serializePerson(person), taskCount });

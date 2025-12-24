@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
+import { ObjectId } from "mongodb";
 import { getDb } from "@/lib/db";
 import { getSessionUserId } from "@/lib/server-auth";
+import { buildIdQuery, matchesId } from "@/lib/mongo-id";
 
 const serializeTask = (task: any) => ({
   ...task,
@@ -23,12 +25,16 @@ export async function PATCH(
   const update = { ...body, lastUpdated: new Date() };
 
   const db = await getDb();
+  const idQuery = buildIdQuery(params.id);
   await db.collection<any>("tasks").updateOne(
-    { _id: params.id, userId },
+    { _id: idQuery, userId },
     { $set: update }
   );
 
-  const task = await db.collection<any>("tasks").findOne({ _id: params.id, userId });
+  const task = await db.collection<any>("tasks").findOne({
+    _id: idQuery,
+    userId,
+  });
   return NextResponse.json(serializeTask(task));
 }
 
@@ -47,20 +53,40 @@ export async function DELETE(
   const toDelete = new Set<string>();
   toDelete.add(params.id);
 
+  const normalizeId = (value: any) => {
+    if (value?.toString) {
+      return value.toString();
+    }
+    return String(value);
+  };
+
   const findChildren = (parentId: string) => {
     tasks.forEach((task) => {
-      if (task.parentId === parentId) {
-        toDelete.add(task._id);
-        findChildren(task._id);
+      if (matchesId(task.parentId, parentId)) {
+        const taskId = normalizeId(task._id);
+        toDelete.add(taskId);
+        findChildren(taskId);
       }
     });
   };
 
   findChildren(params.id);
 
+  const deleteIds: Array<string | ObjectId> = [];
+  toDelete.forEach((id) => {
+    deleteIds.push(id);
+    if (ObjectId.isValid(id)) {
+      try {
+        deleteIds.push(new ObjectId(id));
+      } catch {
+        // Ignore invalid ObjectId conversions.
+      }
+    }
+  });
+
   const result = await db
     .collection<any>("tasks")
-    .deleteMany({ userId, _id: { $in: Array.from(toDelete) } });
+    .deleteMany({ userId, _id: { $in: deleteIds } });
   if (!result.deletedCount) {
     return NextResponse.json({ error: "Task not found." }, { status: 404 });
   }

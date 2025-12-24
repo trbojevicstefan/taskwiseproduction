@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
 import { getSessionUserId } from "@/lib/server-auth";
+import { buildIdQuery } from "@/lib/mongo-id";
 
 export async function PATCH(
   request: Request,
@@ -26,12 +27,16 @@ export async function PATCH(
   }
 
   const db = await getDb();
+  const idQuery = buildIdQuery(params.id);
   await db.collection<any>("projects").updateOne(
-    { _id: params.id, userId },
+    { _id: idQuery, userId },
     { $set: update }
   );
 
-  const project = await db.collection<any>("projects").findOne({ _id: params.id, userId });
+  const project = await db.collection<any>("projects").findOne({
+    _id: idQuery,
+    userId,
+  });
 
   return NextResponse.json({
     ...project,
@@ -51,13 +56,16 @@ export async function DELETE(
   }
 
   const db = await getDb();
+  const idQuery = buildIdQuery(params.id);
   const result = await db
     .collection<any>("projects")
-    .deleteOne({ _id: params.id, userId });
+    .deleteOne({ _id: idQuery, userId });
   if (!result.deletedCount) {
     return NextResponse.json({ error: "Project not found." }, { status: 404 });
   }
-  await db.collection<any>("tasks").deleteMany({ userId, projectId: params.id });
+  await db
+    .collection<any>("tasks")
+    .deleteMany({ userId, projectId: idQuery });
 
   return NextResponse.json({ ok: true });
 }

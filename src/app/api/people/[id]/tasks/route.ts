@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
 import { getSessionUserId } from "@/lib/server-auth";
+import { buildIdQuery } from "@/lib/mongo-id";
 
 const serializeTask = (task: any) => ({
   ...task,
@@ -20,9 +21,10 @@ export async function GET(
   }
 
   const db = await getDb();
+  const assigneeQuery = buildIdQuery(params.id);
   const tasks = await db
     .collection<any>("tasks")
-    .find({ userId, "assignee.uid": params.id })
+    .find({ userId, "assignee.uid": assigneeQuery })
     .sort({ createdAt: -1 })
     .toArray();
 

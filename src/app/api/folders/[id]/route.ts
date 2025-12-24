@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
 import { getSessionUserId } from "@/lib/server-auth";
+import { buildIdQuery } from "@/lib/mongo-id";
 
 const serializeFolder = (folder: any) => ({
   ...folder,
@@ -33,12 +34,16 @@ export async function PATCH(
   }
 
   const db = await getDb();
+  const idQuery = buildIdQuery(params.id);
   await db.collection<any>("folders").updateOne(
-    { _id: params.id, userId },
+    { _id: idQuery, userId },
     { $set: update }
   );
 
-  const folder = await db.collection<any>("folders").findOne({ _id: params.id, userId });
+  const folder = await db.collection<any>("folders").findOne({
+    _id: idQuery,
+    userId,
+  });
   return NextResponse.json(serializeFolder(folder));
 }
 
@@ -52,23 +57,24 @@ export async function DELETE(
   }
 
   const db = await getDb();
+  const idQuery = buildIdQuery(params.id);
   const result = await db
     .collection<any>("folders")
-    .deleteOne({ _id: params.id, userId });
+    .deleteOne({ _id: idQuery, userId });
   if (!result.deletedCount) {
     return NextResponse.json({ error: "Folder not found." }, { status: 404 });
   }
 
   await db.collection<any>("chatSessions").updateMany(
-    { userId, folderId: params.id },
+    { userId, folderId: idQuery },
     { $set: { folderId: null } }
   );
   await db.collection<any>("planningSessions").updateMany(
-    { userId, folderId: params.id },
+    { userId, folderId: idQuery },
     { $set: { folderId: null } }
   );
   await db.collection<any>("folders").updateMany(
-    { userId, parentId: params.id },
+    { userId, parentId: idQuery },
     { $set: { parentId: null } }
   );
 
