@@ -1,36 +1,57 @@
 import crypto from "crypto";
-import { randomUUID } from "crypto";
 import { NextResponse } from "next/server";
-import { analyzeMeeting } from "@/ai/flows/analyze-meeting-flow";
-import { getDb } from "@/lib/db";
 import {
-  fetchFathomSummary,
-  fetchFathomTranscript,
-  formatFathomTranscript,
   getFathomInstallation,
   getValidFathomAccessToken,
 } from "@/lib/fathom";
+import { ingestFathomMeeting } from "@/lib/fathom-ingest";
 import { findUserByFathomWebhookToken } from "@/lib/db/users";
-import { sanitizeTaskForFirestore } from "@/lib/data";
-import type { ExtractedTaskSchema } from "@/types/chat";
 
 const getSignaturesFromHeader = (headerValue: string) => {
-  const [, signatureBlock] = headerValue.split(",", 2);
-  if (!signatureBlock) return [];
-  return signatureBlock.trim().split(/\s+/).filter(Boolean);
+  return headerValue
+    .trim()
+    .split(/\s+/)
+    .map((chunk) => chunk.split(",", 2))
+    .filter((parts) => parts.length === 2)
+    .map(([, signature]) => signature);
 };
+
+const decodeWebhookSecret = (secret: string) => {
+  const trimmed = secret.startsWith("whsec_") ? secret.slice(6) : secret;
+  const normalized = trimmed.replace(/-/g, "+").replace(/_/g, "/");
+  const padLength = (4 - (normalized.length % 4)) % 4;
+  const padded = normalized.padEnd(normalized.length + padLength, "=");
+
+  try {
+    return Buffer.from(padded, "base64");
+  } catch {
+    return Buffer.from(secret, "utf8");
+  }
+};
+
+const buildSignedPayload = (id: string, timestamp: string, body: string) =>
+  `${id}.${timestamp}.${body}`;
 
 const verifyWebhookSignature = (
   rawBody: string,
   signatureHeader: string | null,
-  secret: string | null
+  secret: string | null,
+  webhookId: string | null,
+  webhookTimestamp: string | null
 ) => {
   if (!secret) return true;
   if (!signatureHeader) return false;
+  if (!webhookId || !webhookTimestamp) return false;
 
+  const signingPayload = buildSignedPayload(
+    webhookId,
+    webhookTimestamp,
+    rawBody
+  );
+  const decodedSecret = decodeWebhookSecret(secret);
   const expected = crypto
-    .createHmac("sha256", secret)
-    .update(rawBody, "utf8")
+    .createHmac("sha256", decodedSecret)
+    .update(signingPayload, "utf8")
     .digest("base64");
 
   const signatures = getSignaturesFromHeader(signatureHeader);
@@ -43,15 +64,6 @@ const verifyWebhookSignature = (
 };
 
 const normalizePayload = (payload: any) => payload?.data ?? payload ?? {};
-
-const pickFirst = (...values: Array<string | null | undefined>) =>
-  values.find((value) => value && value.trim()) || null;
-
-const toDateOrNull = (value: any) => {
-  if (!value) return null;
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? null : date;
-};
 
 export async function POST(request: Request) {
   const url = new URL(request.url);
@@ -71,20 +83,46 @@ export async function POST(request: Request) {
   }
 
   const signatureHeader = request.headers.get("webhook-signature");
+  const webhookId = request.headers.get("webhook-id");
+  const webhookTimestamp = request.headers.get("webhook-timestamp");
   const installation = await getFathomInstallation(user._id.toString());
   const secret =
     installation?.webhookSecret || process.env.FATHOM_WEBHOOK_SECRET || null;
-  if (!verifyWebhookSignature(rawBody, signatureHeader, secret)) {
+  if (
+    !verifyWebhookSignature(
+      rawBody,
+      signatureHeader,
+      secret,
+      webhookId,
+      webhookTimestamp
+    )
+  ) {
     return NextResponse.json(
       { error: "Invalid webhook signature." },
       { status: 401 }
     );
   }
 
-  const payload = JSON.parse(rawBody);
+  let payload: any;
+  try {
+    payload = JSON.parse(rawBody);
+  } catch (error) {
+    return NextResponse.json(
+      { error: "Invalid JSON payload." },
+      { status: 400 }
+    );
+  }
   const data = normalizePayload(payload);
   const eventType = payload?.event || payload?.event_type || payload?.type;
-  if (eventType && eventType !== "new-meeting-content-ready") {
+  if (
+    eventType &&
+    ![
+      "new-meeting-content-ready",
+      "new_meeting_content_ready",
+      "newMeeting",
+      "new_meeting",
+    ].includes(eventType)
+  ) {
     return NextResponse.json({ status: "ignored", eventType });
   }
 
@@ -92,7 +130,8 @@ export async function POST(request: Request) {
     data.recording_id ||
     data.recordingId ||
     data?.recording?.id ||
-    data?.recording?.recording_id;
+    data?.recording?.recording_id ||
+    data?.recording_id;
   if (!recordingId) {
     return NextResponse.json(
       { error: "Missing recording ID." },
@@ -100,184 +139,24 @@ export async function POST(request: Request) {
     );
   }
 
-  const db = await getDb();
-  const existing = await db
-    .collection<any>("meetings")
-    .findOne({ userId: user._id.toString(), recordingId });
-  if (existing) {
-    return NextResponse.json({ status: "duplicate", meetingId: existing._id });
-  }
-
   const accessToken = await getValidFathomAccessToken(user._id.toString());
+  const result = await ingestFathomMeeting({
+    user,
+    recordingId: String(recordingId),
+    data,
+    accessToken,
+  });
 
-  let transcriptPayload =
-    data.transcript ||
-    data.transcript_segments ||
-    data?.recording?.transcript ||
-    data?.recording?.transcript_segments;
-  if (!transcriptPayload) {
-    transcriptPayload = await fetchFathomTranscript(recordingId, accessToken);
+  if (result.status === "duplicate") {
+    return NextResponse.json({ status: "duplicate", meetingId: result.meetingId });
   }
 
-  const transcriptText = formatFathomTranscript(transcriptPayload);
-  if (!transcriptText) {
+  if (result.status === "no_transcript") {
     return NextResponse.json(
       { error: "Transcript unavailable for recording." },
       { status: 422 }
     );
   }
 
-  const summaryPayload =
-    data.summary ||
-    data?.recording?.summary ||
-    (await fetchFathomSummary(recordingId, accessToken).catch(() => null));
-
-  const detailLevel = user.taskGranularityPreference || "medium";
-  const analysisResult = await analyzeMeeting({
-    transcript: transcriptText,
-    requestedDetailLevel: detailLevel,
-  });
-
-  const allTaskLevels = analysisResult.allTaskLevels || null;
-  const selectedTasks =
-    allTaskLevels?.[detailLevel as keyof typeof allTaskLevels] || [];
-  const sanitizeLevels = (levels: any) =>
-    levels
-      ? {
-          light: (levels.light || []).map((task: any) =>
-            sanitizeTaskForFirestore(task as ExtractedTaskSchema)
-          ),
-          medium: (levels.medium || []).map((task: any) =>
-            sanitizeTaskForFirestore(task as ExtractedTaskSchema)
-          ),
-          detailed: (levels.detailed || []).map((task: any) =>
-            sanitizeTaskForFirestore(task as ExtractedTaskSchema)
-          ),
-        }
-      : null;
-
-  const sanitizedTasks = selectedTasks.map((task: any) =>
-    sanitizeTaskForFirestore(task as ExtractedTaskSchema)
-  );
-  const sanitizedTaskLevels = sanitizeLevels(allTaskLevels);
-
-  const attendees = (analysisResult.attendees || []).map((person) => ({
-    ...person,
-    role: "attendee" as const,
-  }));
-  const mentioned = (analysisResult.mentionedPeople || []).map((person) => ({
-    ...person,
-    role: "mentioned" as const,
-  }));
-  const combinedPeople = [...attendees, ...mentioned];
-  const uniquePeople = Array.from(
-    new Map(
-      combinedPeople.map((person) => [person.name.toLowerCase(), person])
-    ).values()
-  );
-
-  const meetingTitle = pickFirst(
-    analysisResult.sessionTitle,
-    data.title,
-    data.meeting_title,
-    data?.recording?.title,
-    `Fathom Meeting ${recordingId}`
-  );
-
-  const meetingSummary =
-    analysisResult.meetingSummary ||
-    analysisResult.chatResponseText ||
-    (typeof summaryPayload === "string" ? summaryPayload : "") ||
-    "";
-
-  const now = new Date();
-  const meetingId = randomUUID();
-  const chatId = randomUUID();
-  const planId = randomUUID();
-
-  const meeting = {
-    _id: meetingId,
-    userId: user._id.toString(),
-    title: meetingTitle,
-    originalTranscript: transcriptText,
-    summary: meetingSummary,
-    attendees: uniquePeople,
-    extractedTasks: sanitizedTasks,
-    originalAiTasks: sanitizedTasks,
-    originalAllTaskLevels: sanitizedTaskLevels,
-    taskRevisions:
-      sanitizedTasks.length > 0
-        ? [
-            {
-              id: randomUUID(),
-              createdAt: Date.now(),
-              source: "ai",
-              summary: "Initial AI extraction",
-              tasksSnapshot: sanitizedTasks,
-            },
-          ]
-        : [],
-    chatSessionId: chatId,
-    planningSessionId: planId,
-    allTaskLevels: sanitizedTaskLevels,
-    keyMoments: analysisResult.keyMoments || [],
-    overallSentiment: analysisResult.overallSentiment ?? null,
-    speakerActivity: analysisResult.speakerActivity || [],
-    recordingId,
-    recordingUrl: pickFirst(data.url, data.meeting_url, data?.recording?.url),
-    shareUrl: pickFirst(
-      data.share_url,
-      data.meeting_share_url,
-      data?.recording?.share_url
-    ),
-    startTime: toDateOrNull(
-      data.start_time || data.started_at || data?.recording?.start_time
-    ),
-    endTime: toDateOrNull(
-      data.end_time || data.ended_at || data?.recording?.end_time
-    ),
-    duration: data.duration || data.duration_seconds || data?.recording?.duration,
-    state: "tasks_ready",
-    createdAt: now,
-    lastActivityAt: now,
-  };
-
-  const chatSession = {
-    _id: chatId,
-    userId: user._id.toString(),
-    title: `Chat about "${meetingTitle}"`,
-    messages: [],
-    suggestedTasks: sanitizedTasks,
-    originalAiTasks: sanitizedTasks,
-    originalAllTaskLevels: sanitizedTaskLevels,
-    taskRevisions: [],
-    people: uniquePeople,
-    folderId: null,
-    sourceMeetingId: meetingId,
-    allTaskLevels: sanitizedTaskLevels,
-    createdAt: now,
-    lastActivityAt: now,
-  };
-
-  const planningSession = {
-    _id: planId,
-    userId: user._id.toString(),
-    title: `Plan from "${meetingTitle}"`,
-    inputText: meetingSummary,
-    extractedTasks: sanitizedTasks,
-    originalAiTasks: sanitizedTasks,
-    originalAllTaskLevels: sanitizedTaskLevels,
-    taskRevisions: [],
-    folderId: null,
-    sourceMeetingId: meetingId,
-    allTaskLevels: sanitizedTaskLevels,
-    createdAt: now,
-    lastActivityAt: now,
-  };
-
-  await db.collection("meetings").insertOne(meeting);
-  await db.collection("chatSessions").insertOne(chatSession);
-  await db.collection("planningSessions").insertOne(planningSession);
-
-  return NextResponse.json({ status: "ok", meetingId });
+  return NextResponse.json({ status: "ok", meetingId: result.meetingId });
 }

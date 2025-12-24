@@ -22,11 +22,19 @@ const OAUTH_STATE_COLLECTION = "fathomOauthStates";
 
 const FATHOM_CLIENT_ID = process.env.FATHOM_CLIENT_ID;
 const FATHOM_CLIENT_SECRET = process.env.FATHOM_CLIENT_SECRET;
+const FATHOM_API_KEY = process.env.FATHOM_API_KEY;
 export const FATHOM_SCOPES = "public_api";
 export const FATHOM_WEBHOOK_EVENT = "new-meeting-content-ready";
 export const FATHOM_WEBHOOK_TRIGGERED_FOR = [
   "my_recordings",
   "shared_external_recordings",
+  "my_shared_with_team_recordings",
+  "shared_team_recordings",
+] as const;
+
+const FATHOM_WEBHOOK_TRIGGERED_FOR_FALLBACK = [
+  "my_recordings",
+  "shared_with_me_external_recordings",
   "my_shared_with_team_recordings",
   "shared_team_recordings",
 ] as const;
@@ -176,7 +184,10 @@ const fathomApiFetch = async <T>(
   accessToken: string
 ): Promise<T> => {
   const response = await fetch(`https://api.fathom.ai${path}`, {
-    headers: { Authorization: `Bearer ${accessToken}` },
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      ...(FATHOM_API_KEY ? { "X-Api-Key": FATHOM_API_KEY } : {}),
+    },
   });
   if (!response.ok) {
     const errorText = await response.text().catch(() => "");
@@ -187,24 +198,37 @@ const fathomApiFetch = async <T>(
   return (await response.json()) as T;
 };
 
-const createFathomWebhook = async (
-  accessToken: string,
-  url: string
-) => {
-  const body = {
+export const fetchFathomMeetings = async (accessToken: string) => {
+  const payload = await fathomApiFetch<any>(
+    "/external/v1/meetings",
+    accessToken
+  );
+  if (Array.isArray(payload)) return payload;
+  return payload?.meetings || payload?.data || payload?.items || [];
+};
+
+const buildWebhookBody = (url: string, triggeredFor: readonly string[]) => ({
     destination_url: url,
     include_transcript: true,
     include_summary: true,
-    include_action_items: true,
+    include_action_items: false,
     include_crm_matches: false,
-    triggered_for: [...FATHOM_WEBHOOK_TRIGGERED_FOR],
-  };
+    triggered_for: [...triggeredFor],
+  });
+
+const createFathomWebhook = async (
+  accessToken: string,
+  url: string,
+  triggeredFor: readonly string[]
+) => {
+  const body = buildWebhookBody(url, triggeredFor);
 
   const response = await fetch("https://api.fathom.ai/external/v1/webhooks", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${accessToken}`,
+      ...(FATHOM_API_KEY ? { "X-Api-Key": FATHOM_API_KEY } : {}),
     },
     body: JSON.stringify(body),
   });
@@ -232,7 +256,11 @@ export const ensureFathomWebhook = async (
   }
 
   try {
-    const created = await createFathomWebhook(accessToken, webhookUrl);
+    const created = await createFathomWebhook(
+      accessToken,
+      webhookUrl,
+      FATHOM_WEBHOOK_TRIGGERED_FOR
+    );
     await saveFathomInstallation({
       ...installation,
       webhookId: created.id || created.webhook_id || null,
@@ -244,12 +272,55 @@ export const ensureFathomWebhook = async (
     return { status: "created", webhookId: created.id || created.webhook_id || null };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
+    const triggerFallback =
+      message.includes("triggered_for") ||
+      message.includes("shared_with_me_external_recordings") ||
+      message.includes("shared_external_recordings");
     const isDuplicate =
       message.includes("already") ||
       message.includes("duplicate") ||
       message.includes("exists") ||
       message.includes("taken") ||
       message.includes("409");
+
+    if (triggerFallback) {
+      try {
+        const created = await createFathomWebhook(
+          accessToken,
+          webhookUrl,
+          FATHOM_WEBHOOK_TRIGGERED_FOR_FALLBACK
+        );
+        await saveFathomInstallation({
+          ...installation,
+          webhookId: created.id || created.webhook_id || null,
+          webhookUrl,
+          webhookEvent: FATHOM_WEBHOOK_EVENT,
+          webhookSecret: created.secret || created.webhook_secret || null,
+          updatedAt: new Date(),
+        });
+        return { status: "created", webhookId: created.id || created.webhook_id || null };
+      } catch (fallbackError) {
+        const fallbackMessage =
+          fallbackError instanceof Error ? fallbackError.message : String(fallbackError);
+        if (
+          fallbackMessage.includes("already") ||
+          fallbackMessage.includes("duplicate") ||
+          fallbackMessage.includes("exists") ||
+          fallbackMessage.includes("taken") ||
+          fallbackMessage.includes("409")
+        ) {
+          await saveFathomInstallation({
+            ...installation,
+            webhookUrl,
+            webhookEvent: FATHOM_WEBHOOK_EVENT,
+            webhookSecret: installation.webhookSecret || null,
+            updatedAt: new Date(),
+          });
+          return { status: "existing", webhookId: installation.webhookId || null };
+        }
+        throw fallbackError;
+      }
+    }
 
     if (!isDuplicate) {
       throw error;
@@ -315,7 +386,11 @@ export const formatFathomTranscript = (segments: any): string => {
 
   return segments
     .map((segment) => {
-      const speaker = segment.speaker || segment.speaker_name || segment.name;
+      const speakerValue = segment.speaker || segment.speaker_name || segment.name;
+      const speaker =
+        typeof speakerValue === "string"
+          ? speakerValue
+          : speakerValue?.display_name || speakerValue?.name;
       const text = segment.text || segment.content || "";
       const timestamp =
         segment.timestamp ??

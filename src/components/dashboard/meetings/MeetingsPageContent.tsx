@@ -1596,14 +1596,16 @@ function MeetingDetailSheet({ id, onClose, onNavigateToChat }: { id: string | nu
 type FilterOption = "all" | "today" | "this_week";
 
 export default function MeetingsPageContent() {
-  const { meetings, isLoadingMeetingHistory, updateMeeting, deleteMeeting } = useMeetingHistory();
+  const { meetings, isLoadingMeetingHistory, updateMeeting, deleteMeeting, refreshMeetings } = useMeetingHistory();
   const { createNewSession, setActiveSessionId } = useChatHistory();
+  const { isFathomConnected } = useIntegrations();
   const [openId, setOpenId] = useState<string | null>(null);
   const { toast } = useToast();
   const router = useRouter();
   const searchParams = useSearchParams();
   const [searchQuery, setSearchQuery] = useState("");
   const [filter, setFilter] = useState<FilterOption>("all");
+  const [isSyncingFathom, setIsSyncingFathom] = useState(false);
 
   useEffect(() => {
     const meetingToOpen = searchParams.get('open');
@@ -1634,6 +1636,32 @@ export default function MeetingsPageContent() {
       } else {
         toast({ title: 'Error', description: 'Could not create chat session.', variant: 'destructive' });
       }
+    }
+  };
+
+  const handleSyncFathom = async () => {
+    if (isSyncingFathom) return;
+    setIsSyncingFathom(true);
+    try {
+      const response = await fetch("/api/fathom/sync", { method: "POST" });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(payload.error || "Fathom sync failed.");
+      }
+      await refreshMeetings();
+      toast({
+        title: "Fathom Sync Complete",
+        description: `Imported ${payload.created || 0} meetings, skipped ${payload.skipped || 0}.`,
+      });
+    } catch (error) {
+      console.error("Fathom sync failed:", error);
+      toast({
+        title: "Fathom Sync Failed",
+        description: error instanceof Error ? error.message : "Could not sync meetings.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsSyncingFathom(false);
     }
   };
 
@@ -1742,7 +1770,7 @@ export default function MeetingsPageContent() {
                     <p className="text-muted-foreground">
                         Simply paste a meeting transcript anywhere in the app (<kbd className="px-2 py-1.5 text-xs font-mono text-foreground bg-muted border rounded-md">Ctrl+V</kbd>) to get started. Or, head over to the chat to begin a new conversation.
                     </p>
-                    <div className="flex justify-center gap-4">
+                    <div className="flex flex-wrap justify-center gap-4">
                         <Button asChild>
                             <Link href="/chat">
                                 <MessageSquareText className="mr-2 h-4 w-4"/>
@@ -1753,6 +1781,20 @@ export default function MeetingsPageContent() {
                              <ClipboardPaste className="mr-2 h-4 w-4"/>
                              Quick Paste
                         </Button>
+                        {isFathomConnected && (
+                          <Button
+                            variant="outline"
+                            onClick={handleSyncFathom}
+                            disabled={isSyncingFathom}
+                          >
+                            {isSyncingFathom ? (
+                              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                            ) : (
+                              <RefreshCw className="mr-2 h-4 w-4" />
+                            )}
+                            Sync Fathom
+                          </Button>
+                        )}
                     </div>
                 </CardContent>
             </Card>
@@ -1769,6 +1811,22 @@ export default function MeetingsPageContent() {
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground"/>
                 <Input placeholder="Search meetings..." className="pl-9 h-9" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} />
             </div>
+            {isFathomConnected && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-9"
+                onClick={handleSyncFathom}
+                disabled={isSyncingFathom}
+              >
+                {isSyncingFathom ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <RefreshCw className="mr-2 h-4 w-4" />
+                )}
+                Sync Fathom
+              </Button>
+            )}
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button variant="outline" size="icon" className="h-9 w-9"><Filter className="h-4 w-4" /></Button>

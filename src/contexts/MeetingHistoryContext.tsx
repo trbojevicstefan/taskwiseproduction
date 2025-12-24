@@ -16,6 +16,7 @@ interface MeetingHistoryContextType {
   activeMeetingId: string | null;
   isLoadingMeetingHistory: boolean;
   setActiveMeetingId: (sessionId: string | null) => void;
+  refreshMeetings: () => Promise<void>;
   createNewMeeting: (meetingData: Omit<Meeting, 'id' | 'userId' | 'createdAt' | 'lastActivityAt'>) => Promise<Meeting | undefined>;
   getActiveMeeting: () => Meeting | undefined;
   updateMeeting: (sessionId: string, updatedFields: Partial<Omit<Meeting, 'id' | 'userId' | 'createdAt' | 'lastActivityAt'>>) => Promise<void>;
@@ -31,59 +32,67 @@ export const MeetingHistoryProvider = ({ children }: { children: ReactNode }) =>
   const [activeMeetingId, setActiveMeetingIdState] = useState<string | null>(null);
   const [isLoadingMeetingHistory, setIsLoadingMeetingHistory] = useState(true);
 
-  useEffect(() => {
-    if (user?.uid) {
-      setIsLoadingMeetingHistory(true);
-      apiFetch<Meeting[]>("/api/meetings")
-        .then((loadedMeetings) => {
-          const sanitizeLevels = (levels: any) =>
-            levels
-              ? {
-                  light: (levels.light || []).map((task: any) =>
-                    sanitizeTaskForFirestore(task as ExtractedTaskSchema)
-                  ),
-                  medium: (levels.medium || []).map((task: any) =>
-                    sanitizeTaskForFirestore(task as ExtractedTaskSchema)
-                  ),
-                  detailed: (levels.detailed || []).map((task: any) =>
-                    sanitizeTaskForFirestore(task as ExtractedTaskSchema)
-                  ),
-                }
-              : null;
-          const sanitizedMeetings = loadedMeetings.map(m => ({
-              ...m,
-              extractedTasks: (m.extractedTasks || []).map(task => sanitizeTaskForFirestore(task as ExtractedTaskSchema)),
-              originalAiTasks: (m.originalAiTasks || []).map(task => sanitizeTaskForFirestore(task as ExtractedTaskSchema)),
-              originalAllTaskLevels: sanitizeLevels(m.originalAllTaskLevels),
-              allTaskLevels: sanitizeLevels(m.allTaskLevels),
-              taskRevisions: m.taskRevisions || [],
-              attendees: m.attendees || [],
-          }));
-          setMeetings(sanitizedMeetings);
-
-          const timeValue = (value: any) =>
-            value?.toMillis ? value.toMillis() : value ? new Date(value).getTime() : 0;
-
-          setActiveMeetingIdState(prevActiveId => {
-              const activeIdStillExists = sanitizedMeetings.some(s => s.id === prevActiveId);
-              if (activeIdStillExists) {
-                  return prevActiveId;
-              }
-              const sortedMeetings = [...sanitizedMeetings].sort((a, b) =>
-                  timeValue(b.lastActivityAt) - timeValue(a.lastActivityAt)
-              );
-              return sortedMeetings.length > 0 ? sortedMeetings[0].id : null;
-          });
-        })
-        .finally(() => {
-          setIsLoadingMeetingHistory(false);
-        });
-    } else {
+  const loadMeetings = useCallback(async () => {
+    if (!user?.uid) {
       setMeetings([]);
       setActiveMeetingIdState(null);
       setIsLoadingMeetingHistory(false);
+      return;
+    }
+
+    setIsLoadingMeetingHistory(true);
+    try {
+      const loadedMeetings = await apiFetch<Meeting[]>("/api/meetings");
+      const sanitizeLevels = (levels: any) =>
+        levels
+          ? {
+              light: (levels.light || []).map((task: any) =>
+                sanitizeTaskForFirestore(task as ExtractedTaskSchema)
+              ),
+              medium: (levels.medium || []).map((task: any) =>
+                sanitizeTaskForFirestore(task as ExtractedTaskSchema)
+              ),
+              detailed: (levels.detailed || []).map((task: any) =>
+                sanitizeTaskForFirestore(task as ExtractedTaskSchema)
+              ),
+            }
+          : null;
+      const sanitizedMeetings = loadedMeetings.map(m => ({
+          ...m,
+          extractedTasks: (m.extractedTasks || []).map(task => sanitizeTaskForFirestore(task as ExtractedTaskSchema)),
+          originalAiTasks: (m.originalAiTasks || []).map(task => sanitizeTaskForFirestore(task as ExtractedTaskSchema)),
+          originalAllTaskLevels: sanitizeLevels(m.originalAllTaskLevels),
+          allTaskLevels: sanitizeLevels(m.allTaskLevels),
+          taskRevisions: m.taskRevisions || [],
+          attendees: m.attendees || [],
+      }));
+      setMeetings(sanitizedMeetings);
+
+      const timeValue = (value: any) =>
+        value?.toMillis ? value.toMillis() : value ? new Date(value).getTime() : 0;
+
+      setActiveMeetingIdState(prevActiveId => {
+          const activeIdStillExists = sanitizedMeetings.some(s => s.id === prevActiveId);
+          if (activeIdStillExists) {
+              return prevActiveId;
+          }
+          const sortedMeetings = [...sanitizedMeetings].sort((a, b) =>
+              timeValue(b.lastActivityAt) - timeValue(a.lastActivityAt)
+          );
+          return sortedMeetings.length > 0 ? sortedMeetings[0].id : null;
+      });
+    } finally {
+      setIsLoadingMeetingHistory(false);
     }
   }, [user]);
+
+  useEffect(() => {
+    loadMeetings();
+  }, [loadMeetings]);
+
+  const refreshMeetings = useCallback(async () => {
+    await loadMeetings();
+  }, [loadMeetings]);
 
   const setActiveMeetingId = useCallback((sessionId: string | null) => {
     setActiveMeetingIdState(sessionId);
@@ -197,6 +206,7 @@ export const MeetingHistoryProvider = ({ children }: { children: ReactNode }) =>
       activeMeetingId,
       isLoadingMeetingHistory,
       setActiveMeetingId,
+      refreshMeetings,
       createNewMeeting,
       getActiveMeeting,
       updateMeeting,
