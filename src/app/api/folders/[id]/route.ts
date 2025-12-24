@@ -35,15 +35,14 @@ export async function PATCH(
 
   const db = await getDb();
   const idQuery = buildIdQuery(params.id);
-  await db.collection<any>("folders").updateOne(
-    { _id: idQuery, userId },
-    { $set: update }
-  );
+  const userIdQuery = buildIdQuery(userId);
+  const filter = {
+    userId: userIdQuery,
+    $or: [{ _id: idQuery }, { id: params.id }],
+  };
+  await db.collection<any>("folders").updateOne(filter, { $set: update });
 
-  const folder = await db.collection<any>("folders").findOne({
-    _id: idQuery,
-    userId,
-  });
+  const folder = await db.collection<any>("folders").findOne(filter);
   return NextResponse.json(serializeFolder(folder));
 }
 
@@ -58,23 +57,28 @@ export async function DELETE(
 
   const db = await getDb();
   const idQuery = buildIdQuery(params.id);
+  const userIdQuery = buildIdQuery(userId);
+  const filter = {
+    userId: userIdQuery,
+    $or: [{ _id: idQuery }, { id: params.id }],
+  };
   const result = await db
     .collection<any>("folders")
-    .deleteOne({ _id: idQuery, userId });
+    .deleteOne(filter);
   if (!result.deletedCount) {
     return NextResponse.json({ error: "Folder not found." }, { status: 404 });
   }
 
   await db.collection<any>("chatSessions").updateMany(
-    { userId, folderId: idQuery },
+    { userId: userIdQuery, folderId: idQuery },
     { $set: { folderId: null } }
   );
   await db.collection<any>("planningSessions").updateMany(
-    { userId, folderId: idQuery },
+    { userId: userIdQuery, folderId: idQuery },
     { $set: { folderId: null } }
   );
   await db.collection<any>("folders").updateMany(
-    { userId, parentId: idQuery },
+    { userId: userIdQuery, parentId: idQuery },
     { $set: { parentId: null } }
   );
 

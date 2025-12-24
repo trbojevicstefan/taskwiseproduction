@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { randomUUID } from "crypto";
 import { getDb } from "@/lib/db";
 import { getSessionUserId } from "@/lib/server-auth";
+import { buildIdQuery } from "@/lib/mongo-id";
 
 const serializeFolder = (folder: any) => ({
   ...folder,
@@ -17,9 +18,10 @@ export async function GET() {
   }
 
   const db = await getDb();
+  const userIdQuery = buildIdQuery(userId);
   const folders = await db
     .collection<any>("folders")
-    .find({ userId })
+    .find({ userId: userIdQuery })
     .sort({ createdAt: -1 })
     .toArray();
 

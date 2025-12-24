@@ -4,6 +4,7 @@ import { findUserById } from "@/lib/db/users";
 import { fetchFathomMeetings, getValidFathomAccessToken } from "@/lib/fathom";
 import { ingestFathomMeeting } from "@/lib/fathom-ingest";
 import { getDb } from "@/lib/db";
+import { buildIdQuery } from "@/lib/mongo-id";
 
 type SyncRange = "today" | "this_week" | "last_week" | "this_month" | "all";
 
@@ -100,6 +101,7 @@ export async function POST(request: Request) {
     });
 
     const db = await getDb();
+    const userIdQuery = buildIdQuery(userId);
     const recordingIds = filteredMeetings
       .map((meeting: any) => extractRecordingId(meeting))
       .filter((id: any): id is string | number => Boolean(id))
@@ -107,7 +109,7 @@ export async function POST(request: Request) {
     const existing = recordingIds.length
       ? await db
           .collection<any>("meetings")
-          .find({ userId, recordingId: { $in: recordingIds } })
+          .find({ userId: userIdQuery, recordingId: { $in: recordingIds } })
           .project({ recordingId: 1 })
           .toArray()
       : [];

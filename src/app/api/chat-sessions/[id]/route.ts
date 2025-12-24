@@ -31,15 +31,14 @@ export async function PATCH(
 
   const db = await getDb();
   const idQuery = buildIdQuery(params.id);
-  await db.collection<any>("chatSessions").updateOne(
-    { _id: idQuery, userId },
-    { $set: update }
-  );
+  const userIdQuery = buildIdQuery(userId);
+  const filter = {
+    userId: userIdQuery,
+    $or: [{ _id: idQuery }, { id: params.id }],
+  };
+  await db.collection<any>("chatSessions").updateOne(filter, { $set: update });
 
-  const session = await db.collection<any>("chatSessions").findOne({
-    _id: idQuery,
-    userId,
-  });
+  const session = await db.collection<any>("chatSessions").findOne(filter);
   return NextResponse.json(serializeSession(session));
 }
 
@@ -54,9 +53,14 @@ export async function DELETE(
 
   const db = await getDb();
   const idQuery = buildIdQuery(params.id);
+  const userIdQuery = buildIdQuery(userId);
+  const filter = {
+    userId: userIdQuery,
+    $or: [{ _id: idQuery }, { id: params.id }],
+  };
   const result = await db
     .collection<any>("chatSessions")
-    .deleteOne({ _id: idQuery, userId });
+    .deleteOne(filter);
   if (!result.deletedCount) {
     return NextResponse.json({ error: "Chat session not found." }, { status: 404 });
   }

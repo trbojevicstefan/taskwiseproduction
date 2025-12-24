@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { randomUUID } from "crypto";
 import { getDb } from "@/lib/db";
 import { getSessionUserId } from "@/lib/server-auth";
+import { buildIdQuery } from "@/lib/mongo-id";
 
 const serializeTask = (task: any) => ({
   ...task,
@@ -18,9 +19,10 @@ export async function GET() {
   }
 
   const db = await getDb();
+  const userIdQuery = buildIdQuery(userId);
   const tasks = await db
     .collection<any>("tasks")
-    .find({ userId })
+    .find({ userId: userIdQuery })
     .sort({ projectId: 1, parentId: 1, order: 1, createdAt: 1 })
     .toArray();
 

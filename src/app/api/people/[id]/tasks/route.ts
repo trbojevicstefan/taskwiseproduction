@@ -21,10 +21,11 @@ export async function GET(
   }
 
   const db = await getDb();
+  const userIdQuery = buildIdQuery(userId);
   const assigneeQuery = buildIdQuery(params.id);
   const tasks = await db
     .collection<any>("tasks")
-    .find({ userId, "assignee.uid": assigneeQuery })
+    .find({ userId: userIdQuery, "assignee.uid": assigneeQuery })
     .sort({ createdAt: -1 })
     .toArray();
 

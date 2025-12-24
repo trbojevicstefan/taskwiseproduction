@@ -26,15 +26,14 @@ export async function PATCH(
 
   const db = await getDb();
   const idQuery = buildIdQuery(params.id);
-  await db.collection<any>("tasks").updateOne(
-    { _id: idQuery, userId },
-    { $set: update }
-  );
+  const userIdQuery = buildIdQuery(userId);
+  const filter = {
+    userId: userIdQuery,
+    $or: [{ _id: idQuery }, { id: params.id }],
+  };
+  await db.collection<any>("tasks").updateOne(filter, { $set: update });
 
-  const task = await db.collection<any>("tasks").findOne({
-    _id: idQuery,
-    userId,
-  });
+  const task = await db.collection<any>("tasks").findOne(filter);
   return NextResponse.json(serializeTask(task));
 }
 
@@ -48,7 +47,11 @@ export async function DELETE(
   }
 
   const db = await getDb();
-  const tasks = await db.collection<any>("tasks").find({ userId }).toArray();
+  const userIdQuery = buildIdQuery(userId);
+  const tasks = await db
+    .collection<any>("tasks")
+    .find({ userId: userIdQuery })
+    .toArray();
 
   const toDelete = new Set<string>();
   toDelete.add(params.id);
@@ -86,7 +89,7 @@ export async function DELETE(
 
   const result = await db
     .collection<any>("tasks")
-    .deleteMany({ userId, _id: { $in: deleteIds } });
+    .deleteMany({ userId: userIdQuery, _id: { $in: deleteIds } });
   if (!result.deletedCount) {
     return NextResponse.json({ error: "Task not found." }, { status: 404 });
   }

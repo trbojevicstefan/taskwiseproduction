@@ -22,16 +22,17 @@ export async function GET(
 
   const db = await getDb();
   const idQuery = buildIdQuery(params.id);
+  const userIdQuery = buildIdQuery(userId);
   const person = await db
     .collection<any>("people")
-    .findOne({ _id: idQuery, userId });
+    .findOne({ _id: idQuery, userId: userIdQuery });
   if (!person) {
     return NextResponse.json({ error: "Person not found" }, { status: 404 });
   }
 
   const assigneeQuery = buildIdQuery(params.id);
   const taskCount = await db.collection<any>("tasks").countDocuments({
-    userId,
+    userId: userIdQuery,
     "assignee.uid": assigneeQuery,
   });
 
@@ -52,17 +53,18 @@ export async function PATCH(
 
   const db = await getDb();
   const idQuery = buildIdQuery(params.id);
+  const userIdQuery = buildIdQuery(userId);
   await db.collection<any>("people").updateOne(
-    { _id: idQuery, userId },
+    { _id: idQuery, userId: userIdQuery },
     { $set: update }
   );
 
   const person = await db
     .collection<any>("people")
-    .findOne({ _id: idQuery, userId });
+    .findOne({ _id: idQuery, userId: userIdQuery });
   const assigneeQuery = buildIdQuery(params.id);
   const taskCount = await db.collection<any>("tasks").countDocuments({
-    userId,
+    userId: userIdQuery,
     "assignee.uid": assigneeQuery,
   });
 

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { randomUUID } from "crypto";
 import { getDb } from "@/lib/db";
 import { getSessionUserId } from "@/lib/server-auth";
+import { buildIdQuery, matchesId } from "@/lib/mongo-id";
 
 const serializePerson = (person: any) => ({
   ...person,
@@ -18,15 +19,21 @@ export async function GET() {
   }
 
   const db = await getDb();
+  const userIdQuery = buildIdQuery(userId);
   const people = await db
     .collection<any>("people")
-    .find({ userId })
+    .find({ userId: userIdQuery })
     .sort({ lastSeenAt: -1 })
     .toArray();
 
-  const tasks = await db.collection<any>("tasks").find({ userId }).toArray();
+  const tasks = await db
+    .collection<any>("tasks")
+    .find({ userId: userIdQuery })
+    .toArray();
   const peopleWithCounts = people.map((person) => {
-    const taskCount = tasks.filter((task) => task.assignee?.uid === person._id).length;
+    const taskCount = tasks.filter((task) =>
+      matchesId(task.assignee?.uid, person._id?.toString?.() || String(person._id))
+    ).length;
     return { ...serializePerson(person), taskCount };
   });
 
@@ -48,7 +55,10 @@ export async function POST(request: Request) {
   }
 
   const db = await getDb();
-  const existing = await db.collection<any>("people").findOne({ userId, name });
+  const userIdQuery = buildIdQuery(userId);
+  const existing = await db
+    .collection<any>("people")
+    .findOne({ userId: userIdQuery, name });
   const now = new Date();
 
   if (existing) {
@@ -56,7 +66,7 @@ export async function POST(request: Request) {
     if (sourceSessionId) updatedSourceSessions.add(sourceSessionId);
 
     await db.collection<any>("people").updateOne(
-      { _id: existing._id, userId },
+      { _id: existing._id, userId: userIdQuery },
       {
         $set: {
           lastSeenAt: now,
@@ -68,7 +78,9 @@ export async function POST(request: Request) {
       }
     );
 
-    const refreshed = await db.collection<any>("people").findOne({ _id: existing._id, userId });
+    const refreshed = await db
+      .collection<any>("people")
+      .findOne({ _id: existing._id, userId: userIdQuery });
     return NextResponse.json(serializePerson(refreshed));
   }
 

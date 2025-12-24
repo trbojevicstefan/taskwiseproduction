@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { randomUUID } from "crypto";
 import { getDb } from "@/lib/db";
 import { getSessionUserId } from "@/lib/server-auth";
+import { buildIdQuery } from "@/lib/mongo-id";
 
 const serializeSession = (session: any) => ({
   ...session,
@@ -18,9 +19,10 @@ export async function GET() {
   }
 
   const db = await getDb();
+  const userIdQuery = buildIdQuery(userId);
   const sessions = await db
     .collection<any>("chatSessions")
-    .find({ userId })
+    .find({ userId: userIdQuery })
     .sort({ lastActivityAt: -1 })
     .toArray();
 

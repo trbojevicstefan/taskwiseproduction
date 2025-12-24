@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { randomUUID } from "crypto";
 import { getDb } from "@/lib/db";
 import { getSessionUserId } from "@/lib/server-auth";
+import { buildIdQuery } from "@/lib/mongo-id";
 
 export async function GET() {
   const userId = await getSessionUserId();
@@ -10,9 +11,10 @@ export async function GET() {
   }
 
   const db = await getDb();
+  const userIdQuery = buildIdQuery(userId);
   const projects = await db
     .collection<any>("projects")
-    .find({ userId })
+    .find({ userId: userIdQuery })
     .sort({ createdAt: -1 })
     .toArray();
 
