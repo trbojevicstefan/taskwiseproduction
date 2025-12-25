@@ -6,6 +6,7 @@ import {
 } from "@/lib/fathom";
 import { ingestFathomMeeting } from "@/lib/fathom-ingest";
 import { findUserByFathomWebhookToken } from "@/lib/db/users";
+import { logFathomIntegration } from "@/lib/fathom-logs";
 
 const getSignaturesFromHeader = (headerValue: string) => {
   return headerValue
@@ -123,6 +124,13 @@ export async function POST(request: Request) {
       "new_meeting",
     ].includes(eventType)
   ) {
+    await logFathomIntegration(
+      user._id.toString(),
+      "info",
+      "webhook.receive",
+      "Ignored webhook event type.",
+      { eventType }
+    );
     return NextResponse.json({ status: "ignored", eventType });
   }
 
@@ -133,6 +141,12 @@ export async function POST(request: Request) {
     data?.recording?.recording_id ||
     data?.recording_id;
   if (!recordingId) {
+    await logFathomIntegration(
+      user._id.toString(),
+      "warn",
+      "webhook.receive",
+      "Webhook missing recording ID."
+    );
     return NextResponse.json(
       { error: "Missing recording ID." },
       { status: 400 }
@@ -148,15 +162,37 @@ export async function POST(request: Request) {
   });
 
   if (result.status === "duplicate") {
+    await logFathomIntegration(
+      user._id.toString(),
+      "info",
+      "webhook.ingest",
+      "Duplicate meeting ignored.",
+      { recordingId: String(recordingId) }
+    );
     return NextResponse.json({ status: "duplicate", meetingId: result.meetingId });
   }
 
   if (result.status === "no_transcript") {
+    await logFathomIntegration(
+      user._id.toString(),
+      "warn",
+      "webhook.ingest",
+      "Transcript missing for recording.",
+      { recordingId: String(recordingId) }
+    );
     return NextResponse.json(
       { error: "Transcript unavailable for recording." },
       { status: 422 }
     );
   }
+
+  await logFathomIntegration(
+    user._id.toString(),
+    "info",
+    "webhook.ingest",
+    "Meeting ingested from webhook.",
+    { recordingId: String(recordingId), meetingId: result.meetingId }
+  );
 
   return NextResponse.json({ status: "ok", meetingId: result.meetingId });
 }

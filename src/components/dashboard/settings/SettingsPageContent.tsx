@@ -4,6 +4,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
@@ -43,7 +44,17 @@ const IntegrationCard: React.FC<{
   isLoading: boolean;
   onConnect: () => void;
   onDisconnect: () => void;
-}> = ({ icon: Icon, title, description, isConnected, isLoading, onConnect, onDisconnect }) => {
+  extraActions?: React.ReactNode;
+}> = ({
+  icon: Icon,
+  title,
+  description,
+  isConnected,
+  isLoading,
+  onConnect,
+  onDisconnect,
+  extraActions,
+}) => {
   return (
     <div className="flex items-center justify-between p-4 rounded-lg bg-card border border-border/50 hover:border-primary/50 transition-colors">
       <div className="flex items-center gap-4">
@@ -61,10 +72,13 @@ const IntegrationCard: React.FC<{
           Checking...
         </Button>
       ) : isConnected ? (
-        <Button variant="secondary" size="sm" onClick={onDisconnect}>
-          <PowerOff className="mr-2 h-4 w-4 text-red-500" />
-          Disconnect
-        </Button>
+        <div className="flex items-center gap-2">
+          {extraActions}
+          <Button variant="secondary" size="sm" onClick={onDisconnect}>
+            <PowerOff className="mr-2 h-4 w-4 text-red-500" />
+            Disconnect
+          </Button>
+        </div>
       ) : (
         <Button variant="outline" size="sm" onClick={onConnect}>
           <Power className="mr-2 h-4 w-4 text-green-500" />
@@ -115,6 +129,16 @@ export default function SettingsPageContent() {
   const randomSeed = useMemo(() => user?.uid || Math.random().toString(36).substring(7), [user]);
   const webhookUrlInputRef = useRef<HTMLInputElement>(null);
   const [isCreatingFathomWebhook, setIsCreatingFathomWebhook] = useState(false);
+  const [isFathomLogsOpen, setIsFathomLogsOpen] = useState(false);
+  const [fathomLogs, setFathomLogs] = useState<Array<{
+    id?: string;
+    level: string;
+    event: string;
+    message: string;
+    metadata?: Record<string, unknown> | null;
+    createdAt: string;
+  }>>([]);
+  const [isLoadingFathomLogs, setIsLoadingFathomLogs] = useState(false);
 
   useEffect(() => {
     // This function will run when the component mounts and when searchParams change.
@@ -249,6 +273,32 @@ export default function SettingsPageContent() {
         setTimeout(() => setHasCopied(false), 2500);
         toast({ title: "Selected!", description: "URL selected. Press Ctrl+C to copy." });
       }
+  };
+
+  const loadFathomLogs = async () => {
+    setIsLoadingFathomLogs(true);
+    try {
+      const response = await fetch("/api/fathom/logs");
+      const payload = await response.json().catch(() => []);
+      if (!response.ok) {
+        throw new Error(payload?.error || "Failed to load logs.");
+      }
+      setFathomLogs(Array.isArray(payload) ? payload : []);
+    } catch (error) {
+      console.error("Failed to load Fathom logs:", error);
+      toast({
+        title: "Could not load logs",
+        description: error instanceof Error ? error.message : "Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsLoadingFathomLogs(false);
+    }
+  };
+
+  const handleOpenFathomLogs = async () => {
+    setIsFathomLogsOpen(true);
+    await loadFathomLogs();
   };
 
   const handleRecreateFathomWebhook = async () => {
@@ -436,6 +486,12 @@ export default function SettingsPageContent() {
                             isLoading={isLoadingFathomConnection}
                             onConnect={connectFathom}
                             onDisconnect={disconnectFathom}
+                            extraActions={isFathomConnected ? (
+                              <Button variant="outline" size="sm" onClick={handleOpenFathomLogs}>
+                                <FileText className="mr-2 h-4 w-4" />
+                                Logs
+                              </Button>
+                            ) : null}
                         />
                         <div className="p-4 rounded-lg bg-card border border-border/50">
                             <div className="flex items-center gap-4">
@@ -612,6 +668,76 @@ export default function SettingsPageContent() {
                   Save Avatar
                 </Button>
             </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={isFathomLogsOpen} onOpenChange={setIsFathomLogsOpen}>
+        <DialogContent className="sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Fathom Integration Logs</DialogTitle>
+            <DialogDescription>
+              Recent webhook, sync, and OAuth events for this workspace.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex items-center justify-between">
+            <p className="text-xs text-muted-foreground">
+              Showing {fathomLogs.length} entries
+            </p>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={loadFathomLogs}
+              disabled={isLoadingFathomLogs}
+            >
+              {isLoadingFathomLogs ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <RefreshCw className="mr-2 h-4 w-4" />
+              )}
+              Refresh
+            </Button>
+          </div>
+          <div className="max-h-[420px] overflow-y-auto space-y-3">
+            {isLoadingFathomLogs && (
+              <div className="text-sm text-muted-foreground">Loading logs...</div>
+            )}
+            {!isLoadingFathomLogs && fathomLogs.length === 0 && (
+              <div className="text-sm text-muted-foreground">No logs yet.</div>
+            )}
+            {fathomLogs.map((log) => (
+              <div
+                key={log.id || `${log.event}-${log.createdAt}`}
+                className="rounded-lg border bg-muted/30 p-3"
+              >
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Badge variant="outline" className="uppercase text-[10px]">
+                      {log.level}
+                    </Badge>
+                    <span className="text-xs font-semibold text-foreground">
+                      {log.event}
+                    </span>
+                  </div>
+                  <span className="text-xs text-muted-foreground">
+                    {log.createdAt
+                      ? new Date(log.createdAt).toLocaleString()
+                      : "Unknown time"}
+                  </span>
+                </div>
+                <p className="text-sm text-foreground mt-2">{log.message}</p>
+                {log.metadata && (
+                  <pre className="mt-2 rounded-md bg-background px-3 py-2 text-xs text-muted-foreground whitespace-pre-wrap">
+                    {JSON.stringify(log.metadata, null, 2)}
+                  </pre>
+                )}
+              </div>
+            ))}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsFathomLogsOpen(false)}>
+              Close
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </>

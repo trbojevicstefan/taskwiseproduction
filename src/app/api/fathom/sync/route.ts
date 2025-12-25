@@ -5,6 +5,7 @@ import { fetchFathomMeetings, getValidFathomAccessToken } from "@/lib/fathom";
 import { ingestFathomMeeting } from "@/lib/fathom-ingest";
 import { getDb } from "@/lib/db";
 import { buildIdQuery } from "@/lib/mongo-id";
+import { logFathomIntegration } from "@/lib/fathom-logs";
 
 type SyncRange = "today" | "this_week" | "last_week" | "this_month" | "all";
 
@@ -34,6 +35,9 @@ export async function POST(request: Request) {
   }
 
   try {
+    await logFathomIntegration(userId, "info", "sync.start", "Fathom sync started.", {
+      range,
+    });
     const accessToken = await getValidFathomAccessToken(userId);
     const meetings = await fetchFathomMeetings(accessToken);
 
@@ -144,9 +148,19 @@ export async function POST(request: Request) {
       else skipped += 1;
     }
 
+    await logFathomIntegration(userId, "info", "sync.complete", "Fathom sync completed.", {
+      range,
+      created,
+      duplicate,
+      skipped,
+    });
     return NextResponse.json({ status: "ok", created, duplicate, skipped, range });
   } catch (error) {
     console.error("Fathom sync failed:", error);
+    await logFathomIntegration(userId, "error", "sync.failed", "Fathom sync failed.", {
+      error: error instanceof Error ? error.message : String(error),
+      range,
+    });
     return NextResponse.json(
       { error: "Failed to sync Fathom meetings." },
       { status: 500 }

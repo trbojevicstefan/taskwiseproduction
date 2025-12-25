@@ -7,6 +7,7 @@ import {
   ensureFathomWebhook,
   saveFathomInstallation,
 } from "@/lib/fathom";
+import { logFathomIntegration } from "@/lib/fathom-logs";
 
 export async function GET(request: Request) {
   const url = new URL(request.url);
@@ -22,6 +23,18 @@ export async function GET(request: Request) {
   const state = url.searchParams.get("state");
 
   if (error) {
+    if (state) {
+      const userId = await consumeFathomOAuthState(state);
+      if (userId) {
+        await logFathomIntegration(
+          userId,
+          "error",
+          "oauth.callback",
+          "Fathom OAuth error from provider.",
+          { error }
+        );
+      }
+    }
     return redirectToSettings({
       error: "fathom_oauth_failed",
       message: error,
@@ -120,12 +133,27 @@ export async function GET(request: Request) {
       webhookStatus = "failed";
     }
 
+    await logFathomIntegration(
+      userId,
+      "info",
+      "oauth.callback",
+      "Fathom OAuth completed.",
+      { webhookStatus }
+    );
+
     return redirectToSettings({
       fathom_success: "true",
       fathom_webhook: webhookStatus,
     });
   } catch (err) {
     console.error("Fathom OAuth callback error:", err);
+    await logFathomIntegration(
+      userId,
+      "error",
+      "oauth.callback",
+      "Fathom OAuth callback failed.",
+      { error: err instanceof Error ? err.message : String(err) }
+    );
     return redirectToSettings({
       error: "fathom_callback_failed",
       message: "Unexpected Fathom OAuth error.",

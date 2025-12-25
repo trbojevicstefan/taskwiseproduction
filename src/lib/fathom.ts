@@ -1,5 +1,6 @@
 import crypto from "crypto";
 import { getDb } from "@/lib/db";
+import { logFathomIntegration } from "@/lib/fathom-logs";
 
 export interface FathomInstallationDoc {
   _id: string;
@@ -22,7 +23,6 @@ const OAUTH_STATE_COLLECTION = "fathomOauthStates";
 
 const FATHOM_CLIENT_ID = process.env.FATHOM_CLIENT_ID;
 const FATHOM_CLIENT_SECRET = process.env.FATHOM_CLIENT_SECRET;
-const FATHOM_API_KEY = process.env.FATHOM_API_KEY;
 export const FATHOM_SCOPES = "public_api";
 export const FATHOM_WEBHOOK_EVENT = "new-meeting-content-ready";
 export const FATHOM_WEBHOOK_TRIGGERED_FOR = [
@@ -186,7 +186,6 @@ const fathomApiFetch = async <T>(
   const response = await fetch(`https://api.fathom.ai${path}`, {
     headers: {
       Authorization: `Bearer ${accessToken}`,
-      ...(FATHOM_API_KEY ? { "X-Api-Key": FATHOM_API_KEY } : {}),
     },
   });
   if (!response.ok) {
@@ -228,7 +227,6 @@ const createFathomWebhook = async (
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${accessToken}`,
-      ...(FATHOM_API_KEY ? { "X-Api-Key": FATHOM_API_KEY } : {}),
     },
     body: JSON.stringify(body),
   });
@@ -269,7 +267,12 @@ export const ensureFathomWebhook = async (
       webhookSecret: created.secret || created.webhook_secret || null,
       updatedAt: new Date(),
     });
-    return { status: "created", webhookId: created.id || created.webhook_id || null };
+    const webhookId = created.id || created.webhook_id || null;
+    await logFathomIntegration(userId, "info", "webhook.create", "Webhook created.", {
+      status: "created",
+      webhookId,
+    });
+    return { status: "created", webhookId };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     const triggerFallback =
@@ -298,7 +301,12 @@ export const ensureFathomWebhook = async (
           webhookSecret: created.secret || created.webhook_secret || null,
           updatedAt: new Date(),
         });
-        return { status: "created", webhookId: created.id || created.webhook_id || null };
+        const webhookId = created.id || created.webhook_id || null;
+        await logFathomIntegration(userId, "info", "webhook.create", "Webhook created with fallback trigger.", {
+          status: "created",
+          webhookId,
+        });
+        return { status: "created", webhookId };
       } catch (fallbackError) {
         const fallbackMessage =
           fallbackError instanceof Error ? fallbackError.message : String(fallbackError);
@@ -316,13 +324,24 @@ export const ensureFathomWebhook = async (
             webhookSecret: installation.webhookSecret || null,
             updatedAt: new Date(),
           });
-          return { status: "existing", webhookId: installation.webhookId || null };
+          const webhookId = installation.webhookId || null;
+          await logFathomIntegration(userId, "info", "webhook.create", "Webhook already exists.", {
+            status: "existing",
+            webhookId,
+          });
+          return { status: "existing", webhookId };
         }
+        await logFathomIntegration(userId, "error", "webhook.create", "Webhook fallback creation failed.", {
+          error: fallbackMessage,
+        });
         throw fallbackError;
       }
     }
 
     if (!isDuplicate) {
+      await logFathomIntegration(userId, "error", "webhook.create", "Webhook creation failed.", {
+        error: message,
+      });
       throw error;
     }
 
@@ -333,7 +352,12 @@ export const ensureFathomWebhook = async (
       webhookSecret: installation.webhookSecret || null,
       updatedAt: new Date(),
     });
-    return { status: "existing", webhookId: installation.webhookId || null };
+    const webhookId = installation.webhookId || null;
+    await logFathomIntegration(userId, "info", "webhook.create", "Webhook already exists.", {
+      status: "existing",
+      webhookId,
+    });
+    return { status: "existing", webhookId };
   }
 };
 
