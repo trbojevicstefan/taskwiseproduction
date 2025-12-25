@@ -210,7 +210,7 @@ const buildWebhookBody = (url: string, triggeredFor: readonly string[]) => ({
     destination_url: url,
     include_transcript: true,
     include_summary: true,
-    include_action_items: false,
+    include_action_items: true,
     include_crm_matches: false,
     triggered_for: [...triggeredFor],
   });
@@ -268,11 +268,24 @@ export const ensureFathomWebhook = async (
       updatedAt: new Date(),
     });
     const webhookId = created.id || created.webhook_id || null;
-    await logFathomIntegration(userId, "info", "webhook.create", "Webhook created.", {
-      status: "created",
-      webhookId,
-    });
-    return { status: "created", webhookId };
+    const createdUrl = created.url || created.webhook_url || webhookUrl;
+    await logFathomIntegration(
+      userId,
+      "info",
+      "webhook.create",
+      "Webhook created.",
+      {
+        status: "created",
+        webhookId,
+        destinationUrl: createdUrl,
+        include_action_items: created.include_action_items ?? null,
+        include_summary: created.include_summary ?? null,
+        include_transcript: created.include_transcript ?? null,
+        include_crm_matches: created.include_crm_matches ?? null,
+        triggered_for: created.triggered_for ?? null,
+      }
+    );
+    return { status: "created", webhookId, webhookUrl: createdUrl };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     const triggerFallback =
@@ -302,11 +315,24 @@ export const ensureFathomWebhook = async (
           updatedAt: new Date(),
         });
         const webhookId = created.id || created.webhook_id || null;
-        await logFathomIntegration(userId, "info", "webhook.create", "Webhook created with fallback trigger.", {
-          status: "created",
-          webhookId,
-        });
-        return { status: "created", webhookId };
+        const createdUrl = created.url || created.webhook_url || webhookUrl;
+        await logFathomIntegration(
+          userId,
+          "info",
+          "webhook.create",
+          "Webhook created with fallback trigger.",
+          {
+            status: "created",
+            webhookId,
+            destinationUrl: createdUrl,
+            include_action_items: created.include_action_items ?? null,
+            include_summary: created.include_summary ?? null,
+            include_transcript: created.include_transcript ?? null,
+            include_crm_matches: created.include_crm_matches ?? null,
+            triggered_for: created.triggered_for ?? null,
+          }
+        );
+        return { status: "created", webhookId, webhookUrl: createdUrl };
       } catch (fallbackError) {
         const fallbackMessage =
           fallbackError instanceof Error ? fallbackError.message : String(fallbackError);
@@ -325,11 +351,18 @@ export const ensureFathomWebhook = async (
             updatedAt: new Date(),
           });
           const webhookId = installation.webhookId || null;
-          await logFathomIntegration(userId, "info", "webhook.create", "Webhook already exists.", {
-            status: "existing",
-            webhookId,
-          });
-          return { status: "existing", webhookId };
+          await logFathomIntegration(
+            userId,
+            "info",
+            "webhook.create",
+            "Webhook already exists.",
+            {
+              status: "existing",
+              webhookId,
+              destinationUrl: webhookUrl,
+            }
+          );
+          return { status: "existing", webhookId, webhookUrl };
         }
         await logFathomIntegration(userId, "error", "webhook.create", "Webhook fallback creation failed.", {
           error: fallbackMessage,
@@ -353,11 +386,18 @@ export const ensureFathomWebhook = async (
       updatedAt: new Date(),
     });
     const webhookId = installation.webhookId || null;
-    await logFathomIntegration(userId, "info", "webhook.create", "Webhook already exists.", {
-      status: "existing",
-      webhookId,
-    });
-    return { status: "existing", webhookId };
+    await logFathomIntegration(
+      userId,
+      "info",
+      "webhook.create",
+      "Webhook already exists.",
+      {
+        status: "existing",
+        webhookId,
+        destinationUrl: webhookUrl,
+      }
+    );
+    return { status: "existing", webhookId, webhookUrl };
   }
 };
 

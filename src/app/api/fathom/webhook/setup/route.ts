@@ -43,12 +43,13 @@ export async function POST() {
       userId,
       status: result.status,
       webhookId: result.webhookId,
+      webhookUrl: result.webhookUrl,
     });
 
     return NextResponse.json({
       status: result.status,
       webhookId: result.webhookId,
-      webhookUrl: getFathomWebhookUrl(webhookToken),
+      webhookUrl: result.webhookUrl || getFathomWebhookUrl(webhookToken),
     });
   } catch (error) {
     console.error("Fathom webhook setup failed", {
