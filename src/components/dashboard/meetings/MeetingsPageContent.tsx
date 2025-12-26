@@ -114,7 +114,8 @@ import type { Meeting } from "@/types/meeting";
 import type { ExtractedTaskSchema } from '@/types/chat';
 import AssignPersonDialog from '../planning/AssignPersonDialog';
 import { useAuth } from '@/contexts/AuthContext';
-import { onPeopleSnapshot, addPerson } from '@/lib/data';
+import { onPeopleSnapshot, addPerson, sanitizeTaskForFirestore, updatePersonInFirestore } from '@/lib/data';
+import { getBestPersonMatch } from '@/lib/people-matching';
 import type { Person } from '@/types/person';
 import { cn } from "@/lib/utils";
 import SelectionToolbar from '../common/SelectionToolbar';
@@ -407,6 +408,7 @@ function PersonRow({
   onToggleSelection,
   onOpen,
   isInDirectory,
+  isBlocked = false,
 }: {
   p: MeetingPerson;
   role: "attendee" | "mentioned";
@@ -414,6 +416,7 @@ function PersonRow({
   onToggleSelection: (checked: boolean) => void;
   onOpen: () => void;
   isInDirectory: boolean;
+  isBlocked?: boolean;
 }) {
   return (
     <div
@@ -433,6 +436,7 @@ function PersonRow({
           checked={isSelected}
           onCheckedChange={(checked) => onToggleSelection(!!checked)}
           onClick={(e) => e.stopPropagation()}
+          disabled={isBlocked}
         />
         <Avatar className="h-8 w-8">
           <AvatarImage src={p.avatarUrl || `https://api.dicebear.com/8.x/initials/svg?seed=${p.name}`} />
@@ -451,6 +455,11 @@ function PersonRow({
         <Badge variant={isInDirectory ? "secondary" : "outline"} className="text-[10px]">
           {isInDirectory ? "Saved" : "New"}
         </Badge>
+        {isBlocked && (
+          <Badge variant="destructive" className="text-[10px]">
+            Blocked
+          </Badge>
+        )}
         <Badge variant={role === "attendee" ? "default" : "secondary"} className="capitalize">
           {role}
         </Badge>
@@ -550,8 +559,9 @@ function ArtifactsSection({ meeting }: { meeting: Meeting }) {
   
 function MeetingDetailSheet({ id, onClose, onNavigateToChat }: { id: string | null; onClose: () => void; onNavigateToChat: (meeting: Meeting) => void; }) {
     const { user } = useAuth();
-    const { meetings, isLoadingMeetingHistory, updateMeeting, deleteMeeting } = useMeetingHistory();
+    const { meetings, isLoadingMeetingHistory, updateMeeting, deleteMeeting, refreshMeetings } = useMeetingHistory();
     const { isSlackConnected, isGoogleTasksConnected, isTrelloConnected } = useIntegrations();
+    const { updateSession } = useChatHistory();
     const [people, setPeople] = useState<Person[]>([]);
     const [isLoadingPeople, setIsLoadingPeople] = useState(true);
     const [isAssignDialogOpen, setIsAssignDialogOpen] = useState(false);
@@ -580,21 +590,19 @@ function MeetingDetailSheet({ id, onClose, onNavigateToChat }: { id: string | nu
     const meeting = useMemo(() => meetings.find((m) => m.id === id) || null, [id, meetings]);
     const { toast } = useToast();
 
-    useEffect(() => {
-        if (meeting) {
-            setEditableTitle(meeting.title);
-            setSelectedTaskIds(new Set()); // Clear selection when meeting changes
-            setSelectedPeopleKeys(new Set());
-            setActivePerson(null);
-            
-            // Check for new people when a meeting is opened
-            const hasSeenPopup = sessionStorage.getItem(`seen-people-popup-${meeting.id}`);
-            if (user?.onboardingCompleted && meeting.attendees?.length > 0 && !hasSeenPopup) {
-                setIsDiscoveryDialogOpen(true);
-                sessionStorage.setItem(`seen-people-popup-${meeting.id}`, 'true');
-            }
+    const syncMeetingTasks = useCallback(
+      async (tasks: ExtractedTaskSchema[]) => {
+        if (!meeting) return null;
+        const sanitized = tasks.map((task) => sanitizeTaskForFirestore(task));
+        const updated = await updateMeeting(meeting.id, { extractedTasks: sanitized });
+        const chatSessionId = updated?.chatSessionId || meeting.chatSessionId;
+        if (chatSessionId) {
+          await updateSession(chatSessionId, { suggestedTasks: sanitized });
         }
-    }, [meeting, user?.onboardingCompleted]);
+        return updated;
+      },
+      [meeting, updateMeeting, updateSession]
+    );
 
     const getCheckboxState = useCallback((task: ExtractedTaskSchema, currentSelectedIds: Set<string>): 'checked' | 'unchecked' | 'indeterminate' => {
       if (!task.subtasks || task.subtasks.length === 0) {
@@ -712,6 +720,33 @@ function MeetingDetailSheet({ id, onClose, onNavigateToChat }: { id: string | nu
         );
     }, [people]);
 
+    const blockedPeopleByName = useMemo(() => {
+        return new Set(
+            people
+                .filter((person) => person.isBlocked)
+                .map((person) => person.name.toLowerCase())
+        );
+    }, [people]);
+
+    const blockedPeopleByEmail = useMemo(() => {
+        return new Set(
+            people
+                .filter((person) => person.isBlocked && person.email)
+                .map((person) => person.email!.toLowerCase())
+        );
+    }, [people]);
+
+    const isMeetingPersonBlocked = useCallback(
+        (person: MeetingPerson) => {
+            const nameKey = person.name?.toLowerCase();
+            const emailKey = person.email?.toLowerCase();
+            if (nameKey && blockedPeopleByName.has(nameKey)) return true;
+            if (emailKey && blockedPeopleByEmail.has(emailKey)) return true;
+            return false;
+        },
+        [blockedPeopleByEmail, blockedPeopleByName]
+    );
+
     const findExistingPerson = useCallback((person: MeetingPerson) => {
         if (person.email) {
             const byEmail = peopleByEmail.get(person.email.toLowerCase());
@@ -720,15 +755,35 @@ function MeetingDetailSheet({ id, onClose, onNavigateToChat }: { id: string | nu
         return peopleByName.get(person.name.toLowerCase()) || null;
     }, [peopleByEmail, peopleByName]);
 
-    const allMeetingPeople = useMemo(() => meeting?.attendees || [], [meeting]);
+    const meetingPeople = useMemo(() => meeting?.attendees || [], [meeting]);
+
+    const selectableMeetingPeople = useMemo(() => {
+        return meetingPeople.filter((person) => !isMeetingPersonBlocked(person));
+    }, [meetingPeople, isMeetingPersonBlocked]);
 
     const allMeetingPeopleKeys = useMemo(() => {
-        return new Set(allMeetingPeople.map(getMeetingPersonKey));
-    }, [allMeetingPeople]);
+        return new Set(selectableMeetingPeople.map(getMeetingPersonKey));
+    }, [selectableMeetingPeople]);
 
     const selectedPeople = useMemo(() => {
-        return allMeetingPeople.filter((person) => selectedPeopleKeys.has(getMeetingPersonKey(person)));
-    }, [allMeetingPeople, selectedPeopleKeys]);
+        return selectableMeetingPeople.filter((person) => selectedPeopleKeys.has(getMeetingPersonKey(person)));
+    }, [selectableMeetingPeople, selectedPeopleKeys]);
+
+    useEffect(() => {
+        if (meeting) {
+            setEditableTitle(meeting.title);
+            setSelectedTaskIds(new Set()); // Clear selection when meeting changes
+            setSelectedPeopleKeys(new Set());
+            setActivePerson(null);
+
+            // Check for new people when a meeting is opened
+            const hasSeenPopup = sessionStorage.getItem(`seen-people-popup-${meeting.id}`);
+            if (user?.onboardingCompleted && selectableMeetingPeople.length > 0 && !hasSeenPopup) {
+                setIsDiscoveryDialogOpen(true);
+                sessionStorage.setItem(`seen-people-popup-${meeting.id}`, 'true');
+            }
+        }
+    }, [meeting, user?.onboardingCompleted, selectableMeetingPeople]);
 
     const handleTogglePersonSelection = useCallback((personKey: string, isSelected: boolean) => {
         setSelectedPeopleKeys((prev) => {
@@ -787,7 +842,7 @@ function MeetingDetailSheet({ id, onClose, onNavigateToChat }: { id: string | nu
         };
     
         const updatedTasks = updateTasks(meeting.extractedTasks || []);
-        await updateMeeting(meeting.id, { extractedTasks: updatedTasks });
+        await syncMeetingTasks(updatedTasks);
         
         const taskTitle = taskToAssign ? `"${taskToAssign.title}" and its subtasks` : `${selectedTaskIds.size} tasks`;
         toast({ title: "Tasks Assigned", description: `${taskTitle} assigned to ${person.name}.` });
@@ -814,7 +869,7 @@ function MeetingDetailSheet({ id, onClose, onNavigateToChat }: { id: string | nu
       setIsTaskDetailDialogVisible(true);
     };
 
-    const handleSaveTaskDetails = (updatedTask: ExtractedTaskSchema, options?: { close?: boolean }) => {
+    const handleSaveTaskDetails = async (updatedTask: ExtractedTaskSchema, options?: { close?: boolean }) => {
         if (!meeting) return;
         const updateRecursively = (tasks: ExtractedTaskSchema[]): ExtractedTaskSchema[] => {
           return tasks.map(t => {
@@ -824,7 +879,7 @@ function MeetingDetailSheet({ id, onClose, onNavigateToChat }: { id: string | nu
         });
         };
         const updatedTasks = updateRecursively(meeting.extractedTasks || []);
-        updateMeeting(meeting.id, { extractedTasks: updatedTasks });
+        await syncMeetingTasks(updatedTasks);
         if (options?.close !== false) {
           setIsTaskDetailDialogVisible(false);
         }
@@ -840,7 +895,7 @@ function MeetingDetailSheet({ id, onClose, onNavigateToChat }: { id: string | nu
         if (filterByPerson === 'all') return tasks;
         if (filterByPerson === 'unassigned') return tasks.filter(t => !t.assignee && !t.assigneeName);
         
-        const selectedPerson = (meeting.attendees || []).find(p => p.name === filterByPerson);
+        const selectedPerson = selectableMeetingPeople.find(p => p.name === filterByPerson);
         if (!selectedPerson) return tasks;
 
         return tasks.filter(t => t.assignee?.name === selectedPerson.name || t.assigneeName === selectedPerson.name);
@@ -892,7 +947,7 @@ function MeetingDetailSheet({ id, onClose, onNavigateToChat }: { id: string | nu
         };
 
         const updatedTasks = filterTasks(meeting.extractedTasks || [], taskId);
-        await updateMeeting(meeting.id, { extractedTasks: updatedTasks });
+        await syncMeetingTasks(updatedTasks);
         toast({ title: "Task Deleted", description: "The task has been removed from this meeting." });
     };
 
@@ -913,7 +968,7 @@ function MeetingDetailSheet({ id, onClose, onNavigateToChat }: { id: string | nu
 
         tasksAfterDeletion = filterRecursively(tasksAfterDeletion);
 
-        await updateMeeting(meeting.id, { extractedTasks: tasksAfterDeletion });
+        await syncMeetingTasks(tasksAfterDeletion);
         toast({ title: `${selectedTaskIds.size} Tasks Deleted`, description: "The selected tasks have been removed." });
         setSelectedTaskIds(new Set()); // Clear selection
     };
@@ -933,7 +988,7 @@ function MeetingDetailSheet({ id, onClose, onNavigateToChat }: { id: string | nu
             return;
         }
 
-        await updateMeeting(meeting.id, { extractedTasks: initialTasks });
+        await syncMeetingTasks(initialTasks);
 
         toast({ title: "Tasks Reset", description: "The task list has been reset to its initial state." });
         setIsResetConfirmOpen(false);
@@ -953,7 +1008,7 @@ function MeetingDetailSheet({ id, onClose, onNavigateToChat }: { id: string | nu
       setIsEditingTitle(false);
     };
 
-    const handleConfirmSetDueDate = (date: Date | undefined) => {
+    const handleConfirmSetDueDate = async (date: Date | undefined) => {
         if (!meeting) return;
         const newDueDateISO = date ? date.toISOString() : null;
 
@@ -971,7 +1026,7 @@ function MeetingDetailSheet({ id, onClose, onNavigateToChat }: { id: string | nu
         };
 
         const newExtractedTasks = updateDueDatesRecursively(meeting.extractedTasks || []);
-        updateMeeting(meeting.id, { extractedTasks: newExtractedTasks });
+        await syncMeetingTasks(newExtractedTasks);
         toast({ title: "Due Dates Updated", description: `Due dates set for ${selectedTaskIds.size} task(s).` });
         setIsSetDueDateDialogOpen(false);
         setSelectedTaskIds(new Set());
@@ -1102,11 +1157,18 @@ function MeetingDetailSheet({ id, onClose, onNavigateToChat }: { id: string | nu
 
         const seenKeys = new Set<string>();
         const filteredPeople = peopleToAdd.filter((person) => {
+            if (isMeetingPersonBlocked(person)) return false;
             const personKey = getMeetingPersonKey(person);
             if (seenKeys.has(personKey)) return false;
             seenKeys.add(personKey);
 
             if (forceUnique) return true;
+            const fuzzyMatch = getBestPersonMatch(
+                { name: person.name, email: person.email },
+                people,
+                0.9
+            );
+            if (fuzzyMatch) return false;
             if (person.email && existingEmails.has(person.email.toLowerCase())) return false;
             if (existingNames.has(person.name.toLowerCase())) return false;
             return true;
@@ -1170,7 +1232,12 @@ function MeetingDetailSheet({ id, onClose, onNavigateToChat }: { id: string | nu
         }
         const selectedKeys = new Set(selectedPeopleKeys);
         const updatedAttendees = (meeting.attendees || []).filter((person) => !selectedKeys.has(getMeetingPersonKey(person)));
-        await updateMeeting(meeting.id, { attendees: updatedAttendees });
+        const updated = await updateMeeting(meeting.id, { attendees: updatedAttendees });
+        if (!updated) {
+            toast({ title: "Update Failed", description: "Could not remove people from this meeting.", variant: "destructive" });
+            return;
+        }
+        await refreshMeetings();
         setSelectedPeopleKeys(new Set());
         toast({ title: "People removed", description: `${selectedPeople.length} people removed from this meeting.` });
     };
@@ -1180,8 +1247,36 @@ function MeetingDetailSheet({ id, onClose, onNavigateToChat }: { id: string | nu
         setActivePerson(null);
     };
 
-    const attendees = useMemo(() => (meeting?.attendees || []).filter(p => p.role === 'attendee'), [meeting]);
-    const mentionedPeople = useMemo(() => (meeting?.attendees || []).filter(p => p.role === 'mentioned'), [meeting]);
+    const handleMatchExistingPerson = async ({ person, matchedPerson }: { person: Partial<Person>; matchedPerson: Person }) => {
+        if (!user || !meeting) return;
+        const aliases = new Set(matchedPerson.aliases || []);
+        if (person.name && person.name.toLowerCase() !== matchedPerson.name.toLowerCase()) {
+            aliases.add(person.name);
+        }
+        const sourceSessionIds = new Set(matchedPerson.sourceSessionIds || []);
+        sourceSessionIds.add(meeting.id);
+        const update: Partial<Person> = {
+            aliases: Array.from(aliases),
+            sourceSessionIds: Array.from(sourceSessionIds),
+            ...(matchedPerson.email ? {} : person.email ? { email: person.email } : {}),
+            ...(matchedPerson.title ? {} : person.title ? { title: person.title } : {}),
+            ...(matchedPerson.avatarUrl ? {} : person.avatarUrl ? { avatarUrl: person.avatarUrl } : {}),
+        };
+        await updatePersonInFirestore(user.uid, matchedPerson.id, update);
+        toast({
+            title: "Person matched",
+            description: `${person.name} is now linked to ${matchedPerson.name}.`,
+        });
+    };
+
+    const attendees = useMemo(
+        () => meetingPeople.filter((person) => person.role === "attendee"),
+        [meetingPeople]
+    );
+    const mentionedPeople = useMemo(
+        () => meetingPeople.filter((person) => person.role === "mentioned"),
+        [meetingPeople]
+    );
     
     const selectedTasks = useMemo(() => {
         if (!meeting) return [];
@@ -1239,7 +1334,7 @@ function MeetingDetailSheet({ id, onClose, onNavigateToChat }: { id: string | nu
                         <span>|</span>
                         <span>{meetingDurationMinutes ? `${meetingDurationMinutes} min` : "N/A"}</span>
                         <span>|</span>
-                        <span className="flex items-center gap-1"><Users className="h-3 w-3"/>{meeting.attendees?.length || 0}</span>
+                        <span className="flex items-center gap-1"><Users className="h-3 w-3"/>{meetingPeople.length}</span>
                     </div>
                     </SheetDescription>
                 </SheetHeader>
@@ -1312,7 +1407,7 @@ function MeetingDetailSheet({ id, onClose, onNavigateToChat }: { id: string | nu
                                         <DropdownMenuRadioGroup value={filterByPerson} onValueChange={setFilterByPerson}>
                                             <DropdownMenuRadioItem value="all">All</DropdownMenuRadioItem>
                                             <DropdownMenuRadioItem value="unassigned">Unassigned</DropdownMenuRadioItem>
-                                            {(meeting.attendees || []).map(p => (
+                                            {selectableMeetingPeople.map((p) => (
                                                 <DropdownMenuRadioItem key={p.name} value={p.name}>{p.name}</DropdownMenuRadioItem>
                                             ))}
                                         </DropdownMenuRadioGroup>
@@ -1392,7 +1487,7 @@ function MeetingDetailSheet({ id, onClose, onNavigateToChat }: { id: string | nu
                             {attendees.length > 0 && (
                                 <div className="space-y-2">
                                     <h4 className="text-sm font-semibold flex items-center gap-2"><Users className="h-4 w-4 text-primary"/> Meeting Attendees</h4>
-                                    {attendees.map((p, i) => (
+                                            {attendees.map((p, i) => (
                                         <PersonRow
                                             key={`att-${i}`}
                                             p={p}
@@ -1401,6 +1496,7 @@ function MeetingDetailSheet({ id, onClose, onNavigateToChat }: { id: string | nu
                                             onToggleSelection={(checked) => handleTogglePersonSelection(getMeetingPersonKey(p), checked)}
                                             onOpen={() => handleOpenPersonDetails(p, "attendee")}
                                             isInDirectory={Boolean(findExistingPerson(p))}
+                                            isBlocked={isMeetingPersonBlocked(p)}
                                         />
                                     ))}
                                 </div>
@@ -1417,6 +1513,7 @@ function MeetingDetailSheet({ id, onClose, onNavigateToChat }: { id: string | nu
                                             onToggleSelection={(checked) => handleTogglePersonSelection(getMeetingPersonKey(p), checked)}
                                             onOpen={() => handleOpenPersonDetails(p, "mentioned")}
                                             isInDirectory={Boolean(findExistingPerson(p))}
+                                            isBlocked={isMeetingPersonBlocked(p)}
                                         />
                                     ))}
                                 </div>
@@ -1581,7 +1678,8 @@ function MeetingDetailSheet({ id, onClose, onNavigateToChat }: { id: string | nu
         <PeopleDiscoveryDialog
             isOpen={isDiscoveryDialogOpen}
             onClose={handleDiscoveryDialogClose}
-            discoveredPeople={meeting?.attendees || []}
+            onMatch={handleMatchExistingPerson}
+            discoveredPeople={selectableMeetingPeople}
             existingPeople={people}
         />
         <SelectionViewDialog 
@@ -1598,7 +1696,7 @@ type FathomSyncRange = "today" | "this_week" | "last_week" | "this_month" | "all
 
 export default function MeetingsPageContent() {
   const { meetings, isLoadingMeetingHistory, updateMeeting, deleteMeeting, refreshMeetings } = useMeetingHistory();
-  const { createNewSession, setActiveSessionId } = useChatHistory();
+  const { sessions, createNewSession, setActiveSessionId } = useChatHistory();
   const { isFathomConnected } = useIntegrations();
   const [openId, setOpenId] = useState<string | null>(null);
   const { toast } = useToast();
@@ -1619,25 +1717,37 @@ export default function MeetingsPageContent() {
   }, [searchParams, router]);
 
   const handleChatNavigation = async (meeting: any) => {
-    if (meeting.chatSessionId) {
-      setActiveSessionId(meeting.chatSessionId);
+    const sessionFromMeeting = meeting.chatSessionId
+      ? sessions.find((session) => session.id === meeting.chatSessionId)
+      : undefined;
+    const sessionFromLookup = sessions.find(
+      (session) => session.sourceMeetingId === meeting.id
+    );
+    const existingSession = sessionFromMeeting || sessionFromLookup;
+
+    if (existingSession) {
+      if (meeting.chatSessionId !== existingSession.id) {
+        await updateMeeting(meeting.id, { chatSessionId: existingSession.id });
+      }
+      setActiveSessionId(existingSession.id);
+      router.push('/chat');
+      return;
+    }
+
+    toast({ title: 'Creating Chat Session...' });
+    const newSession = await createNewSession({
+      title: `Chat about "${meeting.title}"`,
+      sourceMeetingId: meeting.id,
+      initialTasks: meeting.extractedTasks,
+      initialPeople: meeting.attendees,
+    });
+
+    if (newSession) {
+      await updateMeeting(meeting.id, { chatSessionId: newSession.id });
+      setActiveSessionId(newSession.id);
       router.push('/chat');
     } else {
-      toast({ title: 'Creating Chat Session...' });
-      const newSession = await createNewSession({
-        title: `Chat about "${meeting.title}"`,
-        sourceMeetingId: meeting.id,
-        initialTasks: meeting.extractedTasks,
-        initialPeople: meeting.attendees,
-      });
-
-      if (newSession) {
-        await updateMeeting(meeting.id, { chatSessionId: newSession.id });
-        setActiveSessionId(newSession.id);
-        router.push('/chat');
-      } else {
-        toast({ title: 'Error', description: 'Could not create chat session.', variant: 'destructive' });
-      }
+      toast({ title: 'Error', description: 'Could not create chat session.', variant: 'destructive' });
     }
   };
 

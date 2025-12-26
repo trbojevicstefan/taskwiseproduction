@@ -28,8 +28,8 @@ import {
   type ExtractTasksFromMessageOutput,
   PersonSchema,
 } from './schemas';
+import { routeChatIntent } from './chat-intent-router-flow';
 
-export type { OrchestratorInput, OrchestratorOutput };
 
 type MeetingPerson = NonNullable<AnalyzeMeetingOutput['attendees']>[number];
 
@@ -66,6 +66,104 @@ const isLikelyTaskModification = (message: string): boolean => {
     return false;
   }
   return hasModification || (taskKeywords.test(normalized) && !isQuestion);
+};
+
+const STOP_WORDS = new Set([
+  "the",
+  "a",
+  "an",
+  "and",
+  "or",
+  "to",
+  "for",
+  "of",
+  "on",
+  "in",
+  "by",
+  "with",
+  "from",
+  "that",
+  "this",
+  "it",
+  "its",
+  "my",
+  "your",
+  "our",
+  "their",
+  "task",
+  "tasks",
+  "item",
+  "items",
+]);
+
+const flattenTasks = (tasks: TaskType[]): TaskType[] => {
+  const result: TaskType[] = [];
+  const walk = (items: TaskType[]) => {
+    items.forEach((task) => {
+      result.push(task);
+      if (task.subtasks) {
+        walk(task.subtasks);
+      }
+    });
+  };
+  walk(tasks);
+  return result;
+};
+
+const extractQueryTokens = (message: string): string[] =>
+  message
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .split(/\s+/)
+    .map((token) => token.trim())
+    .filter((token) => token.length > 2 && !STOP_WORDS.has(token));
+
+const scoreTaskMatch = (task: TaskType, tokens: string[]): number => {
+  if (!tokens.length) return 0;
+  const haystack = `${task.title} ${task.description || ""}`.toLowerCase();
+  const matched = tokens.filter((token) => haystack.includes(token));
+  return matched.length / tokens.length;
+};
+
+const findTaskMatches = (message: string, tasks: TaskType[]) => {
+  const tokens = extractQueryTokens(message);
+  const candidates = flattenTasks(tasks)
+    .map((task) => ({
+      task,
+      score: scoreTaskMatch(task, tokens),
+    }))
+    .filter((entry) => entry.score > 0)
+    .sort((a, b) => b.score - a.score);
+
+  return { tokens, candidates };
+};
+
+const removeTasksByIds = (tasks: TaskType[], ids: Set<string>): TaskType[] =>
+  tasks
+    .filter((task) => !ids.has(task.id))
+    .map((task) => ({
+      ...task,
+      subtasks: task.subtasks ? removeTasksByIds(task.subtasks, ids) : task.subtasks,
+    }));
+
+const isDeleteIntent = (message: string): boolean =>
+  /(delete|remove|archive)\b/i.test(message);
+
+const isConfirmDelete = (message: string): boolean =>
+  /(confirm delete|yes delete|delete it|go ahead delete|confirm removal)/i.test(message);
+
+const needsTargetTask = (message: string): boolean =>
+  /(update|change|edit|rename|assign|reassign|due|deadline|priority|move|merge|split|break down|simplify)/i.test(
+    message
+  );
+
+const isExplicitKnowledgeRequest = (message: string): boolean => {
+  const normalized = message.toLowerCase();
+  return (
+    /(transcript|meeting content|meeting details|transcript answer|summary|recap|key decisions|key moments|what did|who was|who attended|when was|how productive|productivity)/.test(
+      normalized
+    )
+  );
 };
 
 // --- TASK ID AND PATCHING LOGIC ---
@@ -180,6 +278,118 @@ export async function extractTasksFromChat(input: OrchestratorInput): Promise<Or
           meetingMetadata: analysisResult.meetingMetadata,
           sessionTitle: analysisResult.sessionTitle,
           chatResponseText: analysisResult.chatResponseText,
+      };
+  }
+
+  const hasTranscript = Boolean(sourceMeetingTranscript);
+  const hasTasks = existingTasks.length > 0;
+
+  if (hasTranscript && !selectedTasks?.length && !contextTaskTitle) {
+      if (isExplicitKnowledgeRequest(message)) {
+          const qaResult: TranscriptQAOutput = await answerFromTranscript({
+              transcript: sourceMeetingTranscript!,
+              question: message,
+              tasks: existingTasks,
+          });
+          return {
+              tasks: existingTasks,
+              chatResponseText: qaResult.answerText,
+              qaAnswer: qaResult,
+          };
+      }
+      const routed = await routeChatIntent({
+          message,
+          hasTranscript,
+          hasTasks,
+      });
+
+      if (routed.intent === "knowledge") {
+          const qaResult: TranscriptQAOutput = await answerFromTranscript({
+              transcript: sourceMeetingTranscript!,
+              question: message,
+              tasks: existingTasks,
+          });
+          return {
+              tasks: existingTasks,
+              chatResponseText: qaResult.answerText,
+              qaAnswer: qaResult,
+          };
+      }
+
+      if (routed.intent === "ambiguous") {
+          const clarification =
+            routed.clarifyingQuestion ||
+            "Do you want an answer from the transcript, or should I update the task list?";
+          return {
+              tasks: existingTasks,
+              chatResponseText: clarification,
+          };
+      }
+  }
+
+  if (hasTasks && needsTargetTask(message) && !selectedTasks?.length && !contextTaskTitle) {
+      const { tokens, candidates } = findTaskMatches(message, existingTasks);
+      if (!tokens.length) {
+          return {
+              tasks: existingTasks,
+              chatResponseText:
+                "Which task should I update? Please mention part of the task title.",
+          };
+      }
+      if (!candidates.length) {
+          return {
+              tasks: existingTasks,
+              chatResponseText:
+                "I couldn't find a matching task. Can you specify the task title?",
+          };
+      }
+      const topScore = candidates[0].score;
+      const topMatches = candidates.filter((entry) => entry.score >= topScore - 0.15);
+      if (topMatches.length > 1) {
+          const options = topMatches
+            .slice(0, 3)
+            .map((entry) => `"${entry.task.title}"`)
+            .join(", ");
+          return {
+              tasks: existingTasks,
+              chatResponseText: `I found multiple tasks that match. Which one did you mean: ${options}?`,
+          };
+      }
+  }
+
+  if (hasTasks && isDeleteIntent(message)) {
+      const { candidates } = findTaskMatches(message, existingTasks);
+      if (!candidates.length) {
+          return {
+              tasks: existingTasks,
+              chatResponseText:
+                "Which task should I delete? Please mention part of the task title.",
+          };
+      }
+
+      const topScore = candidates[0].score;
+      const topMatches = candidates.filter((entry) => entry.score >= topScore - 0.15);
+
+      if (topMatches.length > 1) {
+          const options = topMatches.slice(0, 3).map((entry) => `"${entry.task.title}"`).join(", ");
+          return {
+              tasks: existingTasks,
+              chatResponseText: `I found multiple tasks that match. Which one should I delete: ${options}?`,
+          };
+      }
+
+      const targetTask = topMatches[0].task;
+      if (!isConfirmDelete(message)) {
+          return {
+              tasks: existingTasks,
+              chatResponseText: `Confirm deletion of "${targetTask.title}"? Reply "confirm delete ${targetTask.title}".`,
+          };
+      }
+
+      const updatedTasks = removeTasksByIds(existingTasks, new Set([targetTask.id]));
+      return {
+          tasks: updatedTasks,
+          chatResponseText: `Deleted "${targetTask.title}".`,
       };
   }
 

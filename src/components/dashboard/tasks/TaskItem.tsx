@@ -113,6 +113,20 @@ const TaskItem: React.FC<TaskItemProps> = ({
         </div>
         
         <div className="flex flex-wrap items-center gap-2 ml-2 flex-shrink-0">
+             {task.priority && (
+                <Badge
+                  variant={
+                    task.priority === 'high'
+                      ? 'destructive'
+                      : task.priority === 'medium'
+                      ? 'secondary'
+                      : 'outline'
+                  }
+                  className="capitalize"
+                >
+                  {task.priority}
+                </Badge>
+            )}
              {task.assignee?.name && (
                 <TooltipProvider>
                   <Tooltip>
@@ -130,8 +144,6 @@ const TaskItem: React.FC<TaskItemProps> = ({
             )}
 
             <div className="flex items-center gap-2 opacity-0 group-hover/task-item:opacity-100 transition-opacity">
-                {task.priority && <Badge variant={task.priority === 'high' ? 'destructive' : task.priority === 'medium' ? 'secondary' : 'outline'} className="capitalize">{task.priority}</Badge>}
-
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
                     <Button variant="ghost" size="icon" className="h-7 w-7" disabled={isProcessing && !isCurrentlyBeingProcessed}>

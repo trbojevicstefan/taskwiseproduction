@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Copy, UserPlus, Trash2, X, Send, File, MessageCircle, Sheet, Bell, Slack, Ticket, CalendarDays, Brain, FileDown, Eye, Edit3 } from 'lucide-react';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
 import { SiGoogletasks, SiTrello } from '@icons-pack/react-simple-icons';
+import { cn } from '@/lib/utils';
 
 const GoogleTasksIcon = () => (
     <svg role="img" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" className="mr-2 h-4 w-4">
@@ -33,6 +34,8 @@ interface SelectionToolbarProps {
   isGoogleTasksConnected?: boolean;
   onPushToTrello?: () => void;
   isTrelloConnected?: boolean;
+  containerClassName?: string;
+  containerStyle?: React.CSSProperties;
 }
 
 const SelectionToolbar: React.FC<SelectionToolbarProps> = ({
@@ -52,6 +55,8 @@ const SelectionToolbar: React.FC<SelectionToolbarProps> = ({
   isGoogleTasksConnected,
   onPushToTrello,
   isTrelloConnected,
+  containerClassName,
+  containerStyle,
 }) => {
   const isOpen = selectedCount > 0;
   const [isMounted, setIsMounted] = React.useState(false);
@@ -69,7 +74,11 @@ const SelectionToolbar: React.FC<SelectionToolbarProps> = ({
           animate={{ y: 0, opacity: 1 }}
           exit={{ y: "100%", opacity: 0 }}
           transition={{ type: 'spring', stiffness: 300, damping: 30 }}
-          className="fixed bottom-0 left-0 right-0 z-50 flex justify-center p-4 pointer-events-none"
+          className={cn(
+            "fixed bottom-0 left-0 right-0 z-50 flex justify-center p-4 pointer-events-none",
+            containerClassName
+          )}
+          style={containerStyle}
         >
           <div className="flex items-center gap-2 p-2 rounded-full bg-background border shadow-2xl pointer-events-auto">
             <div className="flex items-center gap-3 pr-2">

@@ -7,6 +7,7 @@ import '@/ai/flows/extract-tasks-flow.ts';
 import '@/ai/flows/analyze-meeting-flow.ts';
 import '@/ai/flows/refine-tasks-flow.ts';
 import '@/ai/flows/transcript-qa-flow.ts';
+import '@/ai/flows/chat-intent-router-flow.ts';
 
 import '@/ai/flows/summarize-chat-session.ts';
 import '@/ai/flows/merge-tasks-flow.ts'; 

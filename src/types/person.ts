@@ -11,6 +11,7 @@ export interface Person {
   firefliesId?: string | null;
   phantomBusterId?: string | null;
   aliases?: string[]; 
+  isBlocked?: boolean | null;
   sourceSessionIds: string[]; // List of session IDs where this person was identified
   createdAt: any; // Firestore Timestamp
   lastSeenAt: any; // Firestore Timestamp

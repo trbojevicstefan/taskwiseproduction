@@ -29,9 +29,20 @@ interface ShareToSlackDialogProps {
   onClose: () => void;
   tasks: ExtractedTaskSchema[];
   sessionTitle: string;
+  defaultDestinationType?: 'channel' | 'person';
+  defaultUserId?: string | null;
+  defaultChannelId?: string | null;
 }
 
-export default function ShareToSlackDialog({ isOpen, onClose, tasks, sessionTitle }: ShareToSlackDialogProps) {
+export default function ShareToSlackDialog({
+  isOpen,
+  onClose,
+  tasks,
+  sessionTitle,
+  defaultDestinationType,
+  defaultUserId,
+  defaultChannelId,
+}: ShareToSlackDialogProps) {
   const [channels, setChannels] = useState<SlackChannel[]>([]);
   const [selectedChannel, setSelectedChannel] = useState<string | null>(null);
   const [users, setUsers] = useState<SlackUser[]>([]);
@@ -46,6 +57,15 @@ export default function ShareToSlackDialog({ isOpen, onClose, tasks, sessionTitl
 
   useEffect(() => {
     if (isOpen) {
+      if (defaultDestinationType) {
+        setDestinationType(defaultDestinationType);
+      }
+      if (defaultUserId) {
+        setSelectedUser(defaultUserId);
+      }
+      if (defaultChannelId) {
+        setSelectedChannel(defaultChannelId);
+      }
       const fetchChannels = async () => {
         setIsFetchingChannels(true);
         try {
@@ -57,7 +77,7 @@ export default function ShareToSlackDialog({ isOpen, onClose, tasks, sessionTitl
           const fetchedChannels = data.channels || [];
 
           setChannels(fetchedChannels);
-          if (fetchedChannels.length > 0) {
+          if (fetchedChannels.length > 0 && !defaultChannelId) {
             setSelectedChannel(fetchedChannels[0].id);
           }
         } catch (error: any) {
@@ -81,7 +101,7 @@ export default function ShareToSlackDialog({ isOpen, onClose, tasks, sessionTitl
           }
           const fetchedUsers = data.users || [];
           setUsers(fetchedUsers);
-          if (fetchedUsers.length > 0) {
+          if (fetchedUsers.length > 0 && !defaultUserId) {
             setSelectedUser(fetchedUsers[0].id);
           }
         } catch (error: any) {
@@ -98,7 +118,7 @@ export default function ShareToSlackDialog({ isOpen, onClose, tasks, sessionTitl
       fetchChannels();
       fetchUsers();
     }
-  }, [isOpen, toast]);
+  }, [isOpen, toast, defaultDestinationType, defaultUserId, defaultChannelId]);
 
   const handleShare = async () => {
     if (destinationType === "channel" && !selectedChannel) {

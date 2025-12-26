@@ -48,7 +48,19 @@ export const getPersonDetails = async (
     return await apiFetch<PersonWithTaskCount>(`/api/people/${personId}`);
   } catch (error) {
     console.error("Error fetching person details:", error);
-    return null;
+    try {
+      const people = await apiFetch<PersonWithTaskCount[]>("/api/people");
+      const match = people.find((person: any) => {
+        const idMatch = String(person.id) === personId;
+        const legacyMatch = person._id ? String(person._id) === personId : false;
+        const slackMatch = person.slackId ? person.slackId === personId : false;
+        return idMatch || legacyMatch || slackMatch;
+      });
+      return match || null;
+    } catch (fallbackError) {
+      console.error("Error fetching people fallback:", fallbackError);
+      return null;
+    }
   }
 };
 
@@ -61,6 +73,20 @@ export const updatePersonInFirestore = async (
     method: "PATCH",
     body: JSON.stringify(data),
   });
+};
+
+export const mergePeople = async (
+  sourceId: string,
+  targetId: string
+): Promise<PersonWithTaskCount | null> => {
+  const response = await apiFetch<{ person: PersonWithTaskCount }>(
+    "/api/people/merge",
+    {
+      method: "POST",
+      body: JSON.stringify({ sourceId, targetId }),
+    }
+  );
+  return response.person || null;
 };
 
 export const onTasksForPersonSnapshot = (
@@ -76,6 +102,7 @@ export const onTasksForPersonSnapshot = (
       if (active) callback(tasks);
     } catch (error) {
       console.error("Error fetching tasks for person:", error);
+      if (active) callback([]);
     }
   };
 
@@ -112,6 +139,7 @@ export function sanitizeTaskForFirestore(task: any): ExtractedTaskSchema {
     priority: task.priority || "medium",
     taskType: task.taskType === undefined ? null : task.taskType,
     dueAt: task.dueAt === undefined ? null : task.dueAt,
+    status: task.status === undefined ? "todo" : task.status,
     assignee: sanitizedAssignee,
     assigneeName: task.assigneeName === undefined ? null : task.assigneeName,
     sourceEvidence: task.sourceEvidence === undefined ? null : task.sourceEvidence,

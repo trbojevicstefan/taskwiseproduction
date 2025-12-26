@@ -19,7 +19,7 @@ interface MeetingHistoryContextType {
   refreshMeetings: () => Promise<void>;
   createNewMeeting: (meetingData: Omit<Meeting, 'id' | 'userId' | 'createdAt' | 'lastActivityAt'>) => Promise<Meeting | undefined>;
   getActiveMeeting: () => Meeting | undefined;
-  updateMeeting: (sessionId: string, updatedFields: Partial<Omit<Meeting, 'id' | 'userId' | 'createdAt' | 'lastActivityAt'>>) => Promise<void>;
+  updateMeeting: (sessionId: string, updatedFields: Partial<Omit<Meeting, 'id' | 'userId' | 'createdAt' | 'lastActivityAt'>>) => Promise<Meeting | null>;
   deleteMeeting: (sessionId: string) => Promise<void>;
 }
 
@@ -165,7 +165,7 @@ export const MeetingHistoryProvider = ({ children }: { children: ReactNode }) =>
   }, [user, toast]);
   
   const updateMeeting = useCallback(async (sessionId: string, updatedFields: Partial<Omit<Meeting, 'id' | 'userId' | 'createdAt' | 'lastActivityAt'>>) => {
-    if (!user?.uid) return;
+    if (!user?.uid) return null;
     try {
       const sanitizedFields = { ...updatedFields };
       if (sanitizedFields.extractedTasks) {
@@ -178,9 +178,11 @@ export const MeetingHistoryProvider = ({ children }: { children: ReactNode }) =>
         body: JSON.stringify(sanitizedFields),
       });
       setMeetings(prev => prev.map(meeting => meeting.id === updated.id ? updated : meeting));
+      return updated;
     } catch (error) {
       console.error(`Failed to update meeting ${sessionId} in database`, error);
       toast({ title: "Error", description: "Could not save meeting changes.", variant: "destructive" });
+      return null;
     }
   }, [user, toast]);
 

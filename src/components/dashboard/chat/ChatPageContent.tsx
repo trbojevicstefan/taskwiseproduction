@@ -7,11 +7,12 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import { Send, Loader2, PlusCircle, MoreVertical, Edit, Zap as SimplifyIcon, Share2, Info, Folder as FolderIcon, FolderOpen, ClipboardPaste, Users, UserPlus, ListChecks, Network, Video, MessageSquareHeart, GripVertical, FileText } from 'lucide-react';
+import { Send, Loader2, PlusCircle, MoreVertical, Edit, Zap as SimplifyIcon, Share2, Info, Folder as FolderIcon, FolderOpen, ClipboardPaste, Users, UserPlus, ListChecks, Network, Video, MessageSquareHeart, GripVertical, FileText, Quote, Undo2, Redo2 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { useAuth } from '@/contexts/AuthContext';
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { extractTasksFromChat, type OrchestratorInput, type OrchestratorOutput } from '@/ai/flows/extract-tasks';
+import { extractTasksFromChat } from '@/ai/flows/extract-tasks';
+import type { OrchestratorInput, OrchestratorOutput } from '@/ai/flows/schemas';
 import { simplifyTaskBranch } from '@/ai/flows/simplify-task-branch-flow';
 import { useToast } from "@/hooks/use-toast";
 import { useChatHistory } from '@/contexts/ChatHistoryContext';
@@ -32,6 +33,7 @@ import {
   DialogHeader,
   DialogTitle,
   DialogDescription,
+  DialogTrigger,
 } from '@/components/ui/dialog';
 import { Textarea } from '@/components/ui/textarea';
 import {
@@ -62,7 +64,9 @@ import {
   DropdownMenuSubContent,
 } from "@/components/ui/dropdown-menu";
 import { Logo } from '@/components/ui/logo';
-import { sanitizeTaskForFirestore, addPerson, onPeopleSnapshot } from '@/lib/data';
+import { sanitizeTaskForFirestore, addPerson, onPeopleSnapshot, updatePersonInFirestore } from '@/lib/data';
+import { extractTranscriptAttendees } from '@/lib/transcript-utils';
+import { getBestPersonMatch } from '@/lib/people-matching';
 import type { Person } from '@/types/person';
 import { shareTasksNative, formatTasksToText, copyTextToClipboard, exportTasksToCSV, exportTasksToMarkdown, exportTasksToPDF } from '@/lib/exportUtils';
 import AssignPersonDialog from '../planning/AssignPersonDialog';
@@ -73,6 +77,7 @@ import { useMeetingHistory } from '@/contexts/MeetingHistoryContext';
 import { usePlanningHistory } from '@/contexts/PlanningHistoryContext';
 import { processPastedContent } from '@/ai/flows/process-pasted-content';
 import Link from 'next/link';
+import { useRouter, useSearchParams } from 'next/navigation';
 import SetDueDateDialog from '../planning/SetDueDateDialog';
 import SelectionToolbar from '../common/SelectionToolbar';
 import SelectionViewDialog from '../explore/SelectionViewDialog';
@@ -158,7 +163,7 @@ const TRANSCRIPT_TIMESTAMP_REGEX =
   /(^|\n)\s*(?:\[\d{1,2}:\d{2}(?::\d{2})?\]|\d{1,2}:\d{2}(?::\d{2})?)\b/m;
 
 const isTranscriptLike = (text: string): boolean =>
-  TRANSCRIPT_TIMESTAMP_REGEX.test(text);
+  TRANSCRIPT_TIMESTAMP_REGEX.test(text) || extractTranscriptAttendees(text).length >= 2;
 
 
 // Helper to convert nulls to undefineds for AI schema compatibility
@@ -203,24 +208,52 @@ const useTypingEffect = (fullText: string, speed = 50, onFinished?: () => void) 
 
 type MessageSource = NonNullable<ChatMessageType['sources']>[number];
 
-const MessageSources: React.FC<{ sources?: ChatMessageType['sources'] }> = ({ sources }) => {
+const MessageSourcesButton: React.FC<{ sources?: ChatMessageType['sources'] }> = ({ sources }) => {
   if (!sources || sources.length === 0) {
     return null;
   }
   return (
-    <div className="mt-2 ml-12 border-l-2 border-primary/20 pl-4 space-y-2">
-      {sources.map((source: MessageSource, index: number) => (
-        <blockquote key={index} className="p-2 rounded-md bg-muted/50 border border-border/50 text-xs text-muted-foreground">
-          <span className="font-mono text-primary mr-2">[{source.timestamp}]</span>
-          "{source.snippet}"
-        </blockquote>
-      ))}
-    </div>
+    <Dialog>
+      <DialogTrigger asChild>
+        <Button variant="ghost" size="sm" className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground">
+          <Quote className="mr-2 h-3.5 w-3.5" />
+          Sources ({sources.length})
+        </Button>
+      </DialogTrigger>
+      <DialogContent className="max-w-2xl">
+        <DialogHeader>
+          <DialogTitle>Transcript Sources</DialogTitle>
+          <DialogDescription>Evidence pulled from the meeting transcript.</DialogDescription>
+        </DialogHeader>
+        <ScrollArea className="max-h-[60vh] pr-2">
+          <div className="space-y-3">
+            {sources.map((source: MessageSource, index: number) => (
+              <div key={index} className="rounded-lg border border-border/60 bg-muted/40 p-3 text-sm text-muted-foreground">
+                <div className="mb-2 flex items-center gap-2 text-xs font-semibold text-primary">
+                  <span className="rounded-full bg-primary/10 px-2 py-0.5 font-mono">
+                    {source.timestamp}
+                  </span>
+                  Transcript
+                </div>
+                <p className="text-sm text-foreground/90">"{source.snippet}"</p>
+              </div>
+            ))}
+          </div>
+        </ScrollArea>
+      </DialogContent>
+    </Dialog>
   );
 };
 
 
-const MessageDisplay: React.FC<{ message: ChatMessageType; onShowFullText: (text: string) => void; onAnimationComplete: (id: string) => void; hasAnimated: boolean; }> = ({ message, onShowFullText, onAnimationComplete, hasAnimated }) => {
+const MessageDisplay: React.FC<{
+  message: ChatMessageType;
+  onShowFullText: (text: string) => void;
+  onAnimationComplete: (id: string) => void;
+  hasAnimated: boolean;
+  onConfirmDelete: (taskTitle: string) => void;
+  onCancelDelete: () => void;
+}> = ({ message, onShowFullText, onAnimationComplete, hasAnimated, onConfirmDelete, onCancelDelete }) => {
   const isTyping = message.id === 'ai-typing-indicator';
   
   const handleAnimationFinish = useCallback(() => {
@@ -243,6 +276,11 @@ const MessageDisplay: React.FC<{ message: ChatMessageType; onShowFullText: (text
   const contentPreview = message.attachedContent
     ? message.attachedContent.substring(0, 240) + (message.attachedContent.length > 240 ? '...' : '')
     : null;
+
+  const confirmDeleteMatch =
+    message.sender === 'ai'
+      ? message.text.match(/Confirm deletion of\s+\"(.+?)\"/i)
+      : null;
 
   return (
     <>
@@ -278,16 +316,42 @@ const MessageDisplay: React.FC<{ message: ChatMessageType; onShowFullText: (text
             )}
           >
             <div className="text-sm font-body leading-relaxed whitespace-pre-wrap" dangerouslySetInnerHTML={{ __html: displayedText.replace(/\n/g, '<br />') }} />
+            {message.sender === 'ai' && (
+              <div className="mt-2 flex items-center gap-2">
+                <MessageSourcesButton sources={message.sources} />
+                {confirmDeleteMatch && (
+                  <div className="flex items-center gap-2">
+                    <Button
+                      size="sm"
+                      variant="destructive"
+                      className="h-7 px-2 text-xs"
+                      onClick={() => onConfirmDelete(confirmDeleteMatch[1])}
+                    >
+                      Confirm
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-7 px-2 text-xs"
+                      onClick={onCancelDelete}
+                    >
+                      Cancel
+                    </Button>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         )}
       </div>
-      {message.sender === 'ai' && <MessageSources sources={message.sources} />}
     </>
   );
 };
 
 
 export default function ChatPageContent() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const { user } = useAuth();
   const { toast } = useToast();
   const {
@@ -313,6 +377,8 @@ export default function ChatPageContent() {
   const [isSendingMessage, setIsSendingMessage] = useState(false);
   const [suggestedTasks, setSuggestedTasks] = useState<ExtractedTaskSchema[]>([]);
   const [selectedTaskIds, setSelectedTaskIds] = useState<Set<string>>(new Set());
+  const [undoStack, setUndoStack] = useState<ExtractedTaskSchema[][]>([]);
+  const [redoStack, setRedoStack] = useState<ExtractedTaskSchema[][]>([]);
   
   const [isProcessingAiAction, setIsProcessingAiAction] = useState(false);
   
@@ -354,6 +420,34 @@ export default function ChatPageContent() {
 
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const layoutRef = useRef<HTMLDivElement>(null);
+
+  const chatIdParam = searchParams.get('id');
+  const searchParamsString = searchParams.toString();
+
+  useEffect(() => {
+    if (!chatIdParam || chatIdParam === activeSessionId) return;
+    const exists = sessions.some((session) => session.id === chatIdParam);
+    if (exists) {
+      setActiveSessionId(chatIdParam);
+    }
+  }, [chatIdParam, activeSessionId, sessions, setActiveSessionId]);
+
+  useEffect(() => {
+    if (activeSessionId) {
+      if (chatIdParam !== activeSessionId) {
+        const params = new URLSearchParams(searchParamsString);
+        params.set('id', activeSessionId);
+        router.replace(`/chat?${params.toString()}`);
+      }
+      return;
+    }
+    if (chatIdParam) {
+      const params = new URLSearchParams(searchParamsString);
+      params.delete('id');
+      const query = params.toString();
+      router.replace(query ? `/chat?${query}` : "/chat");
+    }
+  }, [activeSessionId, chatIdParam, searchParamsString, router]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const currentMessages = getActiveSession()?.messages || [];
   const isTabletOrMobile = useIsMobile();
@@ -462,34 +556,21 @@ export default function ChatPageContent() {
   const requestedDetailLevel = user?.taskGranularityPreference ?? 'medium';
   const getMeetingForSession = useCallback(
     (session?: { sourceMeetingId?: string | null; id?: string | null }) => {
-      if (!session) return undefined;
-      return (
-        meetings.find((meeting) => meeting.id === session.sourceMeetingId) ||
-        meetings.find((meeting) => meeting.chatSessionId === session.id)
-      );
+      if (session?.sourceMeetingId) {
+        const bySource = meetings.find((meeting) => meeting.id === session.sourceMeetingId);
+        if (bySource) return bySource;
+      }
+      if (session?.id) {
+        const byChatId = meetings.find((meeting) => meeting.chatSessionId === session.id);
+        if (byChatId) return byChatId;
+      }
+      if (activeSessionId) {
+        return meetings.find((meeting) => meeting.chatSessionId === activeSessionId);
+      }
+      return undefined;
     },
-    [meetings]
+    [meetings, activeSessionId]
   );
-
-  useEffect(() => {
-    const currentActiveSession = getActiveSession();
-    if (currentActiveSession) {
-      setSuggestedTasks(currentActiveSession.suggestedTasks || []);
-       setEditableTitle(currentActiveSession.title);
-    } else {
-      setSuggestedTasks([]);
-      setEditableTitle("New Chat");
-    }
-    setSelectedTaskIds(new Set());
-    setIsEditingTitle(false);
-    const shouldShow = (currentActiveSession?.suggestedTasks?.length ?? 0) > 0;
-    setActiveSidePanel((prev) => {
-      if (isTabletOrMobile) return null;
-      if (shouldShow) return prev ?? 'tasks';
-      return prev === 'people' ? 'people' : null;
-    });
-  }, [activeSessionId, getActiveSession, isTabletOrMobile]);
-
 
   useEffect(() => {
     if (selectedTaskIds.size > 0) {
@@ -500,6 +581,79 @@ export default function ChatPageContent() {
       setShowCopyHint(false);
     }
   }, [selectedTaskIds, setShowCopyHint]);
+
+  const applyTaskUpdate = useCallback(
+    (
+      nextTasks: ExtractedTaskSchema[],
+      options: { skipHistory?: boolean; skipPersist?: boolean } = {}
+    ) => {
+      const sanitized = nextTasks.map((task) => sanitizeTaskForFirestore(task));
+      setSuggestedTasks((prev) => {
+        if (!options.skipHistory) {
+          setUndoStack((stack) => [...stack, prev]);
+          setRedoStack([]);
+        }
+        return sanitized;
+      });
+      if (!options.skipPersist && activeSessionId) {
+        updateActiveSessionSuggestions(sanitized);
+      }
+      if (!options.skipPersist) {
+        const meetingId = getActiveSession()?.sourceMeetingId;
+        if (meetingId) {
+          updateMeeting(meetingId, { extractedTasks: sanitized });
+        }
+      }
+    },
+    [activeSessionId, updateActiveSessionSuggestions, getActiveSession, updateMeeting]
+  );
+
+  const resetTaskHistory = useCallback((tasks: ExtractedTaskSchema[]) => {
+    setUndoStack([]);
+    setRedoStack([]);
+    setSuggestedTasks(tasks);
+  }, []);
+
+  useEffect(() => {
+    const currentActiveSession = getActiveSession();
+    if (currentActiveSession) {
+      resetTaskHistory(currentActiveSession.suggestedTasks || []);
+      setEditableTitle(currentActiveSession.title);
+    } else {
+      resetTaskHistory([]);
+      setEditableTitle("New Chat");
+    }
+    setSelectedTaskIds(new Set());
+    setIsEditingTitle(false);
+    const shouldShow = (currentActiveSession?.suggestedTasks?.length ?? 0) > 0;
+    setActiveSidePanel((prev) => {
+      if (isTabletOrMobile) return null;
+      if (shouldShow) return prev ?? 'tasks';
+      return prev === 'people' ? 'people' : null;
+    });
+  }, [activeSessionId, getActiveSession, isTabletOrMobile, resetTaskHistory]);
+
+  const handleUndo = useCallback(() => {
+    if (undoStack.length === 0) return;
+    const previous = undoStack[undoStack.length - 1];
+    setUndoStack((stack) => stack.slice(0, -1));
+    setRedoStack((stack) => [suggestedTasks, ...stack]);
+    setSuggestedTasks(previous);
+    if (activeSessionId) {
+      updateActiveSessionSuggestions(previous);
+    }
+  }, [undoStack, suggestedTasks, activeSessionId, updateActiveSessionSuggestions]);
+
+  const handleRedo = useCallback(() => {
+    if (redoStack.length === 0) return;
+    const next = redoStack[0];
+    setRedoStack((stack) => stack.slice(1));
+    setUndoStack((stack) => [...stack, suggestedTasks]);
+    setSuggestedTasks(next);
+    if (activeSessionId) {
+      updateActiveSessionSuggestions(next);
+    }
+  }, [redoStack, suggestedTasks, activeSessionId, updateActiveSessionSuggestions]);
 
   const getAncestors = (taskId: string, allTasks: ExtractedTaskSchema[]): string[] => {
     const path: string[] = [];
@@ -592,6 +746,7 @@ export default function ChatPageContent() {
   };
 
   const selectedTasks = useMemo(() => getSelectedTasks(), [selectedTaskIds, suggestedTasks]);
+  const hasSelection = selectedTaskIds.size > 0;
   
   const handleCopySelected = async () => {
     if (selectedTaskIds.size === 0) {
@@ -704,8 +859,7 @@ export default function ChatPageContent() {
     });
 
     if (briefsApplied > 0) {
-      setSuggestedTasks(updatedTasks);
-      updateActiveSessionSuggestions(updatedTasks);
+      applyTaskUpdate(updatedTasks);
       if (taskForDetailView) {
         const refreshedTask = findTaskById(updatedTasks, taskForDetailView.id);
         if (refreshedTask) {
@@ -841,18 +995,25 @@ export default function ChatPageContent() {
     };
 
     const tasksWithAssignees = assignRecursively(suggestedTasks);
-    setSuggestedTasks(tasksWithAssignees);
-    updateActiveSessionSuggestions(tasksWithAssignees);
+    applyTaskUpdate(tasksWithAssignees);
   };
 
   const handleSendMessage = async () => {
     if (inputValue.trim() === '' && selectedTaskIds.size === 0) return;
 
     const currentInput = inputValue;
+    const promptText =
+      currentInput.trim().length === 0 && selectedTaskIds.size > 0
+        ? "Work with the selected tasks only."
+        : currentInput;
     const shouldAttach = currentInput.trim().length > 500;
     const userMessage: ChatMessageType = {
         id: `msg-${Date.now()}`,
-        text: shouldAttach ? "Pasted text" : currentInput,
+        text: shouldAttach
+          ? "Pasted text"
+          : promptText.trim().length === 0
+            ? "Selected tasks"
+            : currentInput,
         attachedContent: shouldAttach ? currentInput : null,
         sender: 'user',
         timestamp: Date.now(),
@@ -865,8 +1026,8 @@ export default function ChatPageContent() {
     if (!activeSessionId) {
         setIsSendingMessage(true);
         try {
-            if (isTranscriptLike(currentInput)) {
-                const result = await processPastedContent({ pastedText: currentInput });
+            if (isTranscriptLike(promptText)) {
+                const result = await processPastedContent({ pastedText: promptText });
                 if (result.isMeeting && result.meeting) {
                     const newMeeting = await createNewMeeting(result.meeting);
                     if (newMeeting) {
@@ -881,7 +1042,7 @@ export default function ChatPageContent() {
                             await updateMeeting(newMeeting.id, { chatSessionId: newChat.id, planningSessionId: newPlan.id });
                         }
                         if (newChat?.suggestedTasks && newChat.suggestedTasks.length > 0) {
-                            setSuggestedTasks(newChat.suggestedTasks);
+                            applyTaskUpdate(newChat.suggestedTasks, { skipHistory: true, skipPersist: true });
                         }
                         if (newChat?.title) {
                             setEditableTitle(newChat.title);
@@ -890,22 +1051,22 @@ export default function ChatPageContent() {
                 } else {
                     const newSession = await createNewSession({ initialMessage: userMessage, title: "New Chat", initialTasks: result.tasks, initialPeople: result.people, allTaskLevels: result.allTaskLevels });
                     if (newSession?.suggestedTasks && newSession.suggestedTasks.length > 0) {
-                        setSuggestedTasks(newSession.suggestedTasks);
+                        applyTaskUpdate(newSession.suggestedTasks, { skipHistory: true, skipPersist: true });
                     }
                     if (newSession?.title) {
                         setEditableTitle(newSession.title);
                     }
-                    setPendingPrompt(currentInput);
+                    setPendingPrompt(promptText);
                 }
             } else {
                 const newSession = await createNewSession({ initialMessage: userMessage, title: "New Chat" });
                 if (newSession?.suggestedTasks && newSession.suggestedTasks.length > 0) {
-                    setSuggestedTasks(newSession.suggestedTasks);
+                    applyTaskUpdate(newSession.suggestedTasks, { skipHistory: true, skipPersist: true });
                 }
                 if (newSession?.title) {
                     setEditableTitle(newSession.title);
                 }
-                setPendingPrompt(currentInput);
+                setPendingPrompt(promptText);
             }
         } catch (error) {
             console.error("Error processing initial message:", error);
@@ -915,7 +1076,7 @@ export default function ChatPageContent() {
         }
     } else {
         await addMessageToActiveSession(userMessage);
-        await processAIResponse(currentInput, false);
+        await processAIResponse(promptText, false);
       }
     };
   
@@ -944,8 +1105,17 @@ export default function ChatPageContent() {
         const currentTasks = currentSession?.suggestedTasks || [];
         const sanitizedCurrentTasks = sanitizeTasksForAI(currentTasks);
         const selectedAITasks = sanitizeTasksForAI(getSelectedTasks());
-          const sourceMeeting = getMeetingForSession(currentSession);
-          const sourceTranscript = getMeetingTranscript(sourceMeeting);
+        const sourceMeeting = getMeetingForSession(currentSession);
+        const sourceTranscript = getMeetingTranscript(sourceMeeting);
+
+        if (activeSessionId && currentSession && sourceMeeting) {
+          if (!currentSession.sourceMeetingId || currentSession.sourceMeetingId !== sourceMeeting.id) {
+            await updateSession(activeSessionId, {
+              sourceMeetingId: sourceMeeting.id,
+              people: currentSession.people?.length ? currentSession.people : sourceMeeting.attendees || [],
+            });
+          }
+        }
 
             const orchestratorInput: OrchestratorInput = {
               message: promptText,
@@ -973,17 +1143,17 @@ export default function ChatPageContent() {
             } else {
                 if (result.tasks) {
                     const newTasks = result.tasks.map((t: ExtractedTaskSchema) => sanitizeTaskForFirestore(t as ExtractedTaskSchema));
-                    setSuggestedTasks(newTasks);
-                    updateActiveSessionSuggestions(newTasks);
+                    applyTaskUpdate(newTasks);
                 }
                 if (result.sessionTitle) {
                     updateSessionTitle(activeSessionId, result.sessionTitle);
                 }
                 if (result.people && result.people.length > 0) {
+                    const filteredPeople = result.people.filter((person: { name: string; email?: string | null }) => !isPersonBlocked(person));
                     const existingPeopleNames = new Set((currentSession?.people || []).map((person: { name: string }) => person.name));
-                    const newPeopleDiscovered = result.people.filter((person: { name: string }) => !existingPeopleNames.has(person.name));
+                    const newPeopleDiscovered = filteredPeople.filter((person: { name: string }) => !existingPeopleNames.has(person.name));
                     if (newPeopleDiscovered.length > 0) {
-                        await updateSession(activeSessionId, { people: result.people });
+                        await updateSession(activeSessionId, { people: filteredPeople });
                         const hasSeenPopup = sessionStorage.getItem(`seen-people-popup-${activeSessionId}`);
                         if (!hasSeenPopup) {
                             setIsDiscoveryDialogOpen(true);
@@ -1030,10 +1200,70 @@ export default function ChatPageContent() {
     setPendingPrompt(null);
   }, [pendingPrompt, activeSessionId]);
 
+  const handleSuggestedQuestion = useCallback(
+    async (question: string) => {
+      if (!activeSessionId) {
+        setInputValue(question);
+        return;
+      }
+      const userMessage: ChatMessageType = {
+        id: `msg-${Date.now()}`,
+        text: question,
+        sender: 'user',
+        timestamp: Date.now(),
+        avatar: userAvatar,
+        name: userName,
+      };
+      await addMessageToActiveSession(userMessage);
+      await processAIResponse(question, false);
+    },
+    [activeSessionId, addMessageToActiveSession, processAIResponse, userAvatar, userName]
+  );
+
+  const handleConfirmDeleteFromChat = useCallback(
+    async (taskTitle: string) => {
+      const confirmation = `confirm delete ${taskTitle}`;
+      if (!activeSessionId) {
+        setInputValue(confirmation);
+        return;
+      }
+      const userMessage: ChatMessageType = {
+        id: `msg-${Date.now()}`,
+        text: confirmation,
+        sender: 'user',
+        timestamp: Date.now(),
+        avatar: userAvatar,
+        name: userName,
+      };
+      await addMessageToActiveSession(userMessage);
+      await processAIResponse(confirmation, false);
+    },
+    [activeSessionId, addMessageToActiveSession, processAIResponse, userAvatar, userName]
+  );
+
+  const handleCancelDeleteFromChat = useCallback(async () => {
+    if (!activeSessionId) return;
+    await addMessageToActiveSession({
+      id: `msg-${Date.now()}`,
+      text: "Cancel deletion.",
+      sender: 'user',
+      timestamp: Date.now(),
+      avatar: userAvatar,
+      name: userName,
+    });
+    await addMessageToActiveSession({
+      id: `ai-msg-${Date.now()}`,
+      text: "Okay, I won't delete anything.",
+      sender: 'ai',
+      timestamp: Date.now(),
+      name: aiName,
+    });
+  }, [activeSessionId, addMessageToActiveSession, userAvatar, userName, aiName]);
+
   
   const dismissSuggestion = (taskId: string) => {
     removeSuggestionFromActiveSession(taskId);
-    setSuggestedTasks(prev => prev.filter(task => task.id !== taskId));
+    applyTaskUpdate(suggestedTasks.filter(task => task.id !== taskId), { skipPersist: true });
     setSelectedTaskIds(prev => {
       const newSet = new Set(prev);
       newSet.delete(taskId);
@@ -1061,8 +1291,7 @@ export default function ChatPageContent() {
           sourceMeetingTranscript: transcript,
         });
       
-      setSuggestedTasks(result.tasks.map((t: ExtractedTaskSchema) => sanitizeTaskForFirestore(t as ExtractedTaskSchema)));
-      updateActiveSessionSuggestions(result.tasks as ExtractedTaskSchema[]);
+      applyTaskUpdate(result.tasks.map((t: ExtractedTaskSchema) => sanitizeTaskForFirestore(t as ExtractedTaskSchema)));
       toast({ title: "Sub-tasks Added", description: `Sub-tasks added under "${taskToBreakDown.title}".` });
 
     } catch (error) {
@@ -1092,8 +1321,7 @@ export default function ChatPageContent() {
         });
 
         const newTasks = result.tasks.map((t: ExtractedTaskSchema) => sanitizeTaskForFirestore(t as ExtractedTaskSchema));
-        setSuggestedTasks(newTasks);
-        updateActiveSessionSuggestions(newTasks);
+        applyTaskUpdate(newTasks);
         
     } catch (error) {
       console.error("Error simplifying task:", error);
@@ -1124,8 +1352,7 @@ export default function ChatPageContent() {
       return findAndUpdate(panelTask);
     });
 
-    setSuggestedTasks(newPanelSuggestions);
-    updateActiveSessionSuggestions(newPanelSuggestions);
+    applyTaskUpdate(newPanelSuggestions);
     if (options?.close !== false) {
       setIsTaskDetailDialogVisible(false);
     }
@@ -1330,8 +1557,7 @@ export default function ChatPageContent() {
     };
   
     const newExtractedTasks = updateAssigneeRecursively(suggestedTasks);
-    setSuggestedTasks(newExtractedTasks);
-    updateActiveSessionSuggestions(newExtractedTasks);
+    applyTaskUpdate(newExtractedTasks);
     
     toast({ title: "Tasks Assigned", description: `${selectedTaskIds.size} task branch(es) assigned to ${person.name}.` });
     setIsAssignPersonDialogOpen(false);
@@ -1368,10 +1594,7 @@ export default function ChatPageContent() {
     
     const newExtractedTasks = updateDueDatesRecursively(suggestedTasks);
 
-    setSuggestedTasks(newExtractedTasks);
-    if (activeSessionId) {
-        updateActiveSessionSuggestions(newExtractedTasks);
-    }
+    applyTaskUpdate(newExtractedTasks);
     toast({ title: "Due Dates Updated", description: `Due dates set for ${selectedTaskIds.size} task(s).`});
     setIsSetDueDateDialogOpen(false);
     setRadialMenuState({ open: false, x: 0, y: 0 });
@@ -1425,9 +1648,6 @@ export default function ChatPageContent() {
   const currentSession = getActiveSession();
   const currentSessionTitle = currentSession?.title || "New Chat";
   const currentFolderId = currentSession?.folderId;
-  const currentSessionPeople = currentSession?.people || [];
-  const sourceMeeting = getMeetingForSession(currentSession);
-  const sourceTranscript = getMeetingTranscript(sourceMeeting);
 
   const peopleByName = useMemo(() => {
     return new Map(people.map((person) => [person.name.toLowerCase(), person]));
@@ -1441,6 +1661,36 @@ export default function ChatPageContent() {
     );
   }, [people]);
 
+  const blockedPeopleByName = useMemo(() => {
+    return new Set(people.filter((person) => person.isBlocked).map((person) => person.name.toLowerCase()));
+  }, [people]);
+
+  const blockedPeopleByEmail = useMemo(() => {
+    return new Set(
+      people
+        .filter((person) => person.isBlocked && person.email)
+        .map((person) => person.email!.toLowerCase())
+    );
+  }, [people]);
+
+  const isPersonBlocked = useCallback(
+    (person: { name: string; email?: string | null }) => {
+      const nameKey = person.name?.toLowerCase();
+      const emailKey = person.email?.toLowerCase();
+      if (nameKey && blockedPeopleByName.has(nameKey)) return true;
+      if (emailKey && blockedPeopleByEmail.has(emailKey)) return true;
+      return false;
+    },
+    [blockedPeopleByEmail, blockedPeopleByName]
+  );
+
+  const currentSessionPeopleRaw = currentSession?.people || [];
+  const currentSessionPeople = currentSessionPeopleRaw.filter(
+    (person) => !isPersonBlocked(person)
+  );
+  const sourceMeeting = getMeetingForSession(currentSession);
+  const sourceTranscript = getMeetingTranscript(sourceMeeting);
+
   const findExistingPerson = useCallback((person: { name: string; email?: string | null }) => {
     if (person.email) {
       const byEmail = peopleByEmail.get(person.email.toLowerCase());
@@ -1449,9 +1699,30 @@ export default function ChatPageContent() {
     return peopleByName.get(person.name.toLowerCase()) || null;
   }, [peopleByEmail, peopleByName]);
 
+  const suggestedQuestionItems = useMemo(() => {
+    if (!sourceMeeting) return [];
+    return [
+      { label: "Summary", prompt: "Summarize this meeting in 3 bullets." },
+      { label: "Key decisions", prompt: "What were the key decisions made in this meeting?" },
+      { label: "Action items", prompt: "List the action items and who owns them." },
+      { label: "Productivity", prompt: "How productive was this meeting? Highlight blockers or risks." },
+    ];
+  }, [sourceMeeting]);
+
   const handleAddPersonFromPanel = async (person: { name: string; email?: string | null; title?: string | null }) => {
     if (!user || !activeSessionId) return;
     try {
+      const existing =
+        findExistingPerson(person) ||
+        getBestPersonMatch(person, people, 0.9)?.person ||
+        null;
+      if (existing) {
+        toast({
+          title: "Already in your directory",
+          description: `${existing.name} is already saved.`,
+        });
+        return;
+      }
       await addPerson(user.uid, {
         name: person.name,
         email: person.email ?? null,
@@ -1462,6 +1733,36 @@ export default function ChatPageContent() {
       toast({ title: "Error", description: "Could not add person.", variant: "destructive" });
     }
   };
+
+  const handleMatchExistingPerson = async ({ person, matchedPerson }: { person: Partial<Person>; matchedPerson: Person }) => {
+    if (!user) return;
+    const sessionId = activeSessionId || sourceMeeting?.id || "chat";
+    const aliases = new Set(matchedPerson.aliases || []);
+    if (person.name && person.name.toLowerCase() !== matchedPerson.name.toLowerCase()) {
+      aliases.add(person.name);
+    }
+    const sourceSessionIds = new Set(matchedPerson.sourceSessionIds || []);
+    if (sessionId) sourceSessionIds.add(sessionId);
+    const update: Partial<Person> = {
+      aliases: Array.from(aliases),
+      sourceSessionIds: Array.from(sourceSessionIds),
+      ...(matchedPerson.email ? {} : person.email ? { email: person.email } : {}),
+      ...(matchedPerson.title ? {} : person.title ? { title: person.title } : {}),
+      ...(matchedPerson.avatarUrl ? {} : person.avatarUrl ? { avatarUrl: person.avatarUrl } : {}),
+    };
+    await updatePersonInFirestore(user.uid, matchedPerson.id, update);
+    toast({
+      title: "Person matched",
+      description: `${person.name} is now linked to ${matchedPerson.name}.`,
+    });
+  };
+
+  const handleOpenPersonProfile = useCallback(
+    (person: Person) => {
+      router.push(`/people/${person.id}`);
+    },
+    [router]
+  );
   
   const handleEditSelected = () => {
     if (selectedTaskIds.size === 0) return;
@@ -1809,9 +2110,9 @@ export default function ChatPageContent() {
               </div>
           </DashboardHeader>
 
-          <div className="flex-1 flex min-h-0 relative gap-4 px-4 pb-4" ref={layoutRef}>
+          <div className="flex-1 flex min-h-0 relative gap-4 px-4 pb-4 pt-4" ref={layoutRef}>
             <div className="flex-1 flex flex-col bg-gradient-to-br from-background/90 via-background/70 to-background/40 border border-border/50 rounded-3xl shadow-[0_20px_60px_-40px_rgba(0,0,0,0.7)] backdrop-blur-xl overflow-hidden">
-              <ScrollArea className="flex-1" ref={scrollAreaRef}>
+              <ScrollArea className={cn("flex-1", hasSelection && "pb-24")} ref={scrollAreaRef}>
                   <div className="p-6 md:p-8 space-y-8 max-w-3xl mx-auto w-full">
                     {currentMessages.length === 0 && (
                       <Alert className="max-w-2xl mx-auto my-10 border-dashed bg-background/60 backdrop-blur-md rounded-2xl shadow-[0_16px_40px_-30px_rgba(0,0,0,0.6)]">
@@ -1823,6 +2124,93 @@ export default function ChatPageContent() {
                           <strong className="text-primary">Pro Tip:</strong> You can paste content from anywhere in the app using <kbd className="px-1.5 py-0.5 border rounded bg-muted font-mono text-xs">Ctrl+V</kbd> to get started.
                         </AlertDescription>
                       </Alert>
+                    )}
+                    {sourceMeeting && currentSessionPeople.length > 0 && (
+                      <div className="rounded-2xl border border-border/60 bg-background/70 p-4 shadow-[0_16px_40px_-32px_rgba(0,0,0,0.6)]">
+                        <div className="mb-3 flex items-center justify-between">
+                          <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                            People in this meeting
+                          </div>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-7"
+                            onClick={() => setIsDiscoveryDialogOpen(true)}
+                          >
+                            Manage
+                          </Button>
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                          {currentSessionPeople.map((person, index) => {
+                            const existingPerson = findExistingPerson(person);
+                            const assignedCount = countTasksRecursive(
+                              filterTasksByAssignee(suggestedTasks, person.name)
+                            );
+                            return (
+                              <DropdownMenu key={`${person.name}-${index}`}>
+                                <DropdownMenuTrigger asChild>
+                                  <button
+                                    className="flex items-center gap-2 rounded-full border border-border/50 bg-background/80 px-3 py-1.5 text-xs font-medium text-foreground shadow-sm transition hover:border-primary/40 hover:bg-background"
+                                    type="button"
+                                  >
+                                    <Avatar className="h-6 w-6">
+                                      <AvatarImage src={`https://api.dicebear.com/8.x/initials/svg?seed=${person.name}`} />
+                                      <AvatarFallback>{getInitials(person.name)}</AvatarFallback>
+                                    </Avatar>
+                                    <span className="max-w-[120px] truncate">{person.name}</span>
+                                    <Badge variant={existingPerson ? "secondary" : "outline"} className="text-[10px]">
+                                      {existingPerson ? "Saved" : "New"}
+                                    </Badge>
+                                    {assignedCount > 0 && (
+                                      <Badge variant="secondary" className="text-[10px]">
+                                        {assignedCount}
+                                      </Badge>
+                                    )}
+                                  </button>
+                                </DropdownMenuTrigger>
+                                <DropdownMenuContent align="start">
+                                  {existingPerson ? (
+                                    <DropdownMenuItem onSelect={() => handleOpenPersonProfile(existingPerson)}>
+                                      <Users className="mr-2 h-4 w-4" />
+                                      Open profile
+                                    </DropdownMenuItem>
+                                  ) : (
+                                    <DropdownMenuItem onSelect={() => handleAddPersonFromPanel(person)}>
+                                      <UserPlus className="mr-2 h-4 w-4" />
+                                      Add to People
+                                    </DropdownMenuItem>
+                                  )}
+                                  <DropdownMenuItem onSelect={() => handleShareTasksForPerson(person, existingPerson)}>
+                                    <Share2 className="mr-2 h-4 w-4" />
+                                    Send assigned tasks
+                                  </DropdownMenuItem>
+                                </DropdownMenuContent>
+                              </DropdownMenu>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+                    {sourceMeeting && suggestedQuestionItems.length > 0 && (
+                      <div className="rounded-2xl border border-border/60 bg-muted/30 p-4">
+                        <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                          Suggested questions
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                          {suggestedQuestionItems.map((item) => (
+                            <Button
+                              key={item.label}
+                              variant="outline"
+                              size="sm"
+                              className="h-8 rounded-full bg-background"
+                              onClick={() => handleSuggestedQuestion(item.prompt)}
+                              disabled={isSendingMessage || isProcessingAiAction}
+                            >
+                              {item.label}
+                            </Button>
+                          ))}
+                        </div>
+                      </div>
                     )}
                     {currentMessages.map((msg) => (
                       <div key={msg.id} className="flex flex-col gap-2">
@@ -1837,6 +2225,8 @@ export default function ChatPageContent() {
                                 onShowFullText={handleShowFullText}
                                 onAnimationComplete={handleAnimationComplete}
                                 hasAnimated={animatedMessages.has(msg.id)}
+                                onConfirmDelete={handleConfirmDeleteFromChat}
+                                onCancelDelete={handleCancelDeleteFromChat}
                               />
                               {msg.sender === 'user' && (
                                   <Avatar className="h-9 w-9 border shrink-0">
@@ -1851,7 +2241,27 @@ export default function ChatPageContent() {
                     <div ref={messagesEndRef} />
                   </div>
               </ScrollArea>
-              <div className="p-4 md:p-5 bg-background/70 border-t border-border/50 backdrop-blur-xl space-y-2">
+              <div className={cn("p-4 md:p-5 bg-background/70 border-t border-border/50 backdrop-blur-xl space-y-2", hasSelection && "mb-28")}>
+                  <div className="flex items-center justify-end gap-2">
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8"
+                      onClick={handleUndo}
+                      disabled={undoStack.length === 0 || isSendingMessage || isProcessingAiAction}
+                    >
+                      <Undo2 className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8"
+                      onClick={handleRedo}
+                      disabled={redoStack.length === 0 || isSendingMessage || isProcessingAiAction}
+                    >
+                      <Redo2 className="h-4 w-4" />
+                    </Button>
+                  </div>
                   <div className="flex w-full items-center gap-2">
                       <div className="border-beam flex-1 rounded-full">
                           <Input
@@ -1927,6 +2337,9 @@ export default function ChatPageContent() {
         isGoogleTasksConnected={isGoogleTasksConnected}
         onPushToTrello={handlePushToTrello}
         isTrelloConnected={isTrelloConnected}
+        containerStyle={{
+          right: isSidePanelOpen ? panelWidth + 24 : 0,
+        }}
       />
 
       <SelectionViewDialog 
@@ -1981,6 +2394,7 @@ export default function ChatPageContent() {
        <PeopleDiscoveryDialog
         isOpen={isDiscoveryDialogOpen}
         onClose={handleDiscoveryDialogClose}
+        onMatch={handleMatchExistingPerson}
         discoveredPeople={currentSessionPeople}
         existingPeople={people}
       />

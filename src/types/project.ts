@@ -26,4 +26,6 @@ export interface Task {
   subtaskCount?: number;
   sourceSessionId?: string | null; // New field
   sourceSessionName?: string | null; // New field
+  sourceSessionType?: 'task' | 'meeting' | 'chat' | null;
+  sourceTaskId?: string | null;
 }

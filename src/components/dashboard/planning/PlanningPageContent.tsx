@@ -7,7 +7,8 @@ import { Textarea } from '@/components/ui/textarea';
 import { Input } from '@/components/ui/input'; // Added for title editing
 import { Loader2, Sparkles, Brain, ListTree, Share2, PlusCircle, Settings, Edit2, AlertTriangle, X, CalendarDays, Zap as SimplifyIcon, Copy, Info, Folder as FolderIcon, FolderOpen, Eye, ClipboardPaste, Trash2 as ClearIcon, FileDown, Users, Code, Bot, UserPlus, ListFilter, Slack } from 'lucide-react';
 import { useToast } from "@/hooks/use-toast";
-import { extractTasksFromChat, type OrchestratorInput, type OrchestratorOutput } from '@/ai/flows/extract-tasks';
+import { extractTasksFromChat } from '@/ai/flows/extract-tasks';
+import type { OrchestratorInput, OrchestratorOutput } from '@/ai/flows/schemas';
 import { generateResearchBrief, type GenerateResearchBriefInput, type GenerateResearchBriefOutput } from '@/ai/flows/generate-research-brief-flow';
 import { simplifyTaskBranch, type SimplifyTaskBranchInput, type SimplifyTaskBranchOutput } from '@/ai/flows/simplify-task-branch-flow';
 import type { ExtractedTaskSchema as DisplayTask } from '@/types/chat';

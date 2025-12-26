@@ -28,6 +28,7 @@ export interface ExtractedTaskSchema {
   priority: 'high' | 'medium' | 'low';
   taskType?: TaskTypeCategory | null;
   dueAt?: string | Date | null;
+  status?: 'todo' | 'inprogress' | 'done' | 'recurring';
   subtasks?: ExtractedTaskSchema[] | null;
   assignee?: Partial<AppUser> | null;
   assigneeName?: string | null; // Name from AI, used for matching

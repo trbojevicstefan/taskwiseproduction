@@ -13,8 +13,9 @@ const serializeSession = (session: any) => ({
 
 export async function PATCH(
   request: Request,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
+  const { id } = await params;
   const userId = await getSessionUserId();
   if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -30,11 +31,11 @@ export async function PATCH(
   }
 
   const db = await getDb();
-  const idQuery = buildIdQuery(params.id);
+  const idQuery = buildIdQuery(id);
   const userIdQuery = buildIdQuery(userId);
   const filter = {
     userId: userIdQuery,
-    $or: [{ _id: idQuery }, { id: params.id }],
+    $or: [{ _id: idQuery }, { id }],
   };
   await db.collection<any>("chatSessions").updateOne(filter, { $set: update });
 
@@ -44,19 +45,20 @@ export async function PATCH(
 
 export async function DELETE(
   _request: Request,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
+  const { id } = await params;
   const userId = await getSessionUserId();
   if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
   const db = await getDb();
-  const idQuery = buildIdQuery(params.id);
+  const idQuery = buildIdQuery(id);
   const userIdQuery = buildIdQuery(userId);
   const filter = {
     userId: userIdQuery,
-    $or: [{ _id: idQuery }, { id: params.id }],
+    $or: [{ _id: idQuery }, { id }],
   };
   const result = await db
     .collection<any>("chatSessions")

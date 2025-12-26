@@ -1,11 +1,11 @@
 ﻿// src/components/dashboard/people/PersonDetailPageContent.tsx
 "use client";
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
-import { User, Info, Mail, Phone, Loader2, Briefcase, Save, MessageSquare, Bot, FileText, Slack, Edit3, CheckCircle2, X } from 'lucide-react';
+import { User, Mail, Loader2, Briefcase, Save, MessageSquare, Bot, FileText, Slack, Edit3, CheckCircle2, X } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { getPersonDetails, onTasksForPersonSnapshot, updatePersonInFirestore } from '@/lib/data';
 import type { Person, PersonWithTaskCount } from '@/types/person';
@@ -15,13 +15,19 @@ import { format } from 'date-fns';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useToast } from '@/hooks/use-toast';
+import { useIntegrations } from '@/contexts/IntegrationsContext';
+import ShareToSlackDialog from '@/components/dashboard/common/ShareToSlackDialog';
 import { Badge } from '@/components/ui/badge';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { cn } from '@/lib/utils';
 import { motion } from 'framer-motion';
-import QuickShare from '@/components/dashboard/chat/QuickShare';
 import type { ExtractedTaskSchema } from '@/types/chat';
 import DashboardHeader from '../DashboardHeader';
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
+import { useRouter } from 'next/navigation';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { apiFetch } from '@/lib/api';
 
 
 interface PersonDetailPageContentProps {
@@ -72,7 +78,9 @@ const DetailField = ({
 
 
 export default function PersonDetailPageContent({ personId }: PersonDetailPageContentProps) {
-  const { user } = useAuth();
+  const { user, loading: authLoading } = useAuth();
+  const { isSlackConnected } = useIntegrations();
+  const router = useRouter();
   const { toast } = useToast();
   const [person, setPerson] = useState<PersonWithTaskCount | null>(null);
   const [editablePerson, setEditablePerson] = useState<Partial<Person>>({});
@@ -80,10 +88,59 @@ export default function PersonDetailPageContent({ personId }: PersonDetailPageCo
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
+  const [isBlocking, setIsBlocking] = useState(false);
+  const [isDeleteConfirmOpen, setIsDeleteConfirmOpen] = useState(false);
+  const [isSlackShareOpen, setIsSlackShareOpen] = useState(false);
+  const [selectedTaskIds, setSelectedTaskIds] = useState<Set<string>>(new Set());
+  const [slackShareTasks, setSlackShareTasks] = useState<ExtractedTaskSchema[]>([]);
+  const [statusFilter, setStatusFilter] = useState<"all" | Task["status"]>("all");
+  const [bulkStatusValue, setBulkStatusValue] = useState<string>("");
+
+  const mapTaskToExtracted = useCallback(
+    (task: Task): ExtractedTaskSchema => ({
+      id: task.id,
+      title: task.title,
+      description: task.description ?? null,
+      priority: task.priority,
+      dueAt: task.dueAt ?? null,
+      assignee: task.assignee ?? null,
+      assigneeName: task.assignee?.name ?? null,
+      subtasks: null,
+      status: task.status,
+    }),
+    []
+  );
+
+  const slackTasks = useMemo(() => {
+    return tasks.map(mapTaskToExtracted);
+  }, [tasks, mapTaskToExtracted]);
+
+  const selectedTasks = useMemo(
+    () => tasks.filter((task) => selectedTaskIds.has(task.id)),
+    [tasks, selectedTaskIds]
+  );
+
+  const selectedSlackTasks = useMemo(
+    () => selectedTasks.map(mapTaskToExtracted),
+    [selectedTasks, mapTaskToExtracted]
+  );
+
+  const filteredTasks = useMemo(() => {
+    if (statusFilter === "all") return tasks;
+    return tasks.filter((task) => (task.status || "todo") === statusFilter);
+  }, [tasks, statusFilter]);
+
+  const selectedVisibleCount = useMemo(
+    () => filteredTasks.filter((task) => selectedTaskIds.has(task.id)).length,
+    [filteredTasks, selectedTaskIds]
+  );
+
+  const allVisibleSelected =
+    filteredTasks.length > 0 && selectedVisibleCount === filteredTasks.length;
 
   const groupedTasks = useMemo(() => {
-    if (tasks.length === 0) return {};
-    return tasks.reduce((acc, task) => {
+    if (filteredTasks.length === 0) return {};
+    return filteredTasks.reduce((acc, task) => {
       const groupName = task.sourceSessionName || "General Tasks";
       if (!acc[groupName]) {
         acc[groupName] = [];
@@ -91,29 +148,53 @@ export default function PersonDetailPageContent({ personId }: PersonDetailPageCo
       acc[groupName].push(task);
       return acc;
     }, {} as Record<string, Task[]>);
-  }, [tasks]);
+  }, [filteredTasks]);
 
   useEffect(() => {
-    if (user?.uid && personId) {
-      const fetchDetails = async () => {
-        setIsLoading(true);
-        try {
-          const personDetails = await getPersonDetails(user.uid, personId);
-          setPerson(personDetails);
-          setEditablePerson(personDetails || {});
-        } catch (error) {
-          console.error("Error fetching person details:", error);
-        }
-      };
-      fetchDetails();
-
-      const unsubscribe = onTasksForPersonSnapshot(user.uid, personId, (loadedTasks) => {
-          setTasks(loadedTasks);
-          setIsLoading(false);
-      });
-      return () => unsubscribe();
+    if (authLoading) {
+      setIsLoading(true);
+      return;
     }
-  }, [user, personId]);
+    if (!user?.uid || !personId) {
+      setPerson(null);
+      setEditablePerson({});
+      setTasks([]);
+      setIsLoading(false);
+      return;
+    }
+
+    const fetchDetails = async () => {
+      setIsLoading(true);
+      try {
+        const personDetails = await getPersonDetails(user.uid, personId);
+        setPerson(personDetails);
+        setEditablePerson(personDetails || {});
+      } catch (error) {
+        console.error("Error fetching person details:", error);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+    fetchDetails();
+
+    const unsubscribe = onTasksForPersonSnapshot(user.uid, personId, (loadedTasks) => {
+        setTasks(loadedTasks);
+    });
+    return () => unsubscribe();
+  }, [user, personId, authLoading]);
+
+  useEffect(() => {
+    setSelectedTaskIds((prev) => {
+      if (prev.size === 0) return prev;
+      const next = new Set<string>();
+      tasks.forEach((task) => {
+        if (prev.has(task.id)) {
+          next.add(task.id);
+        }
+      });
+      return next;
+    });
+  }, [tasks]);
 
   const handleInputChange = (field: keyof Person, value: string | string[]) => {
       setEditablePerson(prev => ({ ...prev, [field]: value }));
@@ -162,6 +243,111 @@ export default function PersonDetailPageContent({ personId }: PersonDetailPageCo
         setIsSaving(false);
     }
   }
+
+  const handleToggleBlock = async () => {
+    if (!user || !person?.id) return;
+    setIsBlocking(true);
+    try {
+      const nextBlocked = !person.isBlocked;
+      await updatePersonInFirestore(user.uid, person.id, { isBlocked: nextBlocked });
+      const updatedPersonDetails = await getPersonDetails(user.uid, person.id);
+      setPerson(updatedPersonDetails);
+      setEditablePerson(updatedPersonDetails || {});
+      toast({
+        title: nextBlocked ? "Person Blocked" : "Person Unblocked",
+        description: nextBlocked
+          ? "This person will be ignored in future discoveries."
+          : "This person can be discovered again.",
+      });
+    } catch (error) {
+      console.error("Error updating block status:", error);
+      toast({ title: "Update Failed", description: "Could not update block status.", variant: "destructive" });
+    } finally {
+      setIsBlocking(false);
+    }
+  };
+
+  const handleDeletePerson = async () => {
+    if (!user?.uid || !person?.id) return;
+    try {
+      const response = await fetch(`/api/people/${person.id}`, { method: "DELETE" });
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}));
+        throw new Error(payload.error || "Delete failed.");
+      }
+      toast({ title: "Person Deleted", description: "This person has been removed from your directory." });
+      router.push("/people");
+    } catch (error) {
+      console.error("Error deleting person:", error);
+      toast({ title: "Delete Failed", description: "Could not delete this person.", variant: "destructive" });
+    }
+  };
+
+  const handleToggleTaskSelection = (taskId: string, checked: boolean) => {
+    setSelectedTaskIds((prev) => {
+      const next = new Set(prev);
+      if (checked) {
+        next.add(taskId);
+      } else {
+        next.delete(taskId);
+      }
+      return next;
+    });
+  };
+
+  const handleSelectAllTasks = () => {
+    setSelectedTaskIds((prev) => {
+      const next = new Set(prev);
+      if (allVisibleSelected) {
+        filteredTasks.forEach((task) => next.delete(task.id));
+      } else {
+        filteredTasks.forEach((task) => next.add(task.id));
+      }
+      return next;
+    });
+  };
+
+  const handleTaskStatusChange = async (task: Task, nextStatus: Task["status"]) => {
+    try {
+      if (task.sourceSessionType === "meeting" || task.sourceSessionType === "chat") {
+        await apiFetch("/api/tasks/status", {
+          method: "PATCH",
+          body: JSON.stringify({
+            sourceSessionId: task.sourceSessionId,
+            sourceSessionType: task.sourceSessionType,
+            taskId: task.sourceTaskId || task.id.split(":")[1] || task.id,
+            status: nextStatus,
+          }),
+        });
+      } else {
+        await apiFetch(`/api/tasks/${task.id}`, {
+          method: "PATCH",
+          body: JSON.stringify({ status: nextStatus }),
+        });
+      }
+
+      setTasks((prev) =>
+        prev.map((item) =>
+          item.id === task.id ? { ...item, status: nextStatus } : item
+        )
+      );
+    } catch (error) {
+      console.error("Failed to update task status:", error);
+      toast({
+        title: "Status Update Failed",
+        description: "Could not update the task status.",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleBulkStatusChange = async (nextStatus: Task["status"]) => {
+    if (selectedTasks.length === 0) return;
+    await Promise.all(
+      selectedTasks.map((task) => handleTaskStatusChange(task, nextStatus))
+    );
+    setBulkStatusValue("");
+  };
   
   if (isLoading) {
       return (
@@ -196,6 +382,9 @@ export default function PersonDetailPageContent({ personId }: PersonDetailPageCo
             pageIcon={User}
             pageTitle={headerTitle}
         >
+            {person?.isBlocked && (
+              <Badge variant="destructive">Blocked</Badge>
+            )}
             {isEditing ? (
                 <>
                     <Button variant="outline" onClick={() => { setIsEditing(false); setEditablePerson(person);}}>
@@ -207,9 +396,30 @@ export default function PersonDetailPageContent({ personId }: PersonDetailPageCo
                     </Button>
                 </>
             ) : (
-                <Button onClick={() => setIsEditing(true)}>
-                    <Edit3 className="mr-2 h-4 w-4"/> Edit Profile
-                </Button>
+                <>
+                  <Button variant="outline" onClick={handleToggleBlock} disabled={isBlocking}>
+                    {isBlocking ? <Loader2 className="mr-2 h-4 w-4 animate-spin"/> : <CheckCircle2 className="mr-2 h-4 w-4"/>}
+                    {person?.isBlocked ? "Unblock" : "Block"}
+                  </Button>
+                  {isSlackConnected && (
+                    <Button
+                      variant="outline"
+                      onClick={() => {
+                        setSlackShareTasks(slackTasks);
+                        setIsSlackShareOpen(true);
+                      }}
+                    >
+                      <Slack className="mr-2 h-4 w-4" />
+                      Send to Slack
+                    </Button>
+                  )}
+                  <Button variant="outline" onClick={() => setIsDeleteConfirmOpen(true)}>
+                    Delete
+                  </Button>
+                  <Button onClick={() => setIsEditing(true)}>
+                      <Edit3 className="mr-2 h-4 w-4"/> Edit Profile
+                  </Button>
+                </>
             )}
         </DashboardHeader>
         
@@ -312,11 +522,68 @@ export default function PersonDetailPageContent({ personId }: PersonDetailPageCo
                 <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5, delay: 0.3 }} className="mt-8">
                     <Card>
                         <CardHeader>
-                          <CardTitle className="flex items-center gap-3"><Briefcase className="text-muted-foreground"/> Assigned Tasks ({tasks.length})</CardTitle>
-                          <CardDescription>A complete history of all tasks assigned to {person.name}, grouped by their source session.</CardDescription>
+                          <CardTitle className="flex items-center gap-3">
+                            <Briefcase className="text-muted-foreground"/> Assigned Tasks ({tasks.length})
+                          </CardTitle>
+                          <CardDescription>
+                            A complete history of all tasks assigned to {person.name}, grouped by their source session.
+                          </CardDescription>
+                          <div className="mt-4 flex flex-wrap items-center gap-2">
+                            <Select value={statusFilter} onValueChange={(value) => setStatusFilter(value as "all" | Task["status"])}>
+                              <SelectTrigger className="h-8 w-[180px] text-xs">
+                                <SelectValue placeholder="Filter by status" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="all">All statuses</SelectItem>
+                                <SelectItem value="todo">To do</SelectItem>
+                                <SelectItem value="inprogress">In progress</SelectItem>
+                                <SelectItem value="done">Done</SelectItem>
+                                <SelectItem value="recurring">Recurring</SelectItem>
+                              </SelectContent>
+                            </Select>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={handleSelectAllTasks}
+                              disabled={filteredTasks.length === 0}
+                            >
+                              {allVisibleSelected ? "Clear selection" : "Select all"}
+                            </Button>
+                            <Select
+                              value={bulkStatusValue}
+                              onValueChange={(value) => {
+                                setBulkStatusValue(value);
+                                handleBulkStatusChange(value as Task["status"]);
+                              }}
+                              disabled={selectedTasks.length === 0}
+                            >
+                              <SelectTrigger className="h-8 w-[170px] text-xs">
+                                <SelectValue placeholder="Set status for selected" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="todo">To do</SelectItem>
+                                <SelectItem value="inprogress">In progress</SelectItem>
+                                <SelectItem value="done">Done</SelectItem>
+                                <SelectItem value="recurring">Recurring</SelectItem>
+                              </SelectContent>
+                            </Select>
+                            {isSlackConnected && (
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => {
+                                  setSlackShareTasks(selectedSlackTasks);
+                                  setIsSlackShareOpen(true);
+                                }}
+                                disabled={selectedSlackTasks.length === 0}
+                              >
+                                Send selected to Slack
+                              </Button>
+                            )}
+                          </div>
                         </CardHeader>
                         <CardContent>
-                          {tasks.length > 0 ? (
+                          {filteredTasks.length > 0 ? (
                             <Accordion type="multiple" defaultValue={Object.keys(groupedTasks)} className="w-full">
                               {Object.entries(groupedTasks).map(([sessionName, sessionTasks]) => (
                                 <AccordionItem value={sessionName} key={sessionName}>
@@ -329,30 +596,60 @@ export default function PersonDetailPageContent({ personId }: PersonDetailPageCo
                                   </AccordionTrigger>
                                   <AccordionContent className="pl-6 border-l-2 border-primary/20 ml-2">
                                      <div className="space-y-3 py-2">
-                                        {sessionTasks.map(task => (
-                                           <div key={task.id} className="p-3 rounded-md border bg-background hover:bg-muted/50 transition-colors">
-                                            <div className="flex justify-between items-start">
-                                                <div>
-                                                <p className="font-semibold">{task.title}</p>
-                                                {task.description && <p className="text-sm text-muted-foreground mt-1">{task.description}</p>}
-                                                </div>
-                                                <div className="text-right text-sm flex-shrink-0 ml-4 flex items-center gap-2">
-                                                    <div>
-                                                        <Badge variant={
-                                                            task.status === 'done' ? 'default' : 
-                                                            task.status === 'inprogress' ? 'secondary' : 'outline'
-                                                        } className={cn("capitalize", task.status === 'done' && 'bg-green-600')}>{task.status}</Badge>
-                                                        <p className="text-xs text-muted-foreground mt-1">{task.dueAt ? format(new Date(task.dueAt as string), 'MMM d, yyyy') : 'No due date'}</p>
-                                                    </div>
-                                                    <QuickShare 
-                                                        task={task as unknown as ExtractedTaskSchema}
-                                                        onShare={async () => { /* Implement native share logic here if needed */}}
-                                                        onCopy={() => { /* Implement copy logic here */}}
+                                        {sessionTasks.map(task => {
+                                          const taskStatus = task.status || "todo";
+                                          return (
+                                            <div key={task.id} className="p-3 rounded-md border bg-background hover:bg-muted/50 transition-colors">
+                                              <div className="flex justify-between items-start gap-4">
+                                                  <div className="flex items-start gap-3 flex-1">
+                                                    <Checkbox
+                                                      className="mt-1"
+                                                      checked={selectedTaskIds.has(task.id)}
+                                                      onCheckedChange={(checked) =>
+                                                        handleToggleTaskSelection(task.id, checked === true)
+                                                      }
                                                     />
-                                                </div>
+                                                    <div>
+                                                      <p className="font-semibold">{task.title}</p>
+                                                      {task.description && (
+                                                        <p className="text-sm text-muted-foreground mt-1">
+                                                          {task.description}
+                                                        </p>
+                                                      )}
+                                                    </div>
+                                                  </div>
+                                                  <div className="text-right text-sm flex-shrink-0 flex items-center gap-2">
+                                                      <div className="flex flex-col items-end gap-1">
+                                                        <Select
+                                                          value={taskStatus}
+                                                          onValueChange={(value) =>
+                                                            handleTaskStatusChange(
+                                                              task,
+                                                              value as Task["status"]
+                                                            )
+                                                          }
+                                                        >
+                                                          <SelectTrigger className="h-7 w-[130px] text-xs">
+                                                            <SelectValue />
+                                                          </SelectTrigger>
+                                                          <SelectContent>
+                                                            <SelectItem value="todo">To do</SelectItem>
+                                                            <SelectItem value="inprogress">In progress</SelectItem>
+                                                            <SelectItem value="done">Done</SelectItem>
+                                                            <SelectItem value="recurring">Recurring</SelectItem>
+                                                          </SelectContent>
+                                                        </Select>
+                                                        <p className="text-xs text-muted-foreground">
+                                                          {task.dueAt
+                                                            ? format(new Date(task.dueAt as string), 'MMM d, yyyy')
+                                                            : 'No due date'}
+                                                        </p>
+                                                      </div>
+                                                  </div>
+                                              </div>
                                             </div>
-                                            </div>
-                                        ))}
+                                          );
+                                        })}
                                     </div>
                                   </AccordionContent>
                                 </AccordionItem>
@@ -361,8 +658,8 @@ export default function PersonDetailPageContent({ personId }: PersonDetailPageCo
                           ) : (
                              <div className="text-center py-16 text-muted-foreground bg-muted/30 rounded-lg">
                                 <Briefcase size={32} className="mx-auto mb-3 opacity-50"/>
-                                <p className="font-semibold">No tasks assigned</p>
-                                <p className="text-sm">Tasks assigned to {person.name} will appear here.</p>
+                                <p className="font-semibold">No tasks in this view</p>
+                                <p className="text-sm">Try a different status filter or assign new tasks.</p>
                              </div>
                           )}
                         </CardContent>
@@ -370,6 +667,32 @@ export default function PersonDetailPageContent({ personId }: PersonDetailPageCo
                 </motion.div>
             </div>
         </div>
+      <AlertDialog open={isDeleteConfirmOpen} onOpenChange={setIsDeleteConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete this person?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This removes the person from your directory and unassigns any tasks linked to them. This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleDeletePerson} className="bg-destructive hover:bg-destructive/90 text-destructive-foreground">
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+      {isSlackConnected && person && (
+        <ShareToSlackDialog
+          isOpen={isSlackShareOpen}
+          onClose={() => setIsSlackShareOpen(false)}
+          tasks={slackShareTasks.length ? slackShareTasks : slackTasks}
+          sessionTitle={`Tasks for ${person.name}`}
+          defaultDestinationType={person.slackId ? "person" : "channel"}
+          defaultUserId={person.slackId || null}
+        />
+      )}
     </div>
   );
 }
