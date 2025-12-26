@@ -56,6 +56,18 @@ export interface Meeting extends BaseSession {
   duration?: number;
   overallSentiment?: number; 
   speakerActivity?: { name: string; wordCount: number }[]; 
+  meetingMetadata?: {
+    type: "SALES_DISCOVERY" | "ENGINEERING_SCRUM" | "GENERAL_INTERNAL";
+    confidence?: number;
+    reasoning?: string;
+    dealIntelligence?: {
+      painPoints?: string[];
+      economicBuyer?: string;
+      timeline?: string;
+    };
+    sprintHealth?: "ON_TRACK" | "AT_RISK";
+    blockers?: string[];
+  };
   allTaskLevels?: { 
     light: ExtractedTaskSchema[],
     medium: ExtractedTaskSchema[],

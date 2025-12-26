@@ -42,6 +42,12 @@ const INVALID_NAME_WORDS = new Set([
   "group",
   "department",
   "dept",
+  "date",
+  "time",
+  "title",
+  "weekly",
+  "monthly",
+  "daily",
   "everyone",
   "all",
   "folks",
@@ -64,6 +70,7 @@ const INVALID_NAME_WORDS = new Set([
   "finance",
   "hr",
   "people",
+  "attendees",
   "clients",
   "client",
   "investors",
@@ -98,6 +105,17 @@ const INVALID_NAME_PHRASES = new Set([
   "their team",
   "everyone",
   "all hands",
+  "meeting date",
+  "meeting time",
+  "meeting title",
+  "meeting agenda",
+  "meeting notes",
+  "meeting summary",
+  "meeting minutes",
+  "meeting attendees",
+  "meeting location",
+  "weekly meeting",
+  "daily standup",
 ]);
 
 const STOP_WORDS = new Set([
@@ -187,6 +205,19 @@ const normalizeAssigneeName = (value: string): string | undefined => {
     .join(" ")
     .trim();
   return isValidPersonName(cleaned) ? cleaned : undefined;
+};
+
+const normalizeTranscriptLine = (line: string): string => {
+  let cleaned = line.trim();
+  if (!cleaned) return cleaned;
+  cleaned = cleaned.replace(/^#+\s+/, "");
+  cleaned = cleaned.replace(/^[\*\-\u2022]\s+/, "");
+  cleaned = cleaned.replace(/\*\*([^*]+)\*\*/g, "$1");
+  cleaned = cleaned.replace(/_([^_]+)_/g, "$1");
+  cleaned = cleaned.replace(/\*+\s*(\[\d{1,2}:\d{2}(?::\d{2})?\])\s*\*+/g, "$1");
+  cleaned = cleaned.replace(/_+\s*(\[\d{1,2}:\d{2}(?::\d{2})?\])\s*_+/g, "$1");
+  cleaned = cleaned.replace(/\s+/g, " ").trim();
+  return cleaned;
 };
 
 const normalizeTaskTitle = (phrase: string): string | null => {
@@ -326,7 +357,7 @@ const extractTaskFromSentence = (
 };
 
 const parseSpeakerLine = (line: string): TranscriptLine | null => {
-  const trimmed = line.trim();
+  const trimmed = normalizeTranscriptLine(line);
   if (!trimmed) return null;
   const hadTimestamp = LEADING_TIMESTAMP_REGEX.test(trimmed);
   const withoutTimestamp = trimmed.replace(LEADING_TIMESTAMP_REGEX, "");
@@ -383,6 +414,7 @@ export const extractTranscriptAttendees = (transcript: string): PersonSchemaType
   const seen = new Set<string>();
   for (const line of extractLines(transcript)) {
     if (!line.speaker) continue;
+    if (!line.text || !line.text.trim()) continue;
     const key = line.speaker.toLowerCase();
     if (seen.has(key)) continue;
     seen.add(key);

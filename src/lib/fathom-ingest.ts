@@ -157,6 +157,7 @@ export const ingestFathomMeeting = async ({
     keyMoments: analysisResult.keyMoments || [],
     overallSentiment: analysisResult.overallSentiment ?? null,
     speakerActivity: analysisResult.speakerActivity || [],
+    meetingMetadata: analysisResult.meetingMetadata || undefined,
     recordingId,
     recordingUrl: pickFirst(
       payload.url,
@@ -201,6 +202,7 @@ export const ingestFathomMeeting = async ({
     folderId: null,
     sourceMeetingId: meetingId,
     allTaskLevels: sanitizedTaskLevels,
+    meetingMetadata: analysisResult.meetingMetadata || undefined,
     createdAt: now,
     lastActivityAt: now,
   };
@@ -217,6 +219,7 @@ export const ingestFathomMeeting = async ({
     folderId: null,
     sourceMeetingId: meetingId,
     allTaskLevels: sanitizedTaskLevels,
+    meetingMetadata: analysisResult.meetingMetadata || undefined,
     createdAt: now,
     lastActivityAt: now,
   };

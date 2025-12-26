@@ -41,6 +41,27 @@ export type PersonSchemaType = z.infer<typeof PersonSchema>;
 
 // --- AnalyzeMeetingFlow Schemas ---
 
+export const MeetingTypeSchema = z.enum([
+  "SALES_DISCOVERY",
+  "ENGINEERING_SCRUM",
+  "GENERAL_INTERNAL",
+]);
+
+export const MeetingMetadataSchema = z.object({
+  type: MeetingTypeSchema,
+  confidence: z.number().min(0).max(1).optional(),
+  reasoning: z.string().optional(),
+  dealIntelligence: z
+    .object({
+      painPoints: z.array(z.string()).optional(),
+      economicBuyer: z.string().optional(),
+      timeline: z.string().optional(),
+    })
+    .optional(),
+  sprintHealth: z.enum(["ON_TRACK", "AT_RISK"]).optional(),
+  blockers: z.array(z.string()).optional(),
+});
+
 export const AnalyzeMeetingInputSchema = z.object({
   transcript: z.string().describe('The full transcript of the source meeting.'),
   requestedDetailLevel: z.enum(['light', 'medium', 'detailed']).default('medium'),
@@ -67,6 +88,7 @@ export const AnalyzeMeetingOutputSchema = z.object({
   })).optional().describe("A list of key moments identified from the meeting transcript."),
   overallSentiment: z.number().optional().describe("Overall sentiment of the meeting from 0.0 (very negative) to 1.0 (very positive)."),
   speakerActivity: z.array(z.object({ name: z.string(), wordCount: z.number() })).optional().describe("An array of speakers and their total word count."),
+  meetingMetadata: MeetingMetadataSchema.optional().describe("Structured meeting classification details."),
 });
 export type AnalyzeMeetingOutput = z.infer<typeof AnalyzeMeetingOutputSchema>;
 
@@ -126,6 +148,7 @@ export const OrchestratorOutputSchema = z.object({
   keyMoments: z.array(z.object({ timestamp: z.string(), description: z.string() })).optional(),
   overallSentiment: z.number().optional(),
   speakerActivity: z.array(z.object({ name: z.string(), wordCount: z.number() })).optional(),
+  meetingMetadata: MeetingMetadataSchema.optional(),
 
   allTaskLevels: z.object({
     light: z.array(TaskSchema),
@@ -198,6 +221,7 @@ export const ProcessPastedContentOutputSchema = z.object({
       attendees: z.array(PersonSchema.extend({ role: z.enum(['attendee', 'mentioned'])})),
       extractedTasks: z.array(TaskSchema),
       title: z.string(),
+      meetingMetadata: MeetingMetadataSchema.optional(),
       allTaskLevels: z.object({
         light: z.array(TaskSchema),
         medium: z.array(TaskSchema),

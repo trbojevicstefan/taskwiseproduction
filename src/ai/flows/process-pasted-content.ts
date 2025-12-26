@@ -23,12 +23,16 @@ import { sanitizeTaskForFirestore } from '@/lib/data';
 import type { ExtractedTaskSchema } from '@/types/chat';
 import type { Meeting } from '@/types/meeting';
 import { runPromptWithFallback } from '@/ai/prompt-fallback';
+import { extractTranscriptAttendees } from '@/lib/transcript-utils';
 
 const TRANSCRIPT_TIMESTAMP_REGEX =
   /(^|\n)\s*(?:\[\d{1,2}:\d{2}(?::\d{2})?\]|\d{1,2}:\d{2}(?::\d{2})?)\b/m;
 
 const hasTranscriptTimestamp = (text: string): boolean =>
   TRANSCRIPT_TIMESTAMP_REGEX.test(text);
+
+const hasTranscriptSpeakers = (text: string): boolean =>
+  extractTranscriptAttendees(text).length >= 2;
 
 
 const contentClassifierPrompt = ai.definePrompt({
@@ -104,11 +108,13 @@ const processPastedContentFlow = ai.defineFlow(
     async (input: ProcessPastedContentInput): Promise<ProcessPastedContentOutput> => {
         
         const hasTimestamp = hasTranscriptTimestamp(input.pastedText);
+        const hasSpeakers = hasTranscriptSpeakers(input.pastedText);
         const classification = hasTimestamp
             ? { contentType: 'meeting_transcript' as const }
             : (await runPromptWithFallback(contentClassifierPrompt, { pastedText: input.pastedText })).output as { contentType?: 'meeting_transcript' | 'general_text' } | undefined;
-        
-        const isMeeting = hasTimestamp || classification?.contentType === 'meeting_transcript';
+
+        const isMeeting =
+            hasTimestamp || hasSpeakers || classification?.contentType === 'meeting_transcript';
 
         if (isMeeting) {
             const analysisResult: AnalyzeMeetingOutput = await analyzeMeeting({
@@ -137,6 +143,7 @@ const processPastedContentFlow = ai.defineFlow(
                     attendees: uniquePeople,
                     extractedTasks: primaryTasks,
                     title: meetingTitle,
+                    meetingMetadata: analysisResult.meetingMetadata,
                     allTaskLevels: analysisResult.allTaskLevels,
                     keyMoments: analysisResult.keyMoments,
                     overallSentiment: analysisResult.overallSentiment,

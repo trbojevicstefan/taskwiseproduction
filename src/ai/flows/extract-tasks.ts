@@ -177,6 +177,7 @@ export async function extractTasksFromChat(input: OrchestratorInput): Promise<Or
           keyMoments: analysisResult.keyMoments,
           overallSentiment: analysisResult.overallSentiment,
           speakerActivity: analysisResult.speakerActivity,
+          meetingMetadata: analysisResult.meetingMetadata,
           sessionTitle: analysisResult.sessionTitle,
           chatResponseText: analysisResult.chatResponseText,
       };
