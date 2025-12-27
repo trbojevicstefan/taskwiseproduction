@@ -10,7 +10,7 @@ import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { useAuth } from '@/contexts/AuthContext';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import { Loader2, Power, PowerOff, RefreshCw, Copy, Check, Save, Video, Users, Building, Send, Image as ImageIcon, Link as LinkIcon, Settings as SettingsIcon, ZoomIn, Bot, Slack, FileText, MessageSquare, User, Info as InfoIcon, ToyBrick, Webhook } from 'lucide-react';
+import { Loader2, Power, PowerOff, RefreshCw, Copy, Check, Save, Video, Users, Building, Send, Image as ImageIcon, Link as LinkIcon, Settings as SettingsIcon, ZoomIn, Bot, Slack, FileText, MessageSquare, User, Info as InfoIcon, ToyBrick, Webhook, ClipboardCheck } from 'lucide-react';
 import { useIntegrations } from '@/contexts/IntegrationsContext';
 import { useToast } from '@/hooks/use-toast';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogClose } from '@/components/ui/dialog';
