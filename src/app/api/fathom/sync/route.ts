@@ -156,13 +156,14 @@ export async function POST(request: Request) {
     });
     return NextResponse.json({ status: "ok", created, duplicate, skipped, range });
   } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
     console.error("Fathom sync failed:", error);
     await logFathomIntegration(userId, "error", "sync.failed", "Fathom sync failed.", {
-      error: error instanceof Error ? error.message : String(error),
+      error: message,
       range,
     });
     return NextResponse.json(
-      { error: "Failed to sync Fathom meetings." },
+      { error: message || "Failed to sync Fathom meetings." },
       { status: 500 }
     );
   }

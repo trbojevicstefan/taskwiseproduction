@@ -1,6 +1,7 @@
 // src/components/dashboard/explore/DayColumn.tsx
 import React from 'react';
 import type { DayData, Meeting, ExtractedTaskSchema } from './types';
+import type { Person } from '@/types/person';
 import { format, isToday } from 'date-fns';
 import { cn } from '@/lib/utils';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -13,6 +14,7 @@ interface DayColumnProps {
   isActive: boolean;
   onHoverStart: () => void;
   onHoverEnd: () => void;
+  people: Person[];
   selectedTaskIds: Set<string>;
   onToggleTask: (taskId: string, isSelected: boolean) => void;
   onToggleSession: (session: Meeting, isSelected: boolean) => void;
@@ -34,6 +36,7 @@ const DayColumn: React.FC<DayColumnProps> = ({
     isActive, 
     onHoverStart, 
     onHoverEnd, 
+    people,
     selectedTaskIds, 
     onToggleTask, 
     onToggleSession, 
@@ -107,6 +110,7 @@ const DayColumn: React.FC<DayColumnProps> = ({
                             <SessionCard
                                 key={meeting.id}
                                 session={meeting}
+                                people={people}
                                 selectedTaskIds={selectedTaskIds}
                                 onToggleSession={onToggleSession}
                                 onToggleTask={onToggleTask}

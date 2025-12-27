@@ -11,6 +11,7 @@ export interface CalendarEvent {
   hangoutLink?: string | null;
   location?: string | null;
   organizer?: string | null;
+  description?: string | null;
   attendees?: Array<{
     email: string;
     name?: string | null;

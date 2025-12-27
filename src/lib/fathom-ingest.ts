@@ -9,6 +9,12 @@ import {
 import { sanitizeTaskForFirestore } from "@/lib/data";
 import type { ExtractedTaskSchema } from "@/types/chat";
 import type { DbUser } from "@/lib/db/users";
+import {
+  buildCompletionSuggestions,
+  mergeCompletionSuggestions,
+  type CompletionTarget,
+} from "@/lib/task-completion";
+import { buildIdQuery } from "@/lib/mongo-id";
 
 type FathomIngestResult =
   | { status: "created"; meetingId: string }
@@ -38,6 +44,127 @@ const sanitizeLevels = (levels: any) =>
         ),
       }
     : null;
+
+const updateTaskStatusInList = (
+  tasks: ExtractedTaskSchema[],
+  taskId: string,
+  status: ExtractedTaskSchema["status"]
+) => {
+  let updated = false;
+  const walk = (items: ExtractedTaskSchema[]): ExtractedTaskSchema[] =>
+    items.map((task) => {
+      let nextTask = task;
+      let childUpdated = false;
+
+      if (task.subtasks && task.subtasks.length) {
+        const updatedSubtasks = walk(task.subtasks);
+        if (updatedSubtasks !== task.subtasks) {
+          childUpdated = true;
+          nextTask = { ...nextTask, subtasks: updatedSubtasks };
+        }
+      }
+
+      if (task.id === taskId) {
+        updated = true;
+        return { ...nextTask, status, completionSuggested: false };
+      }
+
+      if (childUpdated) {
+        updated = true;
+        return nextTask;
+      }
+
+      return task;
+    });
+
+  const nextTasks = walk(tasks);
+  return { tasks: nextTasks, updated };
+};
+
+const applyAutoApprovalFlags = (tasks: ExtractedTaskSchema[]) => {
+  const walk = (items: ExtractedTaskSchema[]): ExtractedTaskSchema[] =>
+    items.map((task) => {
+      const nextTask = {
+        ...task,
+        subtasks: task.subtasks ? walk(task.subtasks) : task.subtasks,
+      };
+      if (nextTask.completionSuggested) {
+        return { ...nextTask, status: "done", completionSuggested: false };
+      }
+      return nextTask;
+    });
+  return walk(tasks);
+};
+
+const applyCompletionTargets = async (
+  db: Awaited<ReturnType<typeof getDb>>,
+  userId: string,
+  suggestions: ExtractedTaskSchema[]
+) => {
+  const allTargets: CompletionTarget[] = [];
+  suggestions.forEach((suggestion) => {
+    if (suggestion.completionTargets?.length) {
+      allTargets.push(...suggestion.completionTargets);
+    }
+  });
+  if (!allTargets.length) return;
+
+  const uniqueTargets = Array.from(
+    new Map(
+      allTargets.map((target) => [
+        `${target.sourceType}:${target.sourceSessionId}:${target.taskId}`,
+        target,
+      ])
+    ).values()
+  );
+
+  const userIdQuery = buildIdQuery(userId);
+  const taskTargets = uniqueTargets.filter((target) => target.sourceType === "task");
+  if (taskTargets.length) {
+    const taskIds = Array.from(
+      new Set(taskTargets.map((target) => target.taskId))
+    );
+    await db.collection("tasks").updateMany(
+      {
+        userId: userIdQuery,
+        $or: [{ _id: { $in: taskIds } }, { id: { $in: taskIds } }],
+      },
+      { $set: { status: "done" } }
+    );
+  }
+
+  const updateSessionTasks = async (
+    collectionName: "meetings" | "chatSessions",
+    taskField: "extractedTasks" | "suggestedTasks",
+    target: CompletionTarget
+  ) => {
+    const sessionIdQuery = buildIdQuery(target.sourceSessionId);
+    const filter = {
+      userId: userIdQuery,
+      $or: [{ _id: sessionIdQuery }, { id: target.sourceSessionId }],
+    };
+    const session = await db.collection<any>(collectionName).findOne(filter);
+    if (!session) return;
+    const currentTasks = session[taskField] || [];
+    const { tasks, updated } = updateTaskStatusInList(
+      currentTasks,
+      target.taskId,
+      "done"
+    );
+    if (!updated) return;
+    await db.collection<any>(collectionName).updateOne(filter, {
+      $set: { [taskField]: tasks, lastActivityAt: new Date() },
+    });
+  };
+
+  for (const target of uniqueTargets) {
+    if (target.sourceType === "meeting") {
+      await updateSessionTasks("meetings", "extractedTasks", target);
+    } else if (target.sourceType === "chat") {
+      await updateSessionTasks("chatSessions", "suggestedTasks", target);
+    }
+  }
+};
 
 export const ingestFathomMeeting = async ({
   user,
@@ -91,7 +218,7 @@ export const ingestFathomMeeting = async ({
   const sanitizedTasks = selectedTasks.map((task: any) =>
     sanitizeTaskForFirestore(task as ExtractedTaskSchema)
   );
-  const sanitizedTaskLevels = sanitizeLevels(allTaskLevels);
+  let sanitizedTaskLevels = sanitizeLevels(allTaskLevels);
 
   const attendees = (analysisResult.attendees || []).map((person) => ({
     ...person,
@@ -108,12 +235,55 @@ export const ingestFathomMeeting = async ({
     ).values()
   );
 
+  const completionSuggestions = await buildCompletionSuggestions({
+    userId: user._id.toString(),
+    transcript: transcriptText,
+    attendees: uniquePeople,
+  });
+
+  const shouldAutoApprove = Boolean(user.autoApproveCompletedTasks);
+  if (shouldAutoApprove && completionSuggestions.length) {
+    await applyCompletionTargets(db, user._id.toString(), completionSuggestions);
+  }
+
+  const mergedTasks = mergeCompletionSuggestions(
+    sanitizedTasks,
+    completionSuggestions
+  );
+  const finalizedTasks = shouldAutoApprove
+    ? applyAutoApprovalFlags(mergedTasks)
+    : mergedTasks;
+
+  if (sanitizedTaskLevels) {
+    sanitizedTaskLevels = {
+      light: mergeCompletionSuggestions(
+        sanitizedTaskLevels.light || [],
+        completionSuggestions
+      ),
+      medium: mergeCompletionSuggestions(
+        sanitizedTaskLevels.medium || [],
+        completionSuggestions
+      ),
+      detailed: mergeCompletionSuggestions(
+        sanitizedTaskLevels.detailed || [],
+        completionSuggestions
+      ),
+    };
+    if (shouldAutoApprove) {
+      sanitizedTaskLevels = {
+        light: applyAutoApprovalFlags(sanitizedTaskLevels.light || []),
+        medium: applyAutoApprovalFlags(sanitizedTaskLevels.medium || []),
+        detailed: applyAutoApprovalFlags(sanitizedTaskLevels.detailed || []),
+      };
+    }
+  }
+
   const meetingTitle = pickFirst(
-    analysisResult.sessionTitle,
-    payload.title,
     payload.meeting_title,
+    payload.title,
     payload?.recording?.title,
     payload?.recording_name,
+    analysisResult.sessionTitle,
     `Fathom Meeting ${recordingId}`
   );
 
@@ -136,7 +306,7 @@ export const ingestFathomMeeting = async ({
     originalTranscript: transcriptText,
     summary: meetingSummary,
     attendees: uniquePeople,
-    extractedTasks: sanitizedTasks,
+    extractedTasks: finalizedTasks,
     originalAiTasks: sanitizedTasks,
     originalAllTaskLevels: sanitizedTaskLevels,
     taskRevisions:
@@ -194,7 +364,7 @@ export const ingestFathomMeeting = async ({
     userId: user._id.toString(),
     title: `Chat about "${meetingTitle}"`,
     messages: [],
-    suggestedTasks: sanitizedTasks,
+    suggestedTasks: finalizedTasks,
     originalAiTasks: sanitizedTasks,
     originalAllTaskLevels: sanitizedTaskLevels,
     taskRevisions: [],
@@ -212,7 +382,7 @@ export const ingestFathomMeeting = async ({
     userId: user._id.toString(),
     title: `Plan from "${meetingTitle}"`,
     inputText: meetingSummary,
-    extractedTasks: sanitizedTasks,
+    extractedTasks: finalizedTasks,
     originalAiTasks: sanitizedTasks,
     originalAllTaskLevels: sanitizedTaskLevels,
     taskRevisions: [],

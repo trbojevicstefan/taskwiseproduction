@@ -443,6 +443,7 @@ export default function ExplorePageContent() {
                     isActive={isActive}
                     onHoverStart={() => !day.isEmpty && setActiveDayIndex(i)}
                     onHoverEnd={() => setActiveDayIndex(null)}
+                    people={people}
                     selectedTaskIds={selectedTaskIds}
                     onToggleTask={handleToggleTaskSelection}
                     onToggleSession={handleToggleSessionSelection}

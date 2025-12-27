@@ -118,6 +118,7 @@ import { onPeopleSnapshot, addPerson, sanitizeTaskForFirestore, updatePersonInFi
 import { getBestPersonMatch } from '@/lib/people-matching';
 import type { Person } from '@/types/person';
 import { cn } from "@/lib/utils";
+import { apiFetch } from "@/lib/api";
 import SelectionToolbar from '../common/SelectionToolbar';
 import SetDueDateDialog from '../planning/SetDueDateDialog';
 import { exportTasksToCSV, exportTasksToMarkdown, exportTasksToPDF, copyTextToClipboard, formatTasksToText } from '@/lib/exportUtils';
@@ -300,27 +301,57 @@ const getTaskAndAllDescendantIds = (task: ExtractedTaskSchema): string[] => {
   return ids;
 };
 
+const getStatusLabel = (status?: ExtractedTaskSchema["status"] | null) => {
+  switch (status) {
+    case "done":
+      return "Done";
+    case "inprogress":
+      return "In Progress";
+    case "recurring":
+      return "Recurring";
+    case "todo":
+    default:
+      return "To Do";
+  }
+};
+
+const getStatusVariant = (status?: ExtractedTaskSchema["status"] | null) => {
+  if (status === "done") return "default";
+  if (status === "inprogress") return "outline";
+  if (status === "recurring") return "secondary";
+  return "secondary";
+};
+
 const TaskRow: React.FC<{ 
     task: ExtractedTaskSchema; 
     onAssign: () => void; 
     onDelete: () => void; 
+    onConfirmCompletion?: (task: ExtractedTaskSchema) => void;
+    onDismissCompletion?: (task: ExtractedTaskSchema) => void;
     onToggleSelection: (id: string, checked: boolean) => void;
     onViewDetails: (task: ExtractedTaskSchema) => void;
     isSelected: boolean; 
     isIndeterminate: boolean;
+    selectionDisabled?: boolean;
     level: number;
     selectedTaskIds: Set<string>;
     getCheckboxState: (task: ExtractedTaskSchema, selectedIds: Set<string>) => 'checked' | 'unchecked' | 'indeterminate';
-}> = ({ task, onAssign, onDelete, onToggleSelection, onViewDetails, isSelected, isIndeterminate, level, selectedTaskIds, getCheckboxState }) => {
+}> = ({ task, onAssign, onDelete, onConfirmCompletion, onDismissCompletion, onToggleSelection, onViewDetails, isSelected, isIndeterminate, selectionDisabled, level, selectedTaskIds, getCheckboxState }) => {
     const [isExpanded, setIsExpanded] = useState(true);
     const hasSubtasks = task.subtasks && task.subtasks.length > 0;
     const assigneeName = task.assignee?.name || task.assigneeName || 'Unassigned';
+    const isCompletionSuggested = Boolean(task.completionSuggested);
+    const completionEvidence = task.completionEvidence?.[0]?.snippet;
 
     return (
         <div className={cn("flex flex-col", level > 0 && "pl-5 mt-2 border-l-2 border-border/30")}>
             <div className="flex items-start justify-between gap-3 rounded-xl border bg-card px-3 py-2 group">
                 <div className="flex items-center gap-2 flex-1 min-w-0">
-                    <Checkbox id={`task-${task.id}`} checked={isIndeterminate ? 'indeterminate' : isSelected} onCheckedChange={(checked) => onToggleSelection(task.id, !!checked)} />
+                    {selectionDisabled ? (
+                      <div className="h-4 w-4" />
+                    ) : (
+                      <Checkbox id={`task-${task.id}`} checked={isIndeterminate ? 'indeterminate' : isSelected} onCheckedChange={(checked) => onToggleSelection(task.id, !!checked)} />
+                    )}
                     {hasSubtasks ? (
                         <button onClick={() => setIsExpanded(!isExpanded)} className="p-1">
                             <ChevronDown size={14} className={cn("transition-transform", !isExpanded && "-rotate-90")} />
@@ -346,6 +377,55 @@ const TaskRow: React.FC<{
                       </Badge>
                     )}
                     {task.priority && <Badge variant={task.priority === 'high' ? 'destructive' : 'secondary'} className="rounded-full text-[11px] capitalize">{task.priority}</Badge>}
+                    {task.status && task.status !== "todo" && (
+                      <Badge variant={getStatusVariant(task.status)} className="rounded-full text-[11px] capitalize">
+                        {getStatusLabel(task.status)}
+                      </Badge>
+                    )}
+                    {isCompletionSuggested && (
+                      <Badge variant="outline" className="rounded-full text-[11px]">
+                        Needs Review
+                      </Badge>
+                    )}
+                    {completionEvidence && (
+                      <TooltipProvider>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Button variant="ghost" size="icon" className="h-7 w-7">
+                              <Info className="h-4 w-4" />
+                            </Button>
+                          </TooltipTrigger>
+                          <TooltipContent className="max-w-xs text-xs leading-snug">
+                            {completionEvidence}
+                          </TooltipContent>
+                        </Tooltip>
+                      </TooltipProvider>
+                    )}
+                    {isCompletionSuggested && (
+                      <div className="flex items-center gap-1">
+                        <Button
+                          size="xs"
+                          className="h-7"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onConfirmCompletion?.(task);
+                          }}
+                        >
+                          Confirm
+                        </Button>
+                        <Button
+                          size="xs"
+                          variant="ghost"
+                          className="h-7"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onDismissCompletion?.(task);
+                          }}
+                        >
+                          Dismiss
+                        </Button>
+                      </div>
+                    )}
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
                         <Button variant="ghost" size="icon" className="h-8 w-8 opacity-0 group-hover:opacity-100"><MoreHorizontal className="h-4 w-4" /></Button>
@@ -367,11 +447,14 @@ const TaskRow: React.FC<{
                             task={subtask} 
                             onAssign={onAssign} 
                             onDelete={onDelete} 
+                            onConfirmCompletion={onConfirmCompletion}
+                            onDismissCompletion={onDismissCompletion}
                             onViewDetails={onViewDetails}
                             level={level + 1} 
                             onToggleSelection={onToggleSelection} 
                             isSelected={selectedTaskIds.has(subtask.id)}
                             isIndeterminate={getCheckboxState(subtask, selectedTaskIds) === 'indeterminate'}
+                            selectionDisabled={selectionDisabled}
                             selectedTaskIds={selectedTaskIds}
                             getCheckboxState={getCheckboxState}
                         />
@@ -620,19 +703,6 @@ function MeetingDetailSheet({ id, onClose, onNavigateToChat }: { id: string | nu
       return 'indeterminate';
     }, []);
 
-
-    const allMeetingTaskIds = useMemo(() => {
-      if (!meeting?.extractedTasks) return new Set<string>();
-      const ids = new Set<string>();
-      const collectIds = (tasks: ExtractedTaskSchema[]) => {
-        tasks.forEach(task => {
-          ids.add(task.id);
-          if (task.subtasks) collectIds(task.subtasks);
-        });
-      };
-      collectIds(meeting.extractedTasks);
-      return ids;
-    }, [meeting?.extractedTasks]);
 
     const handleToggleSelection = useCallback((taskId: string, isSelected: boolean) => {
         setSelectedTaskIds(prev => {
@@ -888,22 +958,85 @@ function MeetingDetailSheet({ id, onClose, onNavigateToChat }: { id: string | nu
     
     const flavor = meeting ? flavorMap[meeting.tags?.[0].toLowerCase() as keyof typeof flavorMap || 'default'] : null;
     const meetingDurationMinutes = useMemo(() => getMeetingDurationMinutes(meeting || null), [meeting]);
-
-    const filteredTasks = useMemo(() => {
+    const meetingStart = useMemo(() => (meeting ? toDateValue(meeting.startTime) : null), [meeting]);
+    const meetingEnd = useMemo(() => (meeting ? toDateValue(meeting.endTime) : null), [meeting]);
+    const meetingDateLabel = useMemo(() => {
+        if (meetingStart) return format(meetingStart, "MMM d, yyyy");
+        if (meetingEnd) return format(meetingEnd, "MMM d, yyyy");
+        return null;
+    }, [meetingStart, meetingEnd]);
+    const meetingTimeLabel = useMemo(() => {
+        if (!meetingStart) return null;
+        if (meetingEnd) {
+            return `${format(meetingStart, "h:mm a")} - ${format(meetingEnd, "h:mm a")}`;
+        }
+        return format(meetingStart, "h:mm a");
+    }, [meetingStart, meetingEnd]);
+    const isTaskDone = useCallback(
+        (task: ExtractedTaskSchema) => (task.status || "todo") === "done",
+        []
+    );
+    const isTaskReview = useCallback(
+        (task: ExtractedTaskSchema) => Boolean(task.completionSuggested),
+        []
+    );
+    const openTasks = useMemo(() => {
         if (!meeting) return [];
-        const tasks = meeting.extractedTasks || [];
-        if (filterByPerson === 'all') return tasks;
-        if (filterByPerson === 'unassigned') return tasks.filter(t => !t.assignee && !t.assigneeName);
-        
-        const selectedPerson = selectableMeetingPeople.find(p => p.name === filterByPerson);
-        if (!selectedPerson) return tasks;
+        return (meeting.extractedTasks || []).filter(
+            (task) => !isTaskDone(task) || isTaskReview(task)
+        );
+    }, [meeting, isTaskDone, isTaskReview]);
+    const allMeetingTaskIds = useMemo(() => {
+      if (!openTasks.length) return new Set<string>();
+      const ids = new Set<string>();
+      const collectIds = (tasks: ExtractedTaskSchema[]) => {
+        tasks.forEach(task => {
+          ids.add(task.id);
+          if (task.subtasks) collectIds(task.subtasks);
+        });
+      };
+      collectIds(openTasks);
+      return ids;
+    }, [openTasks]);
+    const completedTasks = useMemo(() => {
+        if (!meeting) return [];
+        return (meeting.extractedTasks || []).filter(
+            (task) => isTaskDone(task) && !isTaskReview(task)
+        );
+    }, [meeting, isTaskDone, isTaskReview]);
+    const filterTasksByPerson = useCallback(
+        (tasks: ExtractedTaskSchema[]) => {
+            if (filterByPerson === "all") return tasks;
+            if (filterByPerson === "unassigned") {
+                return tasks.filter((t) => !t.assignee && !t.assigneeName);
+            }
 
-        return tasks.filter(t => t.assignee?.name === selectedPerson.name || t.assigneeName === selectedPerson.name);
-    }, [meeting, filterByPerson]);
+            const selectedPerson = selectableMeetingPeople.find(
+                (p) => p.name === filterByPerson
+            );
+            if (!selectedPerson) return tasks;
+
+            return tasks.filter(
+                (t) =>
+                    t.assignee?.name === selectedPerson.name ||
+                    t.assigneeName === selectedPerson.name
+            );
+        },
+        [filterByPerson, selectableMeetingPeople]
+    );
+
+    const filteredOpenTasks = useMemo(
+        () => filterTasksByPerson(openTasks),
+        [filterTasksByPerson, openTasks]
+    );
+    const filteredCompletedTasks = useMemo(
+        () => filterTasksByPerson(completedTasks),
+        [filterTasksByPerson, completedTasks]
+    );
 
     const groupedTasks = useMemo(() => {
         const groups = new Map<string, ExtractedTaskSchema[]>();
-        filteredTasks.forEach((task) => {
+        filteredOpenTasks.forEach((task) => {
             const type = task.taskType || 'general';
             if (!groups.has(type)) {
                 groups.set(type, []);
@@ -921,7 +1054,29 @@ function MeetingDetailSheet({ id, onClose, onNavigateToChat }: { id: string | nu
                 label: TASK_TYPE_LABELS[type as TaskTypeCategory] || 'General',
                 tasks,
             }));
-    }, [filteredTasks]);
+    }, [filteredOpenTasks]);
+
+    const groupedCompletedTasks = useMemo(() => {
+        const groups = new Map<string, ExtractedTaskSchema[]>();
+        filteredCompletedTasks.forEach((task) => {
+            const type = task.taskType || 'general';
+            if (!groups.has(type)) {
+                groups.set(type, []);
+            }
+            groups.get(type)!.push(task);
+        });
+        return Array.from(groups.entries())
+            .sort(([aType], [bType]) => {
+                const aOrder = taskTypeOrder.get(aType) ?? 999;
+                const bOrder = taskTypeOrder.get(bType) ?? 999;
+                return aOrder - bOrder;
+            })
+            .map(([type, tasks]) => ({
+                type,
+                label: TASK_TYPE_LABELS[type as TaskTypeCategory] || 'General',
+                tasks,
+            }));
+    }, [filteredCompletedTasks]);
     
     const handleDeleteMeeting = async () => {
         if (!meeting) return;
@@ -949,6 +1104,72 @@ function MeetingDetailSheet({ id, onClose, onNavigateToChat }: { id: string | nu
         const updatedTasks = filterTasks(meeting.extractedTasks || [], taskId);
         await syncMeetingTasks(updatedTasks);
         toast({ title: "Task Deleted", description: "The task has been removed from this meeting." });
+    };
+
+    const handleConfirmCompletion = async (task: ExtractedTaskSchema) => {
+        if (!meeting) return;
+        const targets = task.completionTargets || [];
+
+        const updateRecursively = (tasks: ExtractedTaskSchema[]): ExtractedTaskSchema[] =>
+          tasks.map((t) => {
+            if (t.id === task.id) {
+              return {
+                ...t,
+                status: "done",
+                completionSuggested: false,
+              };
+            }
+            if (t.subtasks) {
+              return { ...t, subtasks: updateRecursively(t.subtasks) };
+            }
+            return t;
+          });
+
+        const updatedTasks = updateRecursively(meeting.extractedTasks || []);
+        await syncMeetingTasks(updatedTasks);
+
+        const updates = targets.map((target) => {
+          if (target.sourceType === "task") {
+            return apiFetch(`/api/tasks/${target.taskId}`, {
+              method: "PATCH",
+              body: JSON.stringify({ status: "done" }),
+            });
+          }
+          return apiFetch("/api/tasks/status", {
+            method: "PATCH",
+            body: JSON.stringify({
+              sourceSessionId: target.sourceSessionId,
+              sourceSessionType: target.sourceType,
+              taskId: target.taskId,
+              status: "done",
+            }),
+          });
+        });
+
+        if (updates.length) {
+          await Promise.allSettled(updates);
+        }
+
+        toast({
+          title: "Completion Confirmed",
+          description: "The linked tasks have been marked as done.",
+        });
+    };
+
+    const handleDismissCompletion = async (task: ExtractedTaskSchema) => {
+        if (!meeting) return;
+        const filterTasks = (tasks: ExtractedTaskSchema[], idToDelete: string): ExtractedTaskSchema[] => {
+            return tasks.filter(t => t.id !== idToDelete).map(t => {
+                if (t.subtasks) {
+                    return { ...t, subtasks: filterTasks(t.subtasks, idToDelete) };
+                }
+                return t;
+            });
+        };
+
+        const updatedTasks = filterTasks(meeting.extractedTasks || [], task.id);
+        await syncMeetingTasks(updatedTasks);
+        toast({ title: "Suggestion Dismissed", description: "Completion suggestion removed." });
     };
 
     const handleDeleteSelectedTasks = async () => {
@@ -1335,6 +1556,16 @@ function MeetingDetailSheet({ id, onClose, onNavigateToChat }: { id: string | nu
                         <span>{meetingDurationMinutes ? `${meetingDurationMinutes} min` : "N/A"}</span>
                         <span>|</span>
                         <span className="flex items-center gap-1"><Users className="h-3 w-3"/>{meetingPeople.length}</span>
+                        {meetingDateLabel && (
+                          <>
+                            <span>|</span>
+                            <span className="flex items-center gap-1">
+                              <CalendarDays className="h-3 w-3" />
+                              {meetingDateLabel}
+                              {meetingTimeLabel ? ` • ${meetingTimeLabel}` : ""}
+                            </span>
+                          </>
+                        )}
                     </div>
                     </SheetDescription>
                 </SheetHeader>
@@ -1370,6 +1601,7 @@ function MeetingDetailSheet({ id, onClose, onNavigateToChat }: { id: string | nu
                         <TabsList>
                         <TabsTrigger value="summary">Summary</TabsTrigger>
                         <TabsTrigger value="tasks">Tasks</TabsTrigger>
+                        <TabsTrigger value="completed">Completed</TabsTrigger>
                         <TabsTrigger value="attendees">People</TabsTrigger>
                         <TabsTrigger value="artifacts">Artifacts</TabsTrigger>
                         </TabsList>
@@ -1414,6 +1646,11 @@ function MeetingDetailSheet({ id, onClose, onNavigateToChat }: { id: string | nu
                                     </DropdownMenuContent>
                                 </DropdownMenu>
                             </div>
+                            {groupedTasks.length === 0 && (
+                                <div className="py-8 text-center text-sm text-muted-foreground">
+                                    No open tasks to review.
+                                </div>
+                            )}
                             {groupedTasks.map((group) => {
                                 const groupCheckboxState = getGroupCheckboxState(group.tasks, selectedTaskIds);
                                 const groupChecked = groupCheckboxState === "checked";
@@ -1441,6 +1678,8 @@ function MeetingDetailSheet({ id, onClose, onNavigateToChat }: { id: string | nu
                                                 task={t}
                                                 onAssign={() => handleOpenAssignDialog(t)}
                                                 onDelete={() => handleDeleteTask(t.id)}
+                                                onConfirmCompletion={handleConfirmCompletion}
+                                                onDismissCompletion={handleDismissCompletion}
                                                 level={0}
                                                 onToggleSelection={handleToggleSelection}
                                                 onViewDetails={handleViewDetails}
@@ -1454,6 +1693,42 @@ function MeetingDetailSheet({ id, onClose, onNavigateToChat }: { id: string | nu
                                 );
                             })}
                             <div className="pt-2 flex items-center gap-2"><Input placeholder="New action item..." /><Button>Add</Button></div>
+                        </TabsContent>
+
+                        <TabsContent value="completed" className="space-y-2 m-0">
+                            {groupedCompletedTasks.length === 0 && (
+                                <div className="py-8 text-center text-sm text-muted-foreground">
+                                    No completed tasks yet.
+                                </div>
+                            )}
+                            {groupedCompletedTasks.map((group) => (
+                                <div key={group.type} className="space-y-2 pt-2">
+                                    <div className="flex items-center justify-between">
+                                        <div className="flex items-center gap-2">
+                                            <label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                                                {group.label}
+                                            </label>
+                                            <Badge variant="secondary" className="text-[10px]">{group.tasks.length}</Badge>
+                                        </div>
+                                    </div>
+                                    {group.tasks.map((t) => (
+                                        <TaskRow
+                                            key={t.id}
+                                            task={t}
+                                            onAssign={() => handleOpenAssignDialog(t)}
+                                            onDelete={() => handleDeleteTask(t.id)}
+                                            level={0}
+                                            onToggleSelection={handleToggleSelection}
+                                            onViewDetails={handleViewDetails}
+                                            isSelected={false}
+                                            isIndeterminate={false}
+                                            selectionDisabled
+                                            selectedTaskIds={selectedTaskIds}
+                                            getCheckboxState={getCheckboxState}
+                                        />
+                                    ))}
+                                </div>
+                            ))}
                         </TabsContent>
 
                         <TabsContent value="attendees" className="space-y-4 m-0">

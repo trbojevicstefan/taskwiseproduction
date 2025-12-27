@@ -62,6 +62,7 @@ type LooseTaskNode = {
   priority?: unknown;
   dueAt?: unknown;
   assigneeName?: unknown;
+  status?: unknown;
   subtasks?: unknown;
 };
 
@@ -126,6 +127,14 @@ function normalizeAiTaskNode(
   const taskType = taskTypeRaw && TASK_TYPE_VALUES.includes(taskTypeRaw) ? taskTypeRaw : undefined;
   const dueAt = toTrimmedString(task.dueAt);
   const assigneeName = toTrimmedString(task.assigneeName);
+  const statusRaw = toTrimmedString(task.status)?.toLowerCase();
+  const status =
+    statusRaw === "todo" ||
+    statusRaw === "inprogress" ||
+    statusRaw === "done" ||
+    statusRaw === "recurring"
+      ? statusRaw
+      : undefined;
   const id = toTrimmedString(task.id);
 
   const childPrefix = `${title} follow-up`;
@@ -161,6 +170,7 @@ function normalizeAiTaskNode(
     priority,
     taskType,
     dueAt,
+    status,
     assigneeName,
     subtasks: subtasks.length ? subtasks : undefined,
     sourceEvidence: sourceEvidence && sourceEvidence.length ? sourceEvidence : undefined,

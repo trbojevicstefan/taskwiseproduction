@@ -3,7 +3,7 @@
 
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { MessageSquare, CheckSquare, BarChart3, Settings as SettingsIcon, PlusCircle, Trash2, Edit3, Archive, Brain, Waypoints, Search, FolderOpen, MessageCircle as MessageCircleIcon, ListChecks as ListChecksIcon, LayoutTemplate, SquareKanban, Star, MoreVertical, Folder as FolderIcon, FolderPlus, X, Check, Users, Video } from 'lucide-react';
+import { MessageSquare, CheckSquare, BarChart3, Settings as SettingsIcon, PlusCircle, Trash2, Edit3, Archive, Brain, Waypoints, Search, FolderOpen, MessageCircle as MessageCircleIcon, ListChecks as ListChecksIcon, LayoutTemplate, SquareKanban, Star, MoreVertical, Folder as FolderIcon, FolderPlus, X, Check, Users, Video, Calendar } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useAuth } from '@/contexts/AuthContext';
 import { useChatHistory } from '@/contexts/ChatHistoryContext';
@@ -55,6 +55,7 @@ const mainNavItems = [
   { href: '/chat', label: 'Chat', icon: MessageSquare },
   { href: '/planning', label: 'Planning', icon: Brain },
   { href: '/explore', label: 'Explore', icon: Search },
+  { href: '/reports', label: 'Meeting Planner', icon: Calendar },
   { href: '/people', label: 'People', icon: Users },
 ];
 

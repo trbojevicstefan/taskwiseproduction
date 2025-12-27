@@ -17,6 +17,7 @@ const updateSchema = z.object({
   fathomConnected: z.boolean().optional(),
   fathomUserId: z.string().optional().nullable(),
   taskGranularityPreference: z.enum(["light", "medium", "detailed"]).optional(),
+  autoApproveCompletedTasks: z.boolean().optional(),
 });
 
 const toAppUser = (user: Awaited<ReturnType<typeof findUserById>>) => {
@@ -43,6 +44,7 @@ const toAppUser = (user: Awaited<ReturnType<typeof findUserById>>) => {
     fathomUserId: user.fathomUserId || null,
     sourceSessionIds: user.sourceSessionIds || [],
     taskGranularityPreference: user.taskGranularityPreference,
+    autoApproveCompletedTasks: Boolean(user.autoApproveCompletedTasks),
     googleConnected: Boolean(user.googleConnected),
     googleEmail: user.googleEmail || null,
   };
@@ -103,6 +105,9 @@ export async function PATCH(request: Request) {
     ...(update.fathomUserId !== undefined ? { fathomUserId: update.fathomUserId } : {}),
     ...(update.taskGranularityPreference !== undefined
       ? { taskGranularityPreference: update.taskGranularityPreference }
+      : {}),
+    ...(update.autoApproveCompletedTasks !== undefined
+      ? { autoApproveCompletedTasks: update.autoApproveCompletedTasks }
       : {}),
   });
 

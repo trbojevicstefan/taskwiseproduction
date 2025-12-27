@@ -66,6 +66,7 @@ if (googleClientId && googleClientSecret) {
             "email",
             "profile",
             "https://www.googleapis.com/auth/calendar.readonly",
+            "https://www.googleapis.com/auth/calendar.events",
             "https://www.googleapis.com/auth/tasks",
           ].join(" "),
           access_type: "offline",

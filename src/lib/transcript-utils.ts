@@ -263,6 +263,7 @@ const extractTaskFromSentence = (
 ): { title: string; assigneeName?: string; description?: string } | null => {
   const trimmed = sentence.trim();
   if (!trimmed) return null;
+  const isQuestion = /\?\s*$/.test(trimmed);
 
   const patterns: Array<{
     regex: RegExp;
@@ -271,6 +272,13 @@ const extractTaskFromSentence = (
     requireActionVerb?: boolean;
     titlePrefix?: string;
   }> = [
+    {
+      regex:
+        /^(?:please\s+)?((?:create|set up|setup|build|purchase|buy|discuss|review|finalize|prepare|send|share|schedule|update|fix|resolve|design|implement|test|deploy|launch)\b.+)/i,
+      assigneeFrom: "speaker",
+      phraseGroup: 1,
+      requireActionVerb: false,
+    },
     {
       regex: /\b([A-Z][a-z]+)\b,\s*(?:can|could|please)\s+(?:you|your team)\s+(.+)/i,
       assigneeFrom: 1,
@@ -332,6 +340,9 @@ const extractTaskFromSentence = (
   for (const pattern of patterns) {
     const match = trimmed.match(pattern.regex);
     if (!match) continue;
+    if (isQuestion && pattern.assigneeFrom === "speaker" && pattern.phraseGroup === 1) {
+      continue;
+    }
     let phrase = match[pattern.phraseGroup]?.trim();
     if (!phrase) continue;
     if (pattern.requireActionVerb && !containsActionVerb(phrase)) continue;

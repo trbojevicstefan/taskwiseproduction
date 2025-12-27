@@ -85,6 +85,7 @@ export async function GET(request: Request) {
           hangoutLink,
           location: item.location || null,
           organizer: item.organizer?.email || null,
+          description: item.description || null,
           attendees: Array.isArray(item.attendees)
             ? item.attendees.map((attendee: any) => ({
                 email: attendee.email,

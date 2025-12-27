@@ -16,6 +16,7 @@ import { useToast } from '@/hooks/use-toast';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogClose } from '@/components/ui/dialog';
 import { useUIState, type UIScale } from '@/contexts/UIStateContext';
 import { Slider } from '@/components/ui/slider';
+import { Switch } from '@/components/ui/switch';
 import { cn } from '@/lib/utils';
 import { Logo } from '@/components/ui/logo';
 import Image from 'next/image';
@@ -122,6 +123,7 @@ export default function SettingsPageContent() {
   const [workspaceName, setWorkspaceName] = useState('');
   const [isSavingWorkspace, setIsSavingWorkspace] = useState(false);
   const [hasCopied, setHasCopied] = useState(false);
+  const [autoApproveCompleted, setAutoApproveCompleted] = useState(false);
   
   const [isAvatarDialogOpen, setIsAvatarDialogOpen] = useState(false);
   const [selectedAvatarUrl, setSelectedAvatarUrl] = useState('');
@@ -214,6 +216,7 @@ export default function SettingsPageContent() {
       setDisplayName(user.displayName || '');
       setSelectedAvatarUrl(user.photoURL || '');
       setWorkspaceName(user.workspace?.name || '');
+      setAutoApproveCompleted(Boolean(user.autoApproveCompletedTasks));
     }
   }, [user]);
 
@@ -249,6 +252,27 @@ export default function SettingsPageContent() {
       toast({ title: 'Error', description: 'Could not save workspace settings.', variant: 'destructive' });
     } finally {
       setIsSavingWorkspace(false);
+    }
+  };
+
+  const handleAutoApproveToggle = async (value: boolean) => {
+    setAutoApproveCompleted(value);
+    try {
+      await updateUserProfile({ autoApproveCompletedTasks: value }, true);
+      toast({
+        title: "Completion Review Updated",
+        description: value
+          ? "Completed items will be auto-approved."
+          : "Completed items will require manual review.",
+      });
+    } catch (error) {
+      console.error("Failed to update completion review setting:", error);
+      setAutoApproveCompleted(Boolean(user?.autoApproveCompletedTasks));
+      toast({
+        title: "Update Failed",
+        description: "Could not update completion review preference.",
+        variant: "destructive",
+      });
     }
   };
   
@@ -439,6 +463,31 @@ export default function SettingsPageContent() {
                       Save Workspace
                     </Button>
                   </CardFooter>
+                </Card>
+
+                <Card className="shadow-lg rounded-xl mt-8">
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-3 font-headline text-xl">
+                      <ClipboardCheck className="text-sky-400 drop-shadow-[0_2px_4px_rgba(56,189,248,0.5)]" />
+                      Meeting Automation
+                    </CardTitle>
+                    <CardDescription>Control how TaskWiseAI handles completed items.</CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="flex items-center justify-between gap-6">
+                      <div className="space-y-1">
+                        <Label className="text-sm font-medium">Auto-approve completed tasks</Label>
+                        <p className="text-xs text-muted-foreground">
+                          If enabled, TaskWiseAI will mark detected completed tasks as done automatically.
+                        </p>
+                      </div>
+                      <Switch
+                        checked={autoApproveCompleted}
+                        onCheckedChange={handleAutoApproveToggle}
+                        aria-label="Auto-approve completed tasks"
+                      />
+                    </div>
+                  </CardContent>
                 </Card>
 
                  {/* Integrations Settings */}

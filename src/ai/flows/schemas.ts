@@ -14,6 +14,7 @@ export const BaseTaskSchema = z.object({
   priority: z.enum(['high', 'medium', 'low']).default('medium').describe('The priority of the item.'),
   taskType: z.enum(TASK_TYPE_VALUES).optional().describe('A high-level category for grouping tasks.'),
   dueAt: z.string().optional().describe('The due date and time in ISO 8601 format.'),
+  status: z.enum(['todo', 'inprogress', 'done', 'recurring']).optional().describe('The status of the task.'),
   assigneeName: z.string().optional().describe("The name of the person this task is assigned to."),
   aiProvider: z.enum(['gemini', 'openai']).optional().describe('The AI provider used to generate this task, if applicable.'),
   sourceEvidence: z.array(z.object({
@@ -21,6 +22,19 @@ export const BaseTaskSchema = z.object({
     speaker: z.string().optional().describe('The speaker tied to the snippet, if known.'),
     timestamp: z.string().optional().describe('Timestamp for the snippet, if available.'),
   })).optional().describe('Supporting evidence for why this task exists.'),
+  completionSuggested: z.boolean().optional().describe('Indicates a completion suggestion awaiting review.'),
+  completionConfidence: z.number().optional().describe('Confidence score for the completion suggestion.'),
+  completionEvidence: z.array(z.object({
+    snippet: z.string(),
+    speaker: z.string().optional(),
+    timestamp: z.string().optional(),
+  })).optional(),
+  completionTargets: z.array(z.object({
+    sourceType: z.enum(['task', 'meeting', 'chat']),
+    sourceSessionId: z.string(),
+    taskId: z.string(),
+    sourceSessionName: z.string().optional(),
+  })).optional(),
 });
 
 export type TaskType = z.infer<typeof BaseTaskSchema> & {

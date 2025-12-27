@@ -150,5 +150,13 @@ export function sanitizeTaskForFirestore(task: any): ExtractedTaskSchema {
     addedToProjectId: task.addedToProjectId === undefined ? null : task.addedToProjectId,
     addedToProjectName: task.addedToProjectName === undefined ? null : task.addedToProjectName,
     firestoreTaskId: task.firestoreTaskId === undefined ? null : task.firestoreTaskId,
+    completionSuggested:
+      task.completionSuggested === undefined ? null : task.completionSuggested,
+    completionConfidence:
+      task.completionConfidence === undefined ? null : task.completionConfidence,
+    completionEvidence:
+      task.completionEvidence === undefined ? null : task.completionEvidence,
+    completionTargets:
+      task.completionTargets === undefined ? null : task.completionTargets,
   };
 }

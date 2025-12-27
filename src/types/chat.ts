@@ -12,6 +12,13 @@ export interface TaskEvidence {
   timestamp?: string | null;
 }
 
+export interface CompletionTarget {
+  sourceType: 'task' | 'meeting' | 'chat';
+  sourceSessionId: string;
+  taskId: string;
+  sourceSessionName?: string | null;
+}
+
 export interface TaskRevision {
   id: string;
   createdAt: number;
@@ -48,6 +55,12 @@ export interface ExtractedTaskSchema {
   sourceSessionId?: string; // Links back to the session it originated from
   sourceSessionName?: string | null;
   isPersonGroup?: boolean; // UI hint
+
+  // Completion review metadata
+  completionSuggested?: boolean;
+  completionConfidence?: number | null;
+  completionEvidence?: TaskEvidence[] | null;
+  completionTargets?: CompletionTarget[] | null;
 }
 
 

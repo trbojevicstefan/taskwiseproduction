@@ -55,6 +55,9 @@ const SpecialistInputSchema = z.object({
   currentDate: z.string(),
 });
 
+const OPEN_ITEMS_TRIGGER_REGEX =
+  /task\s*-?\s*wise\s+open\s+items?|open\s+items|running\s+items/i;
+
 const AuditorInputSchema = z.object({
   transcript: z.string(),
   currentDate: z.string(),
@@ -237,6 +240,51 @@ Output JSON only:
 `,
 });
 
+const openItemsPrompt = ai.definePrompt({
+  name: "meetingOpenItemsReviewPrompt",
+  input: { schema: SpecialistInputSchema },
+  output: { format: "json" },
+  prompt: `
+You are a Task Review Analyst. This meeting is reviewing "open items" and status updates.
+
+Current Date: {{currentDate}}. Interpret relative dates based on this.
+
+Rules:
+- Extract every task explicitly mentioned, even if phrased as a status check.
+- Set status to "done" only when the speaker explicitly confirms completion (done/completed/finished/resolved).
+- If a task is not done, set status to "todo".
+- If a task is postponed or rescheduled, keep status "todo" and capture the new due date.
+- For new tasks introduced during the review, set status "todo".
+- If assignee is unclear, set assigneeName to "Unassigned".
+
+Provide a 2-3 sentence summary focused on progress and blockers.
+
+Full Transcript:
+\`\`\`
+{{{transcript}}}
+\`\`\`
+
+Output JSON only:
+{
+  "title": "Short meeting title",
+  "summary": "string",
+  "action_items": [
+    {
+      "title": "Verb + object or clear task noun",
+      "description": "Concise description in your own words",
+      "assigneeName": "Name or Unassigned",
+      "priority": "high|medium|low",
+      "dueAt": "YYYY-MM-DD or null",
+      "status": "done|todo|inprogress|recurring",
+      "source_quote": "short supporting snippet",
+      "source_speaker": "speaker name if known",
+      "source_timestamp": "timestamp if known"
+    }
+  ]
+}
+`,
+});
+
 const auditorPrompt = ai.definePrompt({
   name: "meetingActionItemAuditorPrompt",
   input: { schema: AuditorInputSchema },
@@ -270,6 +318,7 @@ Output JSON only:
       "assigneeName": "Name or Unassigned",
       "priority": "high|medium|low",
       "dueAt": "YYYY-MM-DD or null",
+      "status": "done|todo|inprogress|recurring",
       "source_quote": "short supporting snippet",
       "source_speaker": "speaker name if known",
       "source_timestamp": "timestamp if known"
@@ -299,6 +348,24 @@ const toTranscriptPreview = (transcript: string, wordLimit = 2000) => {
 };
 
 const buildActionItems = (items: unknown[]): TaskType[] => {
+  const normalizeStatus = (value: string | undefined): TaskType["status"] | undefined => {
+    if (!value) return undefined;
+    const lowered = value.toLowerCase();
+    if (["done", "complete", "completed", "finished", "resolved"].some((word) => lowered.includes(word))) {
+      return "done";
+    }
+    if (["in progress", "in-progress", "progress", "working"].some((word) => lowered.includes(word))) {
+      return "inprogress";
+    }
+    if (["recurring", "repeat"].some((word) => lowered.includes(word))) {
+      return "recurring";
+    }
+    if (["todo", "to do", "pending", "not done", "postpone", "delayed"].some((word) => lowered.includes(word))) {
+      return "todo";
+    }
+    return undefined;
+  };
+
   const mapped = items
     .map((item) => {
       const obj = getObject(item);
@@ -312,6 +379,7 @@ const buildActionItems = (items: unknown[]): TaskType[] => {
       const assigneeName = getString(obj.assigneeName) || getString(obj.assignee);
       const dueAt = getString(obj.dueAt);
       const priority = getString(obj.priority);
+      const status = normalizeStatus(getString(obj.status) || getString(obj.state));
       const sourceQuote = getString(obj.source_quote) || getString(obj.sourceQuote);
       const sourceSpeaker = getString(obj.source_speaker) || getString(obj.sourceSpeaker);
       const sourceTimestamp = getString(obj.source_timestamp) || getString(obj.sourceTimestamp);
@@ -332,6 +400,7 @@ const buildActionItems = (items: unknown[]): TaskType[] => {
         assigneeName,
         dueAt,
         priority: priority as TaskType["priority"],
+        status,
         sourceEvidence,
       };
     })
@@ -379,9 +448,12 @@ const finalizeTasks = (tasks: TaskType[]) => {
     "log",
   ];
 
-  const isActionTitle = (title: string) => {
+  const isActionTitle = (task: TaskType) => {
+    const title = task.title;
     const normalized = title.trim().toLowerCase();
     if (isPlaceholderTitle(normalized)) return false;
+    if (task.status && task.status !== "todo") return true;
+    if (task.dueAt) return true;
     const words = normalized.split(/\s+/).filter(Boolean);
     if (words.length < 2) return false;
     return ACTION_VERBS.includes(words[0]);
@@ -391,7 +463,7 @@ const finalizeTasks = (tasks: TaskType[]) => {
   const filtered: TaskType[] = [];
   const maxTasks = 20;
   for (const task of tasks) {
-    if (!task.title || !isActionTitle(task.title)) continue;
+    if (!task.title || !isActionTitle(task)) continue;
     const key = normalizeTitleKey(task.title);
     if (!key || seen.has(key)) continue;
     seen.add(key);
@@ -399,6 +471,23 @@ const finalizeTasks = (tasks: TaskType[]) => {
     if (filtered.length >= maxTasks) break;
   }
   return filtered;
+};
+
+const applyCompletionReviewFlags = (tasks: TaskType[]): TaskType[] => {
+  const apply = (items: TaskType[]): TaskType[] =>
+    items.map((task) => {
+      const nextSubtasks = task.subtasks ? apply(task.subtasks) : task.subtasks;
+      if (task.status === "done") {
+        return {
+          ...task,
+          completionSuggested: task.completionSuggested ?? true,
+          completionEvidence: task.completionEvidence ?? task.sourceEvidence,
+          subtasks: nextSubtasks,
+        };
+      }
+      return { ...task, subtasks: nextSubtasks };
+    });
+  return apply(tasks);
 };
 
 const analyzeMeetingFlow = ai.defineFlow(
@@ -410,6 +499,7 @@ const analyzeMeetingFlow = ai.defineFlow(
   async (input: AnalyzeMeetingInput) => {
     const transcriptText = getString(input.transcript) || "";
     const currentDate = new Date().toISOString().slice(0, 10);
+    const openItemsTrigger = OPEN_ITEMS_TRIGGER_REGEX.test(transcriptText);
 
     const routerInput = {
       transcript: toTranscriptPreview(transcriptText, 2000),
@@ -455,7 +545,11 @@ const analyzeMeetingFlow = ai.defineFlow(
       return (getObject(raw) || {}) as Record<string, unknown>;
     };
 
-    if (meetingType === "SALES_DISCOVERY") {
+    if (openItemsTrigger) {
+      specialistRaw = await runSpecialist(openItemsPrompt);
+      actionItems = buildActionItems(getArray(specialistRaw.action_items));
+      meetingSummary = getString(specialistRaw.summary);
+    } else if (meetingType === "SALES_DISCOVERY") {
       specialistRaw = await runSpecialist(salesPrompt);
       actionItems = buildActionItems(getArray(specialistRaw.action_items));
       const dealIntelligence = getObject(specialistRaw.deal_intelligence);
@@ -496,23 +590,30 @@ const analyzeMeetingFlow = ai.defineFlow(
       actionItems = extractTranscriptTasks(transcriptText);
     }
 
-    const actionItemsJson = JSON.stringify(actionItems);
-    const { output: auditOutput, text: auditText, provider: auditorProvider } =
-      await runPromptWithFallback(
-      auditorPrompt,
-      {
-        transcript: transcriptText,
-        currentDate,
-        actionItemsJson,
-      }
-      );
-    const auditRaw = extractJsonValue(auditOutput, auditText);
-    const auditObj = getObject(auditRaw) || {};
-    const auditedItems = buildActionItems(getArray(auditObj.action_items));
-    const auditedTasks = auditedItems.length ? auditedItems : actionItems;
+    let auditorProvider: string | undefined;
+    let auditedTasks = actionItems;
+    if (!openItemsTrigger) {
+      const actionItemsJson = JSON.stringify(actionItems);
+      const { output: auditOutput, text: auditText, provider } =
+        await runPromptWithFallback(
+        auditorPrompt,
+        {
+          transcript: transcriptText,
+          currentDate,
+          actionItemsJson,
+        }
+        );
+      auditorProvider = provider;
+      const auditRaw = extractJsonValue(auditOutput, auditText);
+      const auditObj = getObject(auditRaw) || {};
+      const auditedItems = buildActionItems(getArray(auditObj.action_items));
+      auditedTasks = auditedItems.length ? auditedItems : actionItems;
+    }
 
     const lightTasks = finalizeTasks(auditedTasks);
-    const lightWithEvidence = attachEvidenceToTasks(lightTasks, transcriptText);
+    const lightWithEvidence = applyCompletionReviewFlags(
+      attachEvidenceToTasks(lightTasks, transcriptText)
+    );
 
     const rewriteTasksSafely = async (tasks: TaskType[]) => {
       try {

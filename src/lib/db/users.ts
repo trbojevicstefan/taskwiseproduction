@@ -20,6 +20,7 @@ export interface DbUser {
   fathomConnected?: boolean;
   fathomUserId?: string | null;
   taskGranularityPreference?: "light" | "medium" | "detailed";
+  autoApproveCompletedTasks?: boolean;
   googleAccessToken?: string | null;
   googleRefreshToken?: string | null;
   googleTokenExpiry?: number | null;
@@ -75,6 +76,7 @@ export const createUser = async ({
     fathomConnected: false,
     fathomUserId: null,
     taskGranularityPreference: "medium",
+    autoApproveCompletedTasks: false,
     googleAccessToken: null,
     googleRefreshToken: null,
     googleTokenExpiry: null,

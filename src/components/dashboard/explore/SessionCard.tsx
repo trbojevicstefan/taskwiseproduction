@@ -1,14 +1,18 @@
 // src/components/dashboard/explore/SessionCard.tsx
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import type { ExtractedTaskSchema } from '@/types/chat';
 import type { Meeting } from '@/types/meeting';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { AnimatePresence, motion } from 'framer-motion';
 import TaskItem from './TaskItem';
-import { ChevronDown, Flame, Video } from 'lucide-react';
+import { ChevronDown, Flame, Video, Users } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { format } from 'date-fns';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import Link from 'next/link';
+import type { Person } from '@/types/person';
+import { getBestPersonMatch } from '@/lib/people-matching';
 
 const getTaskAndAllDescendantIds = (task: any): string[] => {
   const ids = [task.id];
@@ -20,6 +24,7 @@ const getTaskAndAllDescendantIds = (task: any): string[] => {
 
 interface SessionCardProps {
   session: Meeting; // Changed from ChatSession to Meeting
+  people: Person[];
   selectedTaskIds: Set<string>;
   onToggleSession: (session: Meeting, isSelected: boolean) => void;
   onToggleTask: (taskId: string, isSelected: boolean) => void;
@@ -27,7 +32,7 @@ interface SessionCardProps {
   isExpanded: boolean;
 }
 
-const SessionCard: React.FC<SessionCardProps> = ({ session, selectedTaskIds, onToggleSession, onToggleTask, onViewDetails, isExpanded }) => {
+const SessionCard: React.FC<SessionCardProps> = ({ session, people, selectedTaskIds, onToggleSession, onToggleTask, onViewDetails, isExpanded }) => {
   const [isTasksVisible, setIsTasksVisible] = useState(true);
 
   const allTaskIdsInSession = (session.extractedTasks || []).flatMap(getTaskAndAllDescendantIds);
@@ -45,6 +50,33 @@ const SessionCard: React.FC<SessionCardProps> = ({ session, selectedTaskIds, onT
       ? (session.startTime as any).toDate()
       : new Date(session.startTime as any)
     : null;
+
+  const summaryText = session.summary || "";
+
+  const attendeeMatches = useMemo(() => {
+    const attendees = session.attendees || [];
+    return attendees.map((attendee) => {
+      const match = getBestPersonMatch(
+        { name: attendee.name, email: attendee.email },
+        people,
+        0.85
+      );
+      return {
+        attendee,
+        match,
+      };
+    });
+  }, [session.attendees, people]);
+
+  const getInitials = (name?: string | null) => {
+    if (!name) return "U";
+    return name
+      .split(" ")
+      .map((part) => part[0])
+      .join("")
+      .slice(0, 2)
+      .toUpperCase();
+  };
 
   return (
      <Card className="shadow-md bg-card/80 dark:bg-black/30 border border-border/50 flex flex-col text-foreground">
@@ -97,13 +129,61 @@ const SessionCard: React.FC<SessionCardProps> = ({ session, selectedTaskIds, onT
             transition={{ duration: 0.3, ease: "easeInOut" }}
             className="overflow-hidden"
           >
-            {session.extractedTasks && session.extractedTasks.length > 0 && (
+            {(summaryText || attendeeMatches.length > 0 || (session.extractedTasks && session.extractedTasks.length > 0)) && (
               <CardContent className="p-3 border-t">
-                <div className="space-y-1 text-sm">
-                  {session.extractedTasks.map((task: ExtractedTaskSchema) => (
-                    <TaskItem key={task.id} task={task} selectedIds={selectedTaskIds} onToggle={onToggleTask} onViewDetails={(task) => onViewDetails(task, session)} />
-                  ))}
-                </div>
+                {summaryText && (
+                  <p className="text-xs text-muted-foreground mb-2 line-clamp-2">
+                    {summaryText}
+                  </p>
+                )}
+                {attendeeMatches.length > 0 && (
+                  <div className="flex flex-wrap items-center gap-2 mb-3 text-xs text-muted-foreground">
+                    <Users className="h-3 w-3" />
+                    {attendeeMatches.map(({ attendee, match }) => {
+                      const label = attendee.name || attendee.email || "Guest";
+                      if (match?.person) {
+                        return (
+                          <Link
+                            key={`${label}-${match.person.id}`}
+                            href={`/people/${match.person.id}`}
+                            className="flex items-center gap-1 rounded-full border px-2 py-1 text-xs hover:border-primary"
+                            title={match.person.email || label}
+                          >
+                            <Avatar className="h-5 w-5">
+                              <AvatarImage src={match.person.avatarUrl || undefined} />
+                              <AvatarFallback className="text-[10px]">
+                                {getInitials(match.person.name)}
+                              </AvatarFallback>
+                            </Avatar>
+                            <span className="truncate max-w-[120px]">{match.person.name}</span>
+                          </Link>
+                        );
+                      }
+                      return (
+                        <span
+                          key={label}
+                          className="rounded-full border px-2 py-1 text-xs text-muted-foreground"
+                          title={attendee.email || label}
+                        >
+                          {label}
+                        </span>
+                      );
+                    })}
+                  </div>
+                )}
+                {session.extractedTasks && session.extractedTasks.length > 0 && (
+                  <div className="space-y-1 text-sm">
+                    {session.extractedTasks.map((task: ExtractedTaskSchema) => (
+                      <TaskItem
+                        key={task.id}
+                        task={task}
+                        selectedIds={selectedTaskIds}
+                        onToggle={onToggleTask}
+                        onViewDetails={(task) => onViewDetails(task, session)}
+                      />
+                    ))}
+                  </div>
+                )}
               </CardContent>
             )}
           </motion.div>

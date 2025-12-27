@@ -1,7 +1,7 @@
 import React from "react";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Calendar, Video } from "lucide-react";
+import { Calendar, Video, Users } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { format } from "date-fns";
 import type { CalendarEvent } from "./types";
@@ -20,6 +20,9 @@ const getStartTime = (event: CalendarEvent) => {
 export default function CalendarEventCard({ event }: CalendarEventCardProps) {
   const startTime = getStartTime(event);
   const hasLink = Boolean(event.hangoutLink);
+  const attendeeNames = (event.attendees || [])
+    .map((attendee) => attendee.name || attendee.email)
+    .filter(Boolean) as string[];
 
   return (
     <Card className="p-3 border border-dashed bg-muted/20">
@@ -61,6 +64,20 @@ export default function CalendarEventCard({ event }: CalendarEventCardProps) {
           </a>
         )}
       </div>
+      {event.description && (
+        <p className="mt-2 text-xs text-muted-foreground line-clamp-2">
+          {event.description}
+        </p>
+      )}
+      {attendeeNames.length > 0 && (
+        <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+          <Users className="h-3 w-3" />
+          <span className="truncate">
+            {attendeeNames.slice(0, 3).join(", ")}
+            {attendeeNames.length > 3 ? ` +${attendeeNames.length - 3} more` : ""}
+          </span>
+        </div>
+      )}
     </Card>
   );
 }
