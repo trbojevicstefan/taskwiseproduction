@@ -9,6 +9,7 @@ import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import Link from 'next/link';
 import { Loader2 } from 'lucide-react';
+import { signIn } from "next-auth/react";
 
 export default function SignupForm() {
   const [email, setEmail] = useState('');
@@ -85,6 +86,16 @@ export default function SignupForm() {
             {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : "Sign Up"}
           </Button>
         </form>
+        <div className="mt-6">
+          <Button
+            type="button"
+            variant="outline"
+            className="w-full border-white/20 text-white hover:bg-white/10"
+            onClick={() => signIn("google", { callbackUrl: "/meetings" })}
+          >
+            Continue with Google
+          </Button>
+        </div>
       </CardContent>
       <CardFooter className="flex justify-center">
         <p className="text-sm text-white/60">

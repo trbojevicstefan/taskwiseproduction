@@ -25,6 +25,8 @@ export interface AppUser extends Person {
   displayName?: string | null;
   photoURL?: string | null;
   taskGranularityPreference?: 'light' | 'medium' | 'detailed';
+  googleConnected?: boolean;
+  googleEmail?: string | null;
 }
 
 interface AuthContextType {

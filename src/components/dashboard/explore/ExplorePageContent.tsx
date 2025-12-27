@@ -15,7 +15,7 @@ import type { ExtractedTaskSchema } from '@/types/chat';
 import type { Meeting } from '@/types/meeting';
 import SelectionToolbar from '../common/SelectionToolbar';
 import { cn } from '@/lib/utils';
-import type { DayData } from './types';
+import type { DayData, CalendarEvent } from './types';
 import { useToast } from "@/hooks/use-toast";
 import TaskDetailDialog from '@/components/dashboard/planning/TaskDetailDialog';
 import { useIsMobile } from '@/hooks/use-mobile';
@@ -63,6 +63,8 @@ export default function ExplorePageContent() {
   const [isLoadingPeople, setIsLoadingPeople] = useState(true);
   const [isAssignDialogOpen, setIsAssignDialogOpen] = useState(false);
   const [isSetDueDateDialogOpen, setIsSetDueDateDialogOpen] = useState(false);
+  const [calendarEvents, setCalendarEvents] = useState<CalendarEvent[]>([]);
+  const [isLoadingCalendarEvents, setIsLoadingCalendarEvents] = useState(false);
 
 
   const { toast } = useToast();
@@ -79,6 +81,41 @@ export default function ExplorePageContent() {
             return () => unsubscribe();
         }
     }, [user]);
+
+  useEffect(() => {
+    const fetchCalendarEvents = async () => {
+      if (!isGoogleTasksConnected) {
+        setCalendarEvents([]);
+        return;
+      }
+      setIsLoadingCalendarEvents(true);
+      try {
+        const start = startOfWeek(currentDate, { weekStartsOn: 1 });
+        const end = endOfWeek(currentDate, { weekStartsOn: 1 });
+        const response = await fetch(
+          `/api/google/calendar/upcoming?start=${start.toISOString()}&end=${end.toISOString()}`
+        );
+        if (!response.ok) {
+          const payload = await response.json().catch(() => ({}));
+          throw new Error(payload.error || "Failed to fetch calendar events.");
+        }
+        const data = await response.json();
+        setCalendarEvents(data.events || []);
+      } catch (error: any) {
+        console.error("Failed to load Google Calendar events:", error);
+        toast({
+          title: "Google Calendar Sync Failed",
+          description: error.message || "Could not load upcoming meetings.",
+          variant: "destructive",
+        });
+        setCalendarEvents([]);
+      } finally {
+        setIsLoadingCalendarEvents(false);
+      }
+    };
+
+    fetchCalendarEvents();
+  }, [currentDate, isGoogleTasksConnected, toast]);
 
   const weekData: DayData[] = useMemo(() => {
     if (!allMeetings) return [];
@@ -114,6 +151,11 @@ export default function ExplorePageContent() {
         return true;
       });
 
+      const eventsForDay = calendarEvents.filter((event) => {
+        const eventDate = event.startTime ? new Date(event.startTime) : null;
+        return eventDate ? isSameDay(eventDate, day) : false;
+      });
+
       return {
         date: day,
         meetings: meetingsForDay.sort((a, b) => {
@@ -121,12 +163,13 @@ export default function ExplorePageContent() {
             value?.toMillis ? value.toMillis() : value ? new Date(value).getTime() : 0;
           return timeValue(b.lastActivityAt) - timeValue(a.lastActivityAt);
         }),
-        meetingCount: meetingsForDay.length,
-        isEmpty: meetingsForDay.length === 0,
+        calendarEvents: eventsForDay,
+        meetingCount: meetingsForDay.length + eventsForDay.length,
+        isEmpty: meetingsForDay.length === 0 && eventsForDay.length === 0,
       };
     });
 
-  }, [allMeetings, currentDate, contentFilter, showWeekends]);
+  }, [allMeetings, currentDate, contentFilter, showWeekends, calendarEvents]);
 
   const handleWeekChange = (direction: 'next' | 'prev') => {
       setCurrentDate(prev => direction === 'next' ? addWeeks(prev, 1) : subWeeks(prev, 1));
@@ -342,6 +385,16 @@ export default function ExplorePageContent() {
           pageIcon={Calendar}
           pageTitle={<h1 className="text-2xl font-bold font-headline">Calendar</h1>}
         >
+            {isGoogleTasksConnected && (
+              <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                {isLoadingCalendarEvents ? (
+                  <Loader2 className="h-3 w-3 animate-spin" />
+                ) : (
+                  <Video className="h-3 w-3" />
+                )}
+                Google Calendar
+              </div>
+            )}
             <div className="flex items-center gap-1">
                  <DropdownMenu>
                   <DropdownMenuTrigger asChild>

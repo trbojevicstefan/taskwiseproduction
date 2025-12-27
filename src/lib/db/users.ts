@@ -20,6 +20,12 @@ export interface DbUser {
   fathomConnected?: boolean;
   fathomUserId?: string | null;
   taskGranularityPreference?: "light" | "medium" | "detailed";
+  googleAccessToken?: string | null;
+  googleRefreshToken?: string | null;
+  googleTokenExpiry?: number | null;
+  googleScopes?: string | null;
+  googleConnected?: boolean;
+  googleEmail?: string | null;
 }
 
 const USERS_COLLECTION = "users";
@@ -69,6 +75,12 @@ export const createUser = async ({
     fathomConnected: false,
     fathomUserId: null,
     taskGranularityPreference: "medium",
+    googleAccessToken: null,
+    googleRefreshToken: null,
+    googleTokenExpiry: null,
+    googleScopes: null,
+    googleConnected: false,
+    googleEmail: null,
   };
 
   const result = await db.collection<DbUser>(USERS_COLLECTION).insertOne(doc as DbUser);

@@ -6,6 +6,7 @@ import { cn } from '@/lib/utils';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import SessionCard from './SessionCard';
+import CalendarEventCard from './CalendarEventCard';
 
 interface DayColumnProps {
   day: DayData;
@@ -112,6 +113,9 @@ const DayColumn: React.FC<DayColumnProps> = ({
                                 onViewDetails={onViewDetails}
                                 isExpanded={isActive}
                             />
+                        ))}
+                        {day.calendarEvents.map((event) => (
+                            <CalendarEventCard key={event.id} event={event} />
                         ))}
                     </div>
                 </ScrollArea>

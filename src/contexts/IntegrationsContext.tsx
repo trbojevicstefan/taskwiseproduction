@@ -4,6 +4,7 @@
 import React, { createContext, useContext, useState, ReactNode, useCallback, useEffect } from 'react';
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
+import { signIn } from "next-auth/react";
 
 export interface ClientSideGoogleTokenInfo {
   accessToken: string;
@@ -59,11 +60,12 @@ const IntegrationsContext = createContext<IntegrationsContextType | undefined>(u
 export const IntegrationsProvider = ({ children }: { children: ReactNode }) => {
   const { toast } = useToast();
   const { user, loading, refreshUserProfile } = useAuth();
-  const [googleTokenInfo] = useState<ClientSideGoogleTokenInfo | null>(null);
+  const [googleTokenInfo, setGoogleTokenInfo] = useState<ClientSideGoogleTokenInfo | null>(null);
   const [trelloToken] = useState<TrelloTokenInfo | null>(null);
   const [slackInstallation, setSlackInstallation] = useState<SlackInstallation | null>(null);
   const [isLoadingSlackConnection, setIsLoadingSlackConnection] = useState(true);
   const [isLoadingFathomConnection, setIsLoadingFathomConnection] = useState(true);
+  const [isLoadingGoogleConnection, setIsLoadingGoogleConnection] = useState(true);
 
   const warnDisabled = useCallback(() => {
     toast({
@@ -73,9 +75,49 @@ export const IntegrationsProvider = ({ children }: { children: ReactNode }) => {
     });
   }, [toast]);
 
-  const connectGoogleTasks = async () => warnDisabled();
-  const disconnectGoogleTasks = async () => warnDisabled();
-  const getValidGoogleAccessToken = async () => null;
+  const connectGoogleTasks = async () => {
+    await signIn("google", { callbackUrl: "/settings?google_success=true" });
+  };
+
+  const disconnectGoogleTasks = async () => {
+    try {
+      await fetch("/api/google/revoke", { method: "POST" });
+      await refreshUserProfile();
+      setGoogleTokenInfo(null);
+    } catch (error) {
+      console.error("Failed to disconnect Google:", error);
+      toast({
+        title: "Google Disconnect Failed",
+        description: "Could not disconnect Google. Please try again.",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const getValidGoogleAccessToken = async () => {
+    try {
+      const response = await fetch("/api/google/token");
+      if (!response.ok) {
+        return null;
+      }
+      const data = await response.json();
+      if (!data?.accessToken) {
+        return null;
+      }
+      setGoogleTokenInfo((prev) => ({
+        accessToken: data.accessToken,
+        expiryDate: prev?.expiryDate || new Date().toISOString(),
+        scope: prev?.scope,
+        tokenType: prev?.tokenType,
+        lastUpdated: new Date().toISOString(),
+        userId: user?.uid || "",
+      }));
+      return data.accessToken as string;
+    } catch (error) {
+      console.error("Failed to fetch Google access token:", error);
+      return null;
+    }
+  };
   const connectTrello = () => warnDisabled();
   const disconnectTrello = async () => warnDisabled();
   const connectSlack = () => {
@@ -117,6 +159,7 @@ export const IntegrationsProvider = ({ children }: { children: ReactNode }) => {
   useEffect(() => {
     setIsLoadingSlackConnection(loading);
     setIsLoadingFathomConnection(loading);
+    setIsLoadingGoogleConnection(loading);
     if (!loading && user?.slackTeamId) {
       setSlackInstallation({
         teamId: user.slackTeamId,
@@ -140,8 +183,8 @@ export const IntegrationsProvider = ({ children }: { children: ReactNode }) => {
   return (
     <IntegrationsContext.Provider value={{
       googleTokenInfo,
-      isGoogleTasksConnected: false,
-      isLoadingGoogleConnection: false,
+      isGoogleTasksConnected: Boolean(user?.googleConnected),
+      isLoadingGoogleConnection,
       connectGoogleTasks,
       disconnectGoogleTasks,
       getValidGoogleAccessToken,
