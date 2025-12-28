@@ -5,8 +5,24 @@ import { Providers } from '@/components/common/Providers';
 import { Toaster } from "@/components/ui/toaster";
 
 export const metadata: Metadata = {
-  title: 'TaskWiseAI',
-  description: 'Chat-to-Task platform by Firebase Studio',
+  title: 'TaskwiseAI | Autonomous Meeting Execution',
+  description:
+    'Turn meetings into actionable plans in seconds with autonomous task auditing, meeting planning, people discovery, and Slack-ready updates.',
+  metadataBase: new URL('https://www.taskwise.ai'),
+  openGraph: {
+    title: 'TaskwiseAI | Autonomous Meeting Execution',
+    description:
+      'Turn meetings into actionable plans in seconds with autonomous task auditing, meeting planning, people discovery, and Slack-ready updates.',
+    url: 'https://www.taskwise.ai',
+    siteName: 'TaskwiseAI',
+    type: 'website',
+  },
+  twitter: {
+    card: 'summary_large_image',
+    title: 'TaskwiseAI | Autonomous Meeting Execution',
+    description:
+      'Turn meetings into actionable plans in seconds with autonomous task auditing, meeting planning, people discovery, and Slack-ready updates.',
+  },
 };
 
 export default function RootLayout({

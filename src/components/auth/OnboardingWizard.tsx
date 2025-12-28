@@ -1,4 +1,4 @@
-﻿// src/components/auth/OnboardingWizard.tsx
+// src/components/auth/OnboardingWizard.tsx
 "use client";
 
 import React, { useState, useEffect } from 'react';
@@ -17,7 +17,7 @@ import { Input } from '@/components/ui/input';
 import { Loader2, Building, FolderPlus, Sparkles, Check, PartyPopper, MessageSquare, Brain, MousePointer, Share2, MoveHorizontal } from 'lucide-react';
 import { Logo } from '@/components/ui/logo';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { sanitizeTaskForFirestore } from '@/lib/data';
+import { normalizeTask } from '@/lib/data';
 import type { ExtractedTaskSchema } from '@/types/chat';
 import { v4 as uuidv4 } from 'uuid';
 import CreatingMeetingAnimation from './CreatingMeetingAnimation';
@@ -60,20 +60,20 @@ Mark: You got it.
 
 const birthdayPlanTasks: ExtractedTaskSchema[] = [
     { id: 'bp-1', title: 'Guest List & Invitations', priority: 'high', subtasks: [
-        { id: 'bp-1-1', title: 'Finalize guest list', priority: 'high', subtasks: null, description: null, dueAt: null, aiAssistanceText: null, firestoreTaskId: null, addedToProjectId: null, addedToProjectName: null, researchBrief: null, assigneeName: null, assignee: null },
-        { id: 'bp-1-2', title: 'Design and send out invitations', priority: 'medium', dueAt: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString(), subtasks: null, description: null, aiAssistanceText: null, firestoreTaskId: null, addedToProjectId: null, addedToProjectName: null, researchBrief: null, assigneeName: null, assignee: null },
-        { id: 'bp-1-3', title: 'Track RSVPs', priority: 'low', subtasks: null, description: null, dueAt: null, aiAssistanceText: null, firestoreTaskId: null, addedToProjectId: null, addedToProjectName: null, researchBrief: null, assigneeName: null, assignee: null },
-    ], description: null, dueAt: null, aiAssistanceText: null, firestoreTaskId: null, addedToProjectId: null, addedToProjectName: null, researchBrief: null, assigneeName: null, assignee: null },
+        { id: 'bp-1-1', title: 'Finalize guest list', priority: 'high', subtasks: null, description: null, dueAt: null, aiAssistanceText: null, addedToProjectId: null, addedToProjectName: null, researchBrief: null, assigneeName: null, assignee: null },
+        { id: 'bp-1-2', title: 'Design and send out invitations', priority: 'medium', dueAt: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString(), subtasks: null, description: null, aiAssistanceText: null, addedToProjectId: null, addedToProjectName: null, researchBrief: null, assigneeName: null, assignee: null },
+        { id: 'bp-1-3', title: 'Track RSVPs', priority: 'low', subtasks: null, description: null, dueAt: null, aiAssistanceText: null, addedToProjectId: null, addedToProjectName: null, researchBrief: null, assigneeName: null, assignee: null },
+    ], description: null, dueAt: null, aiAssistanceText: null, addedToProjectId: null, addedToProjectName: null, researchBrief: null, assigneeName: null, assignee: null },
     { id: 'bp-2', title: 'Venue & Decorations', priority: 'high', subtasks: [
-        { id: 'bp-2-1', title: 'Book party venue', priority: 'high', subtasks: null, description: null, dueAt: null, aiAssistanceText: null, firestoreTaskId: null, addedToProjectId: null, addedToProjectName: null, researchBrief: null, assigneeName: null, assignee: null },
-        { id: 'bp-2-2', title: 'Plan theme and decorations', priority: 'medium', subtasks: null, description: null, dueAt: null, aiAssistanceText: null, firestoreTaskId: null, addedToProjectId: null, addedToProjectName: null, researchBrief: null, assigneeName: null, assignee: null },
-        { id: 'bp-2-3', title: 'Purchase or make decorations', priority: 'medium', subtasks: null, description: null, dueAt: null, aiAssistanceText: null, firestoreTaskId: null, addedToProjectId: null, addedToProjectName: null, researchBrief: null, assigneeName: null, assignee: null },
-    ], description: null, dueAt: null, aiAssistanceText: null, firestoreTaskId: null, addedToProjectId: null, addedToProjectName: null, researchBrief: null, assigneeName: null, assignee: null },
+        { id: 'bp-2-1', title: 'Book party venue', priority: 'high', subtasks: null, description: null, dueAt: null, aiAssistanceText: null, addedToProjectId: null, addedToProjectName: null, researchBrief: null, assigneeName: null, assignee: null },
+        { id: 'bp-2-2', title: 'Plan theme and decorations', priority: 'medium', subtasks: null, description: null, dueAt: null, aiAssistanceText: null, addedToProjectId: null, addedToProjectName: null, researchBrief: null, assigneeName: null, assignee: null },
+        { id: 'bp-2-3', title: 'Purchase or make decorations', priority: 'medium', subtasks: null, description: null, dueAt: null, aiAssistanceText: null, addedToProjectId: null, addedToProjectName: null, researchBrief: null, assigneeName: null, assignee: null },
+    ], description: null, dueAt: null, aiAssistanceText: null, addedToProjectId: null, addedToProjectName: null, researchBrief: null, assigneeName: null, assignee: null },
     { id: 'bp-3', title: 'Food & Drinks', priority: 'medium', subtasks: [
-        { id: 'bp-3-1', title: 'Plan the menu', priority: 'medium', subtasks: null, description: null, dueAt: null, aiAssistanceText: null, firestoreTaskId: null, addedToProjectId: null, addedToProjectName: null, researchBrief: null, assigneeName: null, assignee: null },
-        { id: 'bp-3-2', title: 'Order the birthday cake', priority: 'high', subtasks: null, description: null, dueAt: null, aiAssistanceText: null, firestoreTaskId: null, addedToProjectId: null, addedToProjectName: null, researchBrief: null, assigneeName: null, assignee: null },
-        { id: 'bp-3-3', title: 'Buy drinks and snacks', priority: 'low', subtasks: null, description: null, dueAt: null, aiAssistanceText: null, firestoreTaskId: null, addedToProjectId: null, addedToProjectName: null, researchBrief: null, assigneeName: null, assignee: null },
-    ], description: null, dueAt: null, aiAssistanceText: null, firestoreTaskId: null, addedToProjectId: null, addedToProjectName: null, researchBrief: null, assigneeName: null, assignee: null },
+        { id: 'bp-3-1', title: 'Plan the menu', priority: 'medium', subtasks: null, description: null, dueAt: null, aiAssistanceText: null, addedToProjectId: null, addedToProjectName: null, researchBrief: null, assigneeName: null, assignee: null },
+        { id: 'bp-3-2', title: 'Order the birthday cake', priority: 'high', subtasks: null, description: null, dueAt: null, aiAssistanceText: null, addedToProjectId: null, addedToProjectName: null, researchBrief: null, assigneeName: null, assignee: null },
+        { id: 'bp-3-3', title: 'Buy drinks and snacks', priority: 'low', subtasks: null, description: null, dueAt: null, aiAssistanceText: null, addedToProjectId: null, addedToProjectName: null, researchBrief: null, assigneeName: null, assignee: null },
+    ], description: null, dueAt: null, aiAssistanceText: null, addedToProjectId: null, addedToProjectName: null, researchBrief: null, assigneeName: null, assignee: null },
 ];
 
 const OnboardingWizard = ({ onClose }: { onClose?: () => void }) => {
@@ -198,7 +198,7 @@ const OnboardingWizard = ({ onClose }: { onClose?: () => void }) => {
                     id: uuidv4(),
                     subtasks: task.subtasks?.map(sub => ({...sub, id: uuidv4()})) || null
                 }));
-                await createNewPlanningSession("Plan a Birthday Party", tasksWithIds.map(t => sanitizeTaskForFirestore(t)), "Birthday Party Plan");
+                await createNewPlanningSession("Plan a Birthday Party", tasksWithIds.map(t => normalizeTask(t)), "Birthday Party Plan");
                 
             }
             
@@ -399,3 +399,5 @@ const OnboardingWizard = ({ onClose }: { onClose?: () => void }) => {
 };
 
 export default OnboardingWizard;
+
+

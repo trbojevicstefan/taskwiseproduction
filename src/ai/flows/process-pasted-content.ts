@@ -1,4 +1,4 @@
-﻿'use server';
+'use server';
 
 /**
  * @fileOverview This file defines a Genkit flow for processing pasted text content.
@@ -19,7 +19,7 @@ import {
 } from './schemas';
 import { analyzeMeeting } from './analyze-meeting-flow';
 import { extractTasksFromMessage } from './extract-tasks-flow';
-import { sanitizeTaskForFirestore } from '@/lib/data';
+import { normalizeTask } from '@/lib/data';
 import type { ExtractedTaskSchema } from '@/types/chat';
 import type { Meeting } from '@/types/meeting';
 import { runPromptWithFallback } from '@/ai/prompt-fallback';
@@ -70,7 +70,7 @@ export async function processPastedContent(
 
   if (result.isMeeting && result.meeting) {
     const meetingTasks = (result.meeting.extractedTasks || []).map((t: ExtractedTaskSchema) =>
-      sanitizeTaskForFirestore(t as ExtractedTaskSchema)
+      normalizeTask(t as ExtractedTaskSchema)
     );
     return {
       tasks: meetingTasks,
@@ -88,7 +88,7 @@ export async function processPastedContent(
 
   // Fallback for non-meeting styles
   const generalTasks = (result.tasks || []).map((t: ExtractedTaskSchema) =>
-    sanitizeTaskForFirestore(t as ExtractedTaskSchema)
+    normalizeTask(t as ExtractedTaskSchema)
   );
   return {
     tasks: generalTasks,
@@ -167,3 +167,4 @@ const processPastedContentFlow = ai.defineFlow(
         }
     }
 );
+

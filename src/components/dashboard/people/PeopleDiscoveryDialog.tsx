@@ -22,7 +22,7 @@ interface PeopleDiscoveryDialogProps {
   onClose: (peopleToCreate: Partial<Person>[]) => void;
   onMatch?: (payload: { person: Partial<Person>; matchedPerson: Person }) => Promise<void> | void;
   discoveredPeople: any[]; // People from AI
-  existingPeople: Person[]; // People from Firestore
+  existingPeople: Person[]; // People from directory
 }
 
 const getInitials = (name: string) => name ? name.split(' ').map(n => n[0]).join('').toUpperCase().substring(0, 2) : 'U';

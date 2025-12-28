@@ -14,6 +14,16 @@ export interface FathomInstallationDoc {
   webhookUrl?: string | null;
   webhookEvent?: string | null;
   webhookSecret?: string | null;
+  webhooks?: Array<{
+    id?: string | null;
+    url?: string | null;
+    createdAt?: string | Date | null;
+    include_transcript?: boolean | null;
+    include_summary?: boolean | null;
+    include_action_items?: boolean | null;
+    include_crm_matches?: boolean | null;
+    triggered_for?: string[] | null;
+  }>;
   createdAt?: Date;
   updatedAt?: Date;
 }
@@ -241,6 +251,56 @@ const createFathomWebhook = async (
   return (await response.json()) as any;
 };
 
+export const listFathomWebhooks = async (accessToken: string) => {
+  const payload = await fathomApiFetch<any>("/external/v1/webhooks", accessToken);
+  if (Array.isArray(payload)) return payload;
+  return payload?.webhooks || payload?.data || payload?.items || [];
+};
+
+const resolveWebhookDeleteUrl = (webhook: any) => {
+  const candidate =
+    webhook?.actions?.deleteUrl ||
+    webhook?.actions?.delete_url ||
+    webhook?.deleteUrl ||
+    webhook?.delete_url ||
+    webhook?.delete_path ||
+    webhook?.deletePath ||
+    null;
+
+  if (!candidate) return null;
+  if (candidate.startsWith("http")) return candidate;
+  return `https://api.fathom.ai${candidate}`;
+};
+
+export const deleteFathomWebhook = async (
+  accessToken: string,
+  webhook: { id?: string; actions?: { deleteUrl?: string; delete_url?: string } } | string
+) => {
+  const webhookId = typeof webhook === "string" ? webhook : webhook?.id;
+  const deleteUrl =
+    typeof webhook === "string" ? null : resolveWebhookDeleteUrl(webhook);
+
+  const url = deleteUrl || `https://api.fathom.ai/external/v1/webhooks/${webhookId}`;
+
+  if (!webhookId && !deleteUrl) {
+    throw new Error("Missing webhook identifier for deletion.");
+  }
+
+  const response = await fetch(url, {
+    method: "DELETE",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+    },
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text().catch(() => "");
+    throw new Error(
+      `Fathom webhook delete failed (${response.status}): ${errorText || response.statusText}`
+    );
+  }
+};
+
 export const ensureFathomWebhook = async (
   userId: string,
   accessToken: string,
@@ -253,22 +313,84 @@ export const ensureFathomWebhook = async (
     throw new Error("Fathom installation missing while creating webhook.");
   }
 
+  const upsertWebhook = (
+    created: any,
+    current: FathomInstallationDoc,
+    fallbackUrl: string
+  ) => {
+    const webhookId = created.id || created.webhook_id || null;
+    const createdUrl = created.url || created.webhook_url || fallbackUrl;
+    const createdAt = created.created_at || created.createdAt || null;
+    const nextEntry = {
+      id: webhookId,
+      url: createdUrl,
+      createdAt,
+      include_transcript: created.include_transcript ?? null,
+      include_summary: created.include_summary ?? null,
+      include_action_items: created.include_action_items ?? null,
+      include_crm_matches: created.include_crm_matches ?? null,
+      triggered_for: created.triggered_for ?? null,
+    };
+    const existing = current.webhooks || [];
+    const merged = [
+      nextEntry,
+      ...existing.filter((entry) => {
+        if (!entry) return false;
+        if (webhookId && entry.id === webhookId) return false;
+        if (!webhookId && entry.url && entry.url === createdUrl) return false;
+        return true;
+      }),
+    ];
+    return { webhookId, createdUrl, createdAt, merged };
+  };
+
+  const mergeFallbackWebhook = (
+    current: FathomInstallationDoc,
+    webhookId: string | null,
+    webhookUrl: string
+  ) => {
+    const entry = webhookId || webhookUrl
+      ? [
+          {
+            id: webhookId,
+            url: webhookUrl,
+            createdAt: current.updatedAt || current.createdAt || null,
+          },
+        ]
+      : [];
+    const existing = current.webhooks || [];
+    const merged = [
+      ...entry,
+      ...existing.filter((item) => {
+        if (!item) return false;
+        if (webhookId && item.id === webhookId) return false;
+        if (!webhookId && item.url && item.url === webhookUrl) return false;
+        return true;
+      }),
+    ];
+    return merged;
+  };
+
   try {
     const created = await createFathomWebhook(
       accessToken,
       webhookUrl,
       FATHOM_WEBHOOK_TRIGGERED_FOR
     );
+    const { webhookId, createdUrl, merged } = upsertWebhook(
+      created,
+      installation,
+      webhookUrl
+    );
     await saveFathomInstallation({
       ...installation,
-      webhookId: created.id || created.webhook_id || null,
-      webhookUrl,
+      webhookId,
+      webhookUrl: createdUrl,
       webhookEvent: FATHOM_WEBHOOK_EVENT,
       webhookSecret: created.secret || created.webhook_secret || null,
+      webhooks: merged,
       updatedAt: new Date(),
     });
-    const webhookId = created.id || created.webhook_id || null;
-    const createdUrl = created.url || created.webhook_url || webhookUrl;
     await logFathomIntegration(
       userId,
       "info",
@@ -306,16 +428,20 @@ export const ensureFathomWebhook = async (
           webhookUrl,
           FATHOM_WEBHOOK_TRIGGERED_FOR_FALLBACK
         );
+        const { webhookId, createdUrl, merged } = upsertWebhook(
+          created,
+          installation,
+          webhookUrl
+        );
         await saveFathomInstallation({
           ...installation,
-          webhookId: created.id || created.webhook_id || null,
-          webhookUrl,
+          webhookId,
+          webhookUrl: createdUrl,
           webhookEvent: FATHOM_WEBHOOK_EVENT,
           webhookSecret: created.secret || created.webhook_secret || null,
+          webhooks: merged,
           updatedAt: new Date(),
         });
-        const webhookId = created.id || created.webhook_id || null;
-        const createdUrl = created.url || created.webhook_url || webhookUrl;
         await logFathomIntegration(
           userId,
           "info",
@@ -343,14 +469,16 @@ export const ensureFathomWebhook = async (
           fallbackMessage.includes("taken") ||
           fallbackMessage.includes("409")
         ) {
+          const webhookId = installation.webhookId || null;
+          const merged = mergeFallbackWebhook(installation, webhookId, webhookUrl);
           await saveFathomInstallation({
             ...installation,
             webhookUrl,
             webhookEvent: FATHOM_WEBHOOK_EVENT,
             webhookSecret: installation.webhookSecret || null,
+            webhooks: merged,
             updatedAt: new Date(),
           });
-          const webhookId = installation.webhookId || null;
           await logFathomIntegration(
             userId,
             "info",
@@ -378,14 +506,16 @@ export const ensureFathomWebhook = async (
       throw error;
     }
 
+    const webhookId = installation.webhookId || null;
+    const merged = mergeFallbackWebhook(installation, webhookId, webhookUrl);
     await saveFathomInstallation({
       ...installation,
       webhookUrl,
       webhookEvent: FATHOM_WEBHOOK_EVENT,
       webhookSecret: installation.webhookSecret || null,
+      webhooks: merged,
       updatedAt: new Date(),
     });
-    const webhookId = installation.webhookId || null;
     await logFathomIntegration(
       userId,
       "info",

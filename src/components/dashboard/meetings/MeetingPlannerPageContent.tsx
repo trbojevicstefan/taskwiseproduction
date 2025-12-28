@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useEffect, useMemo, useState } from "react";
-import { Calendar, Clipboard, Loader2, Users, Video, Wand2 } from "lucide-react";
+import { Calendar, Clipboard, Loader2, Users, Video, Wand2, Plus } from "lucide-react";
 import DashboardHeader from "@/components/dashboard/DashboardHeader";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -19,6 +19,9 @@ import { format } from "date-fns";
 import { copyTextToClipboard } from "@/lib/exportUtils";
 import type { Person } from "@/types/person";
 import type { Task } from "@/types/project";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 type CalendarEvent = {
   id: string;
@@ -40,6 +43,20 @@ const priorityRank: Record<string, number> = { high: 0, medium: 1, low: 2 };
 
 const getAttendeeKey = (attendee: { email?: string | null; name?: string | null }) =>
   attendee.email || attendee.name || "";
+
+const isValidEmail = (value?: string | null) =>
+  Boolean(value && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value));
+
+const getEmailOptionsForPerson = (person: Person) => {
+  const options = new Set<string>();
+  if (isValidEmail(person.email)) options.add(person.email as string);
+  if (Array.isArray(person.aliases)) {
+    person.aliases.forEach((alias) => {
+      if (isValidEmail(alias)) options.add(alias);
+    });
+  }
+  return Array.from(options);
+};
 
 const sortTasks = (tasks: Task[]) => {
   return [...tasks].sort((a, b) => {
@@ -68,6 +85,18 @@ export default function MeetingPlannerPageContent() {
   const [personTasks, setPersonTasks] = useState<Record<string, Task[]>>({});
   const [isUpdatingDescription, setIsUpdatingDescription] = useState(false);
   const [addingAttendees, setAddingAttendees] = useState<Set<string>>(new Set());
+  const [isSchedulingNew, setIsSchedulingNew] = useState(false);
+  const [scheduleTitle, setScheduleTitle] = useState("");
+  const [scheduleDate, setScheduleDate] = useState("");
+  const [scheduleStartTime, setScheduleStartTime] = useState("");
+  const [scheduleDuration, setScheduleDuration] = useState("30");
+  const [scheduleDescription, setScheduleDescription] = useState("");
+  const [scheduleSelectedPeople, setScheduleSelectedPeople] = useState<Set<string>>(new Set());
+  const [schedulePersonEmails, setSchedulePersonEmails] = useState<Record<string, string>>({});
+  const [manualAttendeeInput, setManualAttendeeInput] = useState("");
+  const [manualAttendees, setManualAttendees] = useState<string[]>([]);
+  const [schedulePeopleSearch, setSchedulePeopleSearch] = useState("");
+  const [isSchedulingMeeting, setIsSchedulingMeeting] = useState(false);
 
   useEffect(() => {
     if (!user?.uid) {
@@ -136,6 +165,14 @@ export default function MeetingPlannerPageContent() {
     setSelectedAttendees(defaultSelection);
   }, [selectedEvent]);
 
+  useEffect(() => {
+    if (!isSchedulingNew) return;
+    setScheduleSelectedPeople(new Set());
+    setSchedulePersonEmails({});
+    setManualAttendees([]);
+    setManualAttendeeInput("");
+  }, [isSchedulingNew]);
+
   const attendeeMatches = useMemo(() => {
     if (!selectedEvent) return [];
     return (selectedEvent.attendees || []).map((attendee) => {
@@ -150,12 +187,14 @@ export default function MeetingPlannerPageContent() {
 
   useEffect(() => {
     const loadTasks = async () => {
-      const selected = attendeeMatches
-        .filter(({ attendee, match }) => {
-          const key = getAttendeeKey(attendee);
-          return key && selectedAttendees.has(key) && match?.person?.id;
-        })
-        .map(({ match }) => match!.person);
+      const selected = isSchedulingNew
+        ? people.filter((person) => scheduleSelectedPeople.has(person.id))
+        : attendeeMatches
+            .filter(({ attendee, match }) => {
+              const key = getAttendeeKey(attendee);
+              return key && selectedAttendees.has(key) && match?.person?.id;
+            })
+            .map(({ match }) => match!.person);
 
       if (selected.length === 0) {
         setPersonTasks({});
@@ -179,9 +218,32 @@ export default function MeetingPlannerPageContent() {
     };
 
     loadTasks();
-  }, [attendeeMatches, selectedAttendees]);
+  }, [attendeeMatches, selectedAttendees, isSchedulingNew, people, scheduleSelectedPeople]);
+
+  const scheduleSelectedPeopleList = useMemo(
+    () => people.filter((person) => scheduleSelectedPeople.has(person.id)),
+    [people, scheduleSelectedPeople]
+  );
+
+  const scheduleManualAttendees = useMemo(
+    () => manualAttendees.map((email) => ({ email })),
+    [manualAttendees]
+  );
 
   const agendaSections = useMemo(() => {
+    if (isSchedulingNew) {
+      const peopleSections = scheduleSelectedPeopleList.map((person) => ({
+        label: person.name || "Attendee",
+        person,
+        tasks: sortTasks(personTasks[person.id] || []),
+      }));
+      const manualSections = scheduleManualAttendees.map((attendee) => ({
+        label: attendee.email || "Guest",
+        person: { id: attendee.email || "manual", name: attendee.email || "Guest" } as Person,
+        tasks: [] as Task[],
+      }));
+      return [...peopleSections, ...manualSections];
+    }
     return attendeeMatches
       .filter(({ attendee, match }) => {
         const key = getAttendeeKey(attendee);
@@ -196,12 +258,15 @@ export default function MeetingPlannerPageContent() {
           tasks,
         };
       });
-  }, [attendeeMatches, selectedAttendees, personTasks]);
+  }, [attendeeMatches, selectedAttendees, personTasks, isSchedulingNew, scheduleSelectedPeopleList, scheduleManualAttendees]);
 
   const agendaText = useMemo(() => {
-    if (!selectedEvent) return "";
+    if (!selectedEvent && !isSchedulingNew) return "";
+    const meetingTitle = isSchedulingNew
+      ? scheduleTitle || "New Meeting"
+      : selectedEvent?.title || "Meeting";
     const lines: string[] = [];
-    lines.push(`Taskwise Agenda: ${selectedEvent.title}`);
+    lines.push(`Taskwise Agenda: ${meetingTitle}`);
     lines.push("");
     lines.push(
       `Meeting Guide: We'll review Taskwise open items and go around the room for status updates.`
@@ -215,21 +280,28 @@ export default function MeetingPlannerPageContent() {
       } else {
         section.tasks.forEach((task) => {
           const due = task.dueAt ? format(new Date(task.dueAt as string), "MMM d") : "No due date";
-          lines.push(`- ${task.title} (Priority: ${task.priority}, Due: ${due})`);
+          lines.push(`- ${task.title} - ${task.priority} - ${due}`);
         });
       }
       lines.push("");
     });
     return lines.join("\n");
-  }, [selectedEvent, agendaSections]);
+  }, [selectedEvent, agendaSections, isSchedulingNew, scheduleTitle]);
 
   const recentMeetings = useMemo(() => {
-    if (!selectedEvent) return [];
-    const attendeeEmails = new Set(
-      (selectedEvent.attendees || [])
+    if (!selectedEvent && !isSchedulingNew) return [];
+    const attendeeEmails = new Set<string>();
+    if (isSchedulingNew) {
+      scheduleSelectedPeopleList.forEach((person) => {
+        if (person.email) attendeeEmails.add(person.email.toLowerCase());
+      });
+      manualAttendees.forEach((email) => attendeeEmails.add(email.toLowerCase()));
+    } else {
+      (selectedEvent?.attendees || [])
         .map((attendee) => attendee.email?.toLowerCase())
-        .filter(Boolean) as string[]
-    );
+        .filter(Boolean)
+        .forEach((email) => attendeeEmails.add(email as string));
+    }
     return meetings
       .filter((meeting) =>
         (meeting.attendees || []).some((attendee) =>
@@ -237,7 +309,7 @@ export default function MeetingPlannerPageContent() {
         )
       )
       .slice(0, 3);
-  }, [meetings, selectedEvent]);
+  }, [meetings, selectedEvent, isSchedulingNew, scheduleSelectedPeopleList, manualAttendees]);
 
   const handleToggleAttendee = (attendee: { email?: string | null; name?: string | null }) => {
     const key = getAttendeeKey(attendee);
@@ -299,6 +371,159 @@ export default function MeetingPlannerPageContent() {
     });
   };
 
+  const handleToggleSchedulePerson = (person: Person) => {
+    setScheduleSelectedPeople((prev) => {
+      const next = new Set(prev);
+      if (next.has(person.id)) {
+        next.delete(person.id);
+      } else {
+        next.add(person.id);
+      }
+      return next;
+    });
+    setSchedulePersonEmails((prev) => {
+      const next = { ...prev };
+      if (next[person.id]) {
+        delete next[person.id];
+      } else {
+        const options = getEmailOptionsForPerson(person);
+        if (options.length > 0) {
+          next[person.id] = options[0];
+        }
+      }
+      return next;
+    });
+  };
+
+  const schedulePeopleOptions = useMemo(() => {
+    const term = schedulePeopleSearch.trim().toLowerCase();
+    if (!term) return people;
+    return people.filter((person) =>
+      [person.name, person.email, ...(person.aliases || [])]
+        .filter(Boolean)
+        .some((value) => String(value).toLowerCase().includes(term))
+    );
+  }, [people, schedulePeopleSearch]);
+
+  const handleScheduleMeeting = async () => {
+    if (!scheduleTitle.trim() || !scheduleDate || !scheduleStartTime) {
+      toast({
+        title: "Missing details",
+        description: "Please add a title, date, and start time.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const attendees = [
+      ...scheduleSelectedPeopleList
+        .map((person) => schedulePersonEmails[person.id] || person.email || "")
+        .filter((email) => isValidEmail(email)),
+      ...manualAttendees,
+    ];
+
+    if (attendees.length === 0) {
+      toast({
+        title: "Add attendees",
+        description: "Select at least one attendee email.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const start = new Date(`${scheduleDate}T${scheduleStartTime}`);
+    if (Number.isNaN(start.getTime())) {
+      toast({
+        title: "Invalid start time",
+        description: "Please select a valid meeting time.",
+        variant: "destructive",
+      });
+      return;
+    }
+    const durationMinutes = Number(scheduleDuration) || 30;
+    const end = new Date(start.getTime() + durationMinutes * 60 * 1000);
+
+    setIsSchedulingMeeting(true);
+    try {
+      const response = await fetch("/api/google/calendar/create", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: scheduleTitle.trim(),
+          description: scheduleDescription.trim() || agendaText,
+          startTime: start.toISOString(),
+          endTime: end.toISOString(),
+          attendees,
+        }),
+      });
+
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(payload.error || "Failed to create meeting.");
+      }
+
+      toast({ title: "Meeting scheduled", description: "Google Calendar event created." });
+
+      if (payload.event) {
+        const extractUrl = (value?: string | null) => {
+          if (!value) return null;
+          const match = value.match(/https?:\/\/\S+/i);
+          return match ? match[0].replace(/[),.]+$/, "") : null;
+        };
+        const event = payload.event;
+        const conferenceLink = event.conferenceData?.entryPoints?.find(
+          (entry: { uri?: string | null }) => entry.uri
+        )?.uri;
+        const locationLink = extractUrl(event.location);
+        const descriptionLink = extractUrl(event.description);
+        const hangoutLink =
+          event.hangoutLink || conferenceLink || locationLink || descriptionLink || null;
+
+        const newEvent: CalendarEvent = {
+          id: event.id,
+          title: event.summary || scheduleTitle.trim() || "Untitled Meeting",
+          startTime: event.start?.dateTime || event.start?.date,
+          endTime: event.end?.dateTime || event.end?.date || null,
+          hangoutLink,
+          location: event.location || null,
+          organizer: event.organizer?.email || null,
+          description: event.description || null,
+          attendees: Array.isArray(event.attendees)
+            ? event.attendees.map((attendee: any) => ({
+                email: attendee.email,
+                name: attendee.displayName || null,
+                responseStatus: attendee.responseStatus || null,
+              }))
+            : [],
+        };
+
+        setCalendarEvents((prev) => [newEvent, ...prev.filter((item) => item.id !== newEvent.id)]);
+      }
+      setIsSchedulingNew(false);
+      setScheduleTitle("");
+      setScheduleDate("");
+      setScheduleStartTime("");
+      setScheduleDuration("30");
+      setScheduleDescription("");
+      setScheduleSelectedPeople(new Set());
+      setManualAttendees([]);
+      setManualAttendeeInput("");
+
+      if (payload.event?.id) {
+        setSelectedEventId(payload.event.id);
+      }
+    } catch (error: any) {
+      console.error("Failed to schedule meeting:", error);
+      toast({
+        title: "Scheduling failed",
+        description: error.message || "Could not create meeting.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsSchedulingMeeting(false);
+    }
+  };
+
   const handleUpdateDescription = async () => {
     if (!selectedEvent) return;
     setIsUpdatingDescription(true);
@@ -355,6 +580,16 @@ export default function MeetingPlannerPageContent() {
               Upcoming Meetings
             </CardTitle>
             <CardDescription>Pick a meeting to prepare the agenda.</CardDescription>
+            <Button
+              variant="outline"
+              size="sm"
+              className="mt-3"
+              onClick={() => setIsSchedulingNew(true)}
+              disabled={!isGoogleTasksConnected}
+            >
+              <Plus className="mr-2 h-4 w-4" />
+              Schedule Google Meeting
+            </Button>
           </CardHeader>
           <CardContent className="flex-1 min-h-0">
             {isLoadingEvents ? (
@@ -372,7 +607,10 @@ export default function MeetingPlannerPageContent() {
                         className={`w-full rounded-lg border p-3 text-left transition ${
                           isSelected ? "border-primary bg-primary/10" : "border-border"
                         }`}
-                        onClick={() => setSelectedEventId(event.id)}
+                        onClick={() => {
+                          setSelectedEventId(event.id);
+                          setIsSchedulingNew(false);
+                        }}
                       >
                         <div className="flex items-center justify-between gap-2">
                           <div className="min-w-0">
@@ -408,7 +646,177 @@ export default function MeetingPlannerPageContent() {
             </CardHeader>
             <CardContent className="flex-1 overflow-auto space-y-4">
               {!selectedEvent && <p className="text-sm text-muted-foreground">Select a meeting to begin.</p>}
-              {selectedEvent && (
+              {isSchedulingNew && (
+                <div className="space-y-4 rounded-lg border p-4 bg-muted/20">
+                  <h4 className="text-sm font-semibold">Schedule a Google Meeting</h4>
+                  <div className="grid grid-cols-1 gap-3">
+                    <div className="space-y-1">
+                      <Label>Meeting title</Label>
+                      <Input
+                        value={scheduleTitle}
+                        onChange={(event) => setScheduleTitle(event.target.value)}
+                        placeholder="Weekly Sync"
+                      />
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="space-y-1">
+                        <Label>Date</Label>
+                        <Input
+                          type="date"
+                          value={scheduleDate}
+                          onChange={(event) => setScheduleDate(event.target.value)}
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <Label>Start time</Label>
+                        <Input
+                          type="time"
+                          value={scheduleStartTime}
+                          onChange={(event) => setScheduleStartTime(event.target.value)}
+                        />
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="space-y-1">
+                        <Label>Duration</Label>
+                        <Select
+                          value={scheduleDuration}
+                          onValueChange={(value) => setScheduleDuration(value)}
+                        >
+                          <SelectTrigger>
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="30">30 minutes</SelectItem>
+                            <SelectItem value="45">45 minutes</SelectItem>
+                            <SelectItem value="60">60 minutes</SelectItem>
+                            <SelectItem value="90">90 minutes</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-1">
+                        <Label>Attendees (manual)</Label>
+                        <div className="flex gap-2">
+                          <Input
+                            value={manualAttendeeInput}
+                            onChange={(event) => setManualAttendeeInput(event.target.value)}
+                            placeholder="name@email.com"
+                          />
+                          <Button
+                            variant="outline"
+                            onClick={() => {
+                              if (!isValidEmail(manualAttendeeInput)) {
+                                toast({
+                                  title: "Invalid email",
+                                  description: "Enter a valid email address.",
+                                  variant: "destructive",
+                                });
+                                return;
+                              }
+                              setManualAttendees((prev) => {
+                                const next = new Set(prev);
+                                next.add(manualAttendeeInput.trim().toLowerCase());
+                                return Array.from(next);
+                              });
+                              setManualAttendeeInput("");
+                            }}
+                          >
+                            Add
+                          </Button>
+                        </div>
+                        {manualAttendees.length > 0 && (
+                          <div className="flex flex-wrap gap-2 pt-2 text-xs">
+                            {manualAttendees.map((email) => (
+                              <Badge
+                                key={email}
+                                variant="secondary"
+                                className="cursor-pointer"
+                                onClick={() =>
+                                  setManualAttendees((prev) =>
+                                    prev.filter((item) => item !== email)
+                                  )
+                                }
+                              >
+                                {email}
+                              </Badge>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                    <div className="space-y-1">
+                      <Label>Notes</Label>
+                      <Textarea
+                        value={scheduleDescription}
+                        onChange={(event) => setScheduleDescription(event.target.value)}
+                        placeholder="Optional agenda notes..."
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>People directory</Label>
+                      <Input
+                        value={schedulePeopleSearch}
+                        onChange={(event) => setSchedulePeopleSearch(event.target.value)}
+                        placeholder="Search people..."
+                      />
+                      <div className="space-y-2 max-h-64 overflow-auto pr-2">
+                        {schedulePeopleOptions.map((person) => {
+                          const emailOptions = getEmailOptionsForPerson(person);
+                          const isSelected = scheduleSelectedPeople.has(person.id);
+                          return (
+                            <div key={person.id} className="flex items-center justify-between gap-3 rounded-md border p-2">
+                              <div>
+                                <p className="text-sm font-medium">{person.name}</p>
+                                <p className="text-xs text-muted-foreground">
+                                  {person.email || "No email on file"}
+                                </p>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                {isSelected && (
+                                  <Select
+                                    value={schedulePersonEmails[person.id] || emailOptions[0] || ""}
+                                    onValueChange={(value) =>
+                                      setSchedulePersonEmails((prev) => ({
+                                        ...prev,
+                                        [person.id]: value,
+                                      }))
+                                    }
+                                  >
+                                    <SelectTrigger className="h-8 w-[180px] text-xs">
+                                      <SelectValue placeholder="Select email" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      {emailOptions.length === 0 && (
+                                        <SelectItem value="none" disabled>
+                                          No emails found
+                                        </SelectItem>
+                                      )}
+                                      {emailOptions.map((email) => (
+                                        <SelectItem key={email} value={email}>
+                                          {email}
+                                        </SelectItem>
+                                      ))}
+                                    </SelectContent>
+                                  </Select>
+                                )}
+                                <Checkbox
+                                  checked={isSelected}
+                                  onCheckedChange={() => handleToggleSchedulePerson(person)}
+                                />
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </div>
+                  <Button onClick={handleScheduleMeeting} disabled={isSchedulingMeeting}>
+                    {isSchedulingMeeting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                    Schedule Meeting
+                  </Button>
+                </div>
+              )}
+              {selectedEvent && !isSchedulingNew && (
                 <>
                   <div className="space-y-3">
                     <h4 className="text-sm font-semibold">Attendees</h4>
@@ -470,7 +878,7 @@ export default function MeetingPlannerPageContent() {
                           {section.tasks.length === 0 && <li>No open tasks.</li>}
                           {section.tasks.map((task) => (
                             <li key={task.id}>
-                              {task.title} · {task.priority} ·{" "}
+                              {task.title} - {task.priority} - 
                               {task.dueAt ? format(new Date(task.dueAt as string), "MMM d") : "No due date"}
                             </li>
                           ))}
@@ -516,12 +924,15 @@ export default function MeetingPlannerPageContent() {
                       <p className="text-xs text-muted-foreground line-clamp-2">{meeting.summary}</p>
                     </div>
                   ))}
-                </div>
-              )}
-            </CardContent>
-          </Card>
+              </div>
+            )}
+          </CardContent>
+        </Card>
         </div>
       </div>
     </div>
   );
 }
+
+
+

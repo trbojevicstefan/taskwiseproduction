@@ -43,13 +43,23 @@ export async function GET() {
     .project({ _id: 1, suggestedTasks: 1 })
     .toArray();
 
-  const counts = new Map<string, number>();
+  type TaskStatus = "todo" | "inprogress" | "done" | "recurring";
+  const emptyCounts = () => ({
+    total: 0,
+    open: 0,
+    todo: 0,
+    inprogress: 0,
+    done: 0,
+    recurring: 0,
+  });
+
+  const statusCounts = new Map<string, ReturnType<typeof emptyCounts>>();
   const emailToId = new Map<string, string>();
   const nameToId = new Map<string, string>();
 
   people.forEach((person) => {
     const personId = String(person._id);
-    counts.set(personId, 0);
+    statusCounts.set(personId, emptyCounts());
     if (person.email) {
       const emailKey = person.email.toLowerCase();
       if (!emailToId.has(emailKey)) emailToId.set(emailKey, personId);
@@ -66,31 +76,63 @@ export async function GET() {
     }
   });
 
-  const increment = (personId?: string | null) => {
-    if (!personId) return;
+  const normalizeStatus = (status: any): TaskStatus => {
+    const raw = typeof status === "string" ? status.toLowerCase().trim() : "";
+    if (raw === "in progress" || raw === "in-progress" || raw === "in_progress") {
+      return "inprogress";
+    }
+    if (raw === "todo" || raw === "to do" || raw === "to-do") {
+      return "todo";
+    }
+    if (raw === "done" || raw === "completed" || raw === "complete") {
+      return "done";
+    }
+    if (raw === "recurring") {
+      return "recurring";
+    }
+    if (status === "todo" || status === "inprogress" || status === "done" || status === "recurring") {
+      return status;
+    }
+    return "todo";
+  };
+
+  const increment = (personId: string, status: TaskStatus) => {
     const key = String(personId);
-    if (!counts.has(key)) return;
-    counts.set(key, (counts.get(key) || 0) + 1);
+    const counts = statusCounts.get(key);
+    if (!counts) return;
+    counts.total += 1;
+    counts[status] += 1;
+    if (status !== "done") {
+      counts.open += 1;
+    }
+  };
+
+  const resolvePersonId = (task: any) => {
+    const assigneeId =
+      task?.assignee?.uid ?? task?.assignee?.id ?? task?.assigneeId ?? null;
+    if (assigneeId && statusCounts.has(String(assigneeId))) {
+      return String(assigneeId);
+    }
+    const emailKey =
+      task?.assignee?.email?.toLowerCase?.() ??
+      task?.assigneeEmail?.toLowerCase?.();
+    if (emailKey && emailToId.has(emailKey)) {
+      return emailToId.get(emailKey) || null;
+    }
+    const nameKeyRaw = task?.assigneeNameKey || task?.assigneeName || task?.assignee?.name;
+    if (nameKeyRaw) {
+      const nameKey = task?.assigneeNameKey || normalizePersonNameKey(nameKeyRaw);
+      if (nameKey && nameToId.has(nameKey)) {
+        return nameToId.get(nameKey) || null;
+      }
+    }
+    return null;
   };
 
   const matchTaskToPerson = (task: any) => {
-    const assigneeId = task.assignee?.uid;
-    if (assigneeId && counts.has(String(assigneeId))) {
-      increment(String(assigneeId));
-      return;
-    }
-    const emailKey = task.assignee?.email?.toLowerCase?.();
-    if (emailKey && emailToId.has(emailKey)) {
-      increment(emailToId.get(emailKey));
-      return;
-    }
-    const nameKeyRaw = task.assigneeName || task.assignee?.name;
-    if (nameKeyRaw) {
-      const nameKey = normalizePersonNameKey(nameKeyRaw);
-      if (nameKey && nameToId.has(nameKey)) {
-        increment(nameToId.get(nameKey));
-      }
-    }
+    const personId = resolvePersonId(task);
+    if (!personId) return;
+    increment(personId, normalizeStatus(task?.status));
   };
 
   const flattenExtractedTasks = (items: ExtractedTaskSchema[] = []) => {
@@ -107,19 +149,40 @@ export async function GET() {
     return result;
   };
 
-  tasks.forEach(matchTaskToPerson);
+  const meetingSessionsWithTasks = new Set<string>();
+  const chatSessionsWithTasks = new Set<string>();
+
+  tasks.forEach((task) => {
+    if (task?.sourceSessionType === "meeting" && task.sourceSessionId) {
+      meetingSessionsWithTasks.add(String(task.sourceSessionId));
+    }
+    if (task?.sourceSessionType === "chat" && task.sourceSessionId) {
+      chatSessionsWithTasks.add(String(task.sourceSessionId));
+    }
+    matchTaskToPerson(task);
+  });
+
   meetings.forEach((meeting) => {
+    const meetingId = String(meeting._id ?? meeting.id);
+    if (meetingSessionsWithTasks.has(meetingId)) return;
     const flattened = flattenExtractedTasks(meeting.extractedTasks || []);
     flattened.forEach(matchTaskToPerson);
   });
+
   chatSessions.forEach((session) => {
+    const sessionId = String(session._id ?? session.id);
+    if (chatSessionsWithTasks.has(sessionId)) return;
     const flattened = flattenExtractedTasks(session.suggestedTasks || []);
     flattened.forEach(matchTaskToPerson);
   });
 
   const peopleWithCounts = people.map((person) => {
-    const taskCount = counts.get(String(person._id)) || 0;
-    return { ...serializePerson(person), taskCount };
+    const counts = statusCounts.get(String(person._id)) || emptyCounts();
+    return {
+      ...serializePerson(person),
+      taskCount: counts.open,
+      taskCounts: counts,
+    };
   });
 
   return NextResponse.json(peopleWithCounts);

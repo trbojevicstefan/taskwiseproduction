@@ -64,7 +64,7 @@ export const getPersonDetails = async (
   }
 };
 
-export const updatePersonInFirestore = async (
+export const updatePerson = async (
   _userId: string,
   personId: string,
   data: Partial<Person>
@@ -115,7 +115,7 @@ export const onTasksForPersonSnapshot = (
   };
 };
 
-export function sanitizeTaskForFirestore(task: any): ExtractedTaskSchema {
+export function normalizeTask(task: any): ExtractedTaskSchema {
   if (!task) return {} as ExtractedTaskSchema;
 
   let sanitizedAssignee = null;
@@ -129,7 +129,7 @@ export function sanitizeTaskForFirestore(task: any): ExtractedTaskSchema {
   }
 
   const sanitizedSubtasks = task.subtasks
-    ? (task.subtasks || []).map(sanitizeTaskForFirestore)
+    ? (task.subtasks || []).map(normalizeTask)
     : null;
 
   return {
@@ -146,10 +146,10 @@ export function sanitizeTaskForFirestore(task: any): ExtractedTaskSchema {
     aiProvider: task.aiProvider === undefined ? null : task.aiProvider,
     researchBrief: task.researchBrief === undefined ? null : task.researchBrief,
     aiAssistanceText: task.aiAssistanceText === undefined ? null : task.aiAssistanceText,
+    comments: task.comments === undefined ? null : task.comments,
     subtasks: sanitizedSubtasks,
     addedToProjectId: task.addedToProjectId === undefined ? null : task.addedToProjectId,
     addedToProjectName: task.addedToProjectName === undefined ? null : task.addedToProjectName,
-    firestoreTaskId: task.firestoreTaskId === undefined ? null : task.firestoreTaskId,
     completionSuggested:
       task.completionSuggested === undefined ? null : task.completionSuggested,
     completionConfidence:

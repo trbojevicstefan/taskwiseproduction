@@ -1,18 +1,18 @@
 
 // src/app/planning/page.tsx
 import DashboardPageLayout from '@/components/layouts/DashboardPageLayout';
-import PlanningPageContent from '@/components/dashboard/planning/PlanningPageContent';
+import MeetingPlannerPageContent from '@/components/dashboard/meetings/MeetingPlannerPageContent';
 import type { Metadata } from 'next';
 
 export const metadata: Metadata = {
-  title: 'Planning | TaskWiseAI',
-  description: 'Break down ideas into actionable plans and visualize them.',
+  title: 'Meeting Planner | TaskWiseAI',
+  description: 'Plan upcoming meetings, align tasks, and prepare agendas.',
 };
 
 export default function PlanningPage() {
   return (
     <DashboardPageLayout>
-      <PlanningPageContent />
+      <MeetingPlannerPageContent />
     </DashboardPageLayout>
   );
 }

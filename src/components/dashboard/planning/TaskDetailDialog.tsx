@@ -27,6 +27,7 @@ import { generateResearchBrief, type GenerateResearchBriefOutput } from '@/ai/fl
 import { useToast } from "@/hooks/use-toast";
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { motion } from 'framer-motion';
+import { useAuth } from '@/contexts/AuthContext';
 
 interface TaskDetailDialogProps {
   isOpen: boolean;
@@ -39,29 +40,39 @@ export default function TaskDetailDialog({ isOpen, onClose, task, onSave }: Task
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [priority, setPriority] = useState<DisplayTask['priority']>('medium');
+  const [status, setStatus] = useState<DisplayTask['status']>('todo');
   const [dueAt, setDueAt] = useState<Date | undefined>(undefined);
   const [researchBrief, setResearchBrief] = useState<string | null>(null);
   const [aiAssistanceText, setAiAssistanceText] = useState<string | null>(null);
+  const [comments, setComments] = useState<DisplayTask['comments']>([]);
+  const [newComment, setNewComment] = useState('');
   const [isGeneratingBrief, setIsGeneratingBrief] = useState(false);
   const [isGeneratingAssistance, setIsGeneratingAssistance] = useState(false);
   const { toast } = useToast();
+  const { user } = useAuth();
   
   useEffect(() => {
     if (task) {
       setTitle(task.title);
       setDescription(task.description || '');
       setPriority(task.priority || 'medium');
+      setStatus(task.status || 'todo');
       setDueAt(task.dueAt ? (typeof task.dueAt === 'string' ? parseISO(task.dueAt) : new Date(task.dueAt)) : undefined);
       setResearchBrief(task.researchBrief || null);
       setAiAssistanceText(task.aiAssistanceText || null);
+      setComments(task.comments || []);
+      setNewComment('');
     } else {
       // Reset state when there's no task (e.g., dialog closes)
       setTitle('');
       setDescription('');
       setPriority('medium');
+      setStatus('todo');
       setDueAt(undefined);
       setResearchBrief(null);
       setAiAssistanceText(null);
+      setComments([]);
+      setNewComment('');
     }
   }, [task, isOpen]);
 
@@ -70,9 +81,11 @@ export default function TaskDetailDialog({ isOpen, onClose, task, onSave }: Task
     title,
     description,
     priority,
+    status,
     dueAt: dueAt ? dueAt.toISOString() : null,
     researchBrief,
     aiAssistanceText,
+    comments,
     ...overrides,
   });
 
@@ -123,6 +136,21 @@ export default function TaskDetailDialog({ isOpen, onClose, task, onSave }: Task
     if (!task) return;
     onSave(buildUpdatedTask());
   };
+
+  const handleAddComment = () => {
+    if (!newComment.trim()) return;
+    const nextComment = {
+      id: globalThis.crypto?.randomUUID?.() || `comment_${Date.now()}`,
+      text: newComment.trim(),
+      createdAt: Date.now(),
+      authorName: user?.displayName || user?.name || "You",
+      authorId: user?.uid || null,
+    };
+    const nextComments = [...(comments || []), nextComment];
+    setComments(nextComments);
+    setNewComment('');
+    onSave(buildUpdatedTask({ comments: nextComments }), { close: false });
+  };
   
   if (!isOpen) return null;
 
@@ -151,6 +179,38 @@ export default function TaskDetailDialog({ isOpen, onClose, task, onSave }: Task
                   <div className="space-y-2">
                       <Label htmlFor="description">Description</Label>
                       <Textarea id="description" value={description} onChange={(e) => setDescription(e.target.value)} className="min-h-[100px]" placeholder="Add a more detailed description..."/>
+                  </div>
+                  <div className="space-y-3">
+                      <Label>Comments</Label>
+                      <div className="space-y-3">
+                        {(comments || []).length === 0 && (
+                          <p className="text-xs text-muted-foreground">No comments yet.</p>
+                        )}
+                        {(comments || []).map((comment) => (
+                          <div key={comment.id} className="rounded-md border bg-muted/30 p-3 text-xs">
+                            <div className="flex items-center justify-between text-muted-foreground">
+                              <span className="font-semibold text-foreground">
+                                {comment.authorName || "Contributor"}
+                              </span>
+                              <span>{format(new Date(comment.createdAt), "MMM d, h:mm a")}</span>
+                            </div>
+                            <p className="mt-2 text-foreground whitespace-pre-wrap">{comment.text}</p>
+                          </div>
+                        ))}
+                      </div>
+                      <div className="flex flex-col gap-2">
+                        <Textarea
+                          value={newComment}
+                          onChange={(e) => setNewComment(e.target.value)}
+                          placeholder="Add a comment..."
+                          className="min-h-[80px]"
+                        />
+                        <div className="flex justify-end">
+                          <Button type="button" size="sm" onClick={handleAddComment} disabled={!newComment.trim()}>
+                            Add Comment
+                          </Button>
+                        </div>
+                      </div>
                   </div>
                   {task?.sourceEvidence && task.sourceEvidence.length > 0 && (
                     <div className="space-y-2">
@@ -200,6 +260,18 @@ export default function TaskDetailDialog({ isOpen, onClose, task, onSave }: Task
             className="space-y-4"
           >
               <div className="p-4 rounded-lg bg-card border space-y-4">
+                  <div className="space-y-2">
+                      <Label htmlFor="status">Status</Label>
+                      <Select value={status || "todo"} onValueChange={(value: DisplayTask['status']) => setStatus(value)}>
+                          <SelectTrigger><SelectValue placeholder="Select status" /></SelectTrigger>
+                          <SelectContent>
+                              <SelectItem value="todo">To do</SelectItem>
+                              <SelectItem value="inprogress">In progress</SelectItem>
+                              <SelectItem value="done">Done</SelectItem>
+                              <SelectItem value="recurring">Recurring</SelectItem>
+                          </SelectContent>
+                      </Select>
+                  </div>
                    <div className="space-y-2">
                       <Label htmlFor="priority">Priority</Label>
                       <Select value={priority} onValueChange={(value: DisplayTask['priority']) => setPriority(value)}>

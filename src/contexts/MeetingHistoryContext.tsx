@@ -1,4 +1,4 @@
-﻿
+
 // src/contexts/MeetingHistoryContext.tsx
 "use client";
 
@@ -9,7 +9,7 @@ import type { Meeting } from '@/types/meeting';
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from "@/hooks/use-toast";
 import { apiFetch } from '@/lib/api';
-import { sanitizeTaskForFirestore } from '@/lib/data';
+import { normalizeTask } from '@/lib/data';
 
 interface MeetingHistoryContextType {
   meetings: Meeting[];
@@ -47,20 +47,20 @@ export const MeetingHistoryProvider = ({ children }: { children: ReactNode }) =>
         levels
           ? {
               light: (levels.light || []).map((task: any) =>
-                sanitizeTaskForFirestore(task as ExtractedTaskSchema)
+                normalizeTask(task as ExtractedTaskSchema)
               ),
               medium: (levels.medium || []).map((task: any) =>
-                sanitizeTaskForFirestore(task as ExtractedTaskSchema)
+                normalizeTask(task as ExtractedTaskSchema)
               ),
               detailed: (levels.detailed || []).map((task: any) =>
-                sanitizeTaskForFirestore(task as ExtractedTaskSchema)
+                normalizeTask(task as ExtractedTaskSchema)
               ),
             }
           : null;
       const sanitizedMeetings = loadedMeetings.map(m => ({
           ...m,
-          extractedTasks: (m.extractedTasks || []).map(task => sanitizeTaskForFirestore(task as ExtractedTaskSchema)),
-          originalAiTasks: (m.originalAiTasks || []).map(task => sanitizeTaskForFirestore(task as ExtractedTaskSchema)),
+          extractedTasks: (m.extractedTasks || []).map(task => normalizeTask(task as ExtractedTaskSchema)),
+          originalAiTasks: (m.originalAiTasks || []).map(task => normalizeTask(task as ExtractedTaskSchema)),
           originalAllTaskLevels: sanitizeLevels(m.originalAllTaskLevels),
           allTaskLevels: sanitizeLevels(m.allTaskLevels),
           taskRevisions: m.taskRevisions || [],
@@ -108,13 +108,13 @@ export const MeetingHistoryProvider = ({ children }: { children: ReactNode }) =>
       levels
         ? {
             light: (levels.light || []).map((task: any) =>
-              sanitizeTaskForFirestore(task as ExtractedTaskSchema)
+              normalizeTask(task as ExtractedTaskSchema)
             ),
             medium: (levels.medium || []).map((task: any) =>
-              sanitizeTaskForFirestore(task as ExtractedTaskSchema)
+              normalizeTask(task as ExtractedTaskSchema)
             ),
             detailed: (levels.detailed || []).map((task: any) =>
-              sanitizeTaskForFirestore(task as ExtractedTaskSchema)
+              normalizeTask(task as ExtractedTaskSchema)
             ),
           }
         : null;
@@ -123,11 +123,11 @@ export const MeetingHistoryProvider = ({ children }: { children: ReactNode }) =>
 
     const sanitizedData = {
         ...meetingData,
-        extractedTasks: (meetingData.extractedTasks || []).map(task => sanitizeTaskForFirestore(task as ExtractedTaskSchema)),
+        extractedTasks: (meetingData.extractedTasks || []).map(task => normalizeTask(task as ExtractedTaskSchema)),
         allTaskLevels: sanitizedAllTaskLevels,
         originalAiTasks:
           (meetingData.originalAiTasks || meetingData.extractedTasks || []).map(task =>
-            sanitizeTaskForFirestore(task as ExtractedTaskSchema)
+            normalizeTask(task as ExtractedTaskSchema)
           ),
         originalAllTaskLevels: sanitizedOriginalAllTaskLevels || sanitizedAllTaskLevels,
     };
@@ -153,6 +153,22 @@ export const MeetingHistoryProvider = ({ children }: { children: ReactNode }) =>
         method: "POST",
         body: JSON.stringify(sanitizedData),
       });
+      if (sanitizedData.extractedTasks?.length) {
+        try {
+          await apiFetch("/api/tasks/sync", {
+            method: "POST",
+            body: JSON.stringify({
+              sourceSessionId: created.id,
+              sourceSessionType: "meeting",
+              sourceSessionName: created.title,
+              origin: "meeting",
+              tasks: sanitizedData.extractedTasks,
+            }),
+          });
+        } catch (syncError) {
+          console.error("Failed to sync meeting tasks to task list", syncError);
+        }
+      }
       setActiveMeetingIdState(created.id);
       toast({ title: "Meeting Created", description: `Meeting "${meetingData.title}" has been saved.` });
       setMeetings(prev => [created, ...prev]);
@@ -170,13 +186,29 @@ export const MeetingHistoryProvider = ({ children }: { children: ReactNode }) =>
       const sanitizedFields = { ...updatedFields };
       if (sanitizedFields.extractedTasks) {
         sanitizedFields.extractedTasks = sanitizedFields.extractedTasks.map(task =>
-          sanitizeTaskForFirestore(task as ExtractedTaskSchema)
+          normalizeTask(task as ExtractedTaskSchema)
         );
       }
       const updated = await apiFetch<Meeting>(`/api/meetings/${sessionId}`, {
         method: "PATCH",
         body: JSON.stringify(sanitizedFields),
       });
+      if (sanitizedFields.extractedTasks) {
+        try {
+          await apiFetch("/api/tasks/sync", {
+            method: "POST",
+            body: JSON.stringify({
+              sourceSessionId: updated.id,
+              sourceSessionType: "meeting",
+              sourceSessionName: updated.title,
+              origin: "meeting",
+              tasks: sanitizedFields.extractedTasks,
+            }),
+          });
+        } catch (syncError) {
+          console.error("Failed to sync meeting tasks to task list", syncError);
+        }
+      }
       setMeetings(prev => prev.map(meeting => meeting.id === updated.id ? updated : meeting));
       return updated;
     } catch (error) {
@@ -232,3 +264,4 @@ export const useMeetingHistory = () => {
   }
   return context;
 };
+

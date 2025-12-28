@@ -1,4 +1,4 @@
-﻿// src/components/dashboard/people/PeoplePageContent.tsx
+// src/components/dashboard/people/PeoplePageContent.tsx
 "use client";
 
 import React, { useState, useEffect, useMemo } from 'react';
@@ -9,7 +9,7 @@ import { Users, UserPlus, Info, Loader2, Briefcase, Slack, LayoutGrid, List, Tra
 import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert';
 import { useAuth } from '@/contexts/AuthContext';
 import { useIntegrations } from '@/contexts/IntegrationsContext';
-import { addPerson, mergePeople, onPeopleSnapshot, updatePersonInFirestore } from '@/lib/data';
+import { addPerson, mergePeople, onPeopleSnapshot, updatePerson } from '@/lib/data';
 import type { PersonWithTaskCount } from '@/types/person';
 import DashboardHeader from '../DashboardHeader';
 import { Button } from '@/components/ui/button';
@@ -161,7 +161,7 @@ export default function PeoplePageContent() {
     try {
       await Promise.all(
         Array.from(selectedPeopleIds).map((personId) =>
-          updatePersonInFirestore(user.uid, personId, { isBlocked: nextBlocked })
+          updatePerson(user.uid, personId, { isBlocked: nextBlocked })
         )
       );
       toast({
@@ -302,7 +302,7 @@ export default function PeoplePageContent() {
     if (!user?.uid) return;
     setIsUpdatingBlocked(personId);
     try {
-      await updatePersonInFirestore(user.uid, personId, { isBlocked: false });
+      await updatePerson(user.uid, personId, { isBlocked: false });
       toast({
         title: "Person Unblocked",
         description: "This person will be available for discovery again.",
@@ -343,6 +343,15 @@ export default function PeoplePageContent() {
     } finally {
       setIsSavingPerson(false);
     }
+  };
+
+  const getTaskCounts = (person: PersonWithTaskCount) => {
+    const counts = person.taskCounts;
+    return {
+      todo: counts?.todo ?? person.taskCount ?? 0,
+      inprogress: counts?.inprogress ?? 0,
+      done: counts?.done ?? 0,
+    };
   };
 
   return (
@@ -414,7 +423,7 @@ export default function PeoplePageContent() {
             <CardHeader>
               <CardTitle>Directory is Empty</CardTitle>
               <CardDescription>
-                No people have been extracted yet. Process a meeting transcript in the "Chat" or "Planning" page to get started.
+                No people have been extracted yet. Process a meeting transcript in the "Chat" or "Meeting Planner" page to get started.
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -462,6 +471,7 @@ export default function PeoplePageContent() {
               <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
                 {visiblePeople.map((person) => {
                   const personId = String(person.id);
+                  const counts = getTaskCounts(person);
                   return (
                     <Card key={personId} className="relative h-full flex flex-col hover:border-primary hover:shadow-lg transition-all">
                       <div className="absolute top-3 left-3">
@@ -482,7 +492,11 @@ export default function PeoplePageContent() {
                         </CardContent>
                         <CardFooter className="p-3 bg-muted/50 border-t flex justify-center items-center gap-2 text-sm text-muted-foreground">
                           <Briefcase size={14} />
-                          <span>{person.taskCount} Assigned Task{person.taskCount !== 1 ? 's' : ''}</span>
+                          <div className="flex items-center gap-2 text-xs">
+                            <Badge variant="secondary">Todo {counts.todo}</Badge>
+                            <Badge variant="outline">In progress {counts.inprogress}</Badge>
+                            <Badge variant="outline">Done {counts.done}</Badge>
+                          </div>
                         </CardFooter>
                       </Link>
                     </Card>
@@ -499,6 +513,7 @@ export default function PeoplePageContent() {
                 </div>
                 {visiblePeople.map((person) => {
                   const personId = String(person.id);
+                  const counts = getTaskCounts(person);
                   return (
                     <div key={personId} className="grid grid-cols-[40px_1fr_1fr_140px] gap-4 items-center px-4 py-3 border-t">
                       <Checkbox
@@ -515,8 +530,12 @@ export default function PeoplePageContent() {
                           {person.title && <p className="text-xs text-muted-foreground">{person.title}</p>}
                         </div>
                       </Link>
-                      <span className="text-sm text-muted-foreground">{person.email || "—"}</span>
-                      <span className="text-sm text-muted-foreground">{person.taskCount}</span>
+                      <span className="text-sm text-muted-foreground">{person.email || "No email"}</span>
+                      <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                        <Badge variant="secondary">Todo {counts.todo}</Badge>
+                        <Badge variant="outline">In progress {counts.inprogress}</Badge>
+                        <Badge variant="outline">Done {counts.done}</Badge>
+                      </div>
                     </div>
                   );
                 })}
@@ -669,7 +688,7 @@ export default function PeoplePageContent() {
             <div className="hidden lg:flex items-center justify-center">
               <div className="flex flex-col items-center gap-2 text-xs text-muted-foreground">
                 <span>Match</span>
-                <span>→</span>
+                <span>?</span>
               </div>
             </div>
             <div className="space-y-3">
@@ -766,3 +785,5 @@ export default function PeoplePageContent() {
     </div>
   );
 }
+
+

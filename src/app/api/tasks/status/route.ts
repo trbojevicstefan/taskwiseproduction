@@ -91,6 +91,14 @@ export async function PATCH(request: Request) {
     await db
       .collection<any>("meetings")
       .updateOne(filter, { $set: { extractedTasks: tasks, lastActivityAt: new Date() } });
+    await db.collection<any>("tasks").updateOne(
+      {
+        userId: userIdQuery,
+        sourceSessionType: "meeting",
+        $or: [{ _id: taskId }, { sourceTaskId: taskId }],
+      },
+      { $set: { status: normalizedStatus, lastUpdated: new Date() } }
+    );
     return NextResponse.json({ ok: true });
   }
 
@@ -110,6 +118,14 @@ export async function PATCH(request: Request) {
     await db
       .collection<any>("chatSessions")
       .updateOne(filter, { $set: { suggestedTasks: tasks, lastActivityAt: new Date() } });
+    await db.collection<any>("tasks").updateOne(
+      {
+        userId: userIdQuery,
+        sourceSessionType: "chat",
+        $or: [{ _id: taskId }, { sourceTaskId: taskId }],
+      },
+      { $set: { status: normalizedStatus, lastUpdated: new Date() } }
+    );
     return NextResponse.json({ ok: true });
   }
 

@@ -3,6 +3,8 @@ import { randomUUID } from "crypto";
 import { getDb } from "@/lib/db";
 import { getSessionUserId } from "@/lib/server-auth";
 import { buildIdQuery } from "@/lib/mongo-id";
+import { syncTasksForSource } from "@/lib/task-sync";
+import type { ExtractedTaskSchema } from "@/types/chat";
 
 const serializeMeeting = (meeting: any) => ({
   ...meeting,
@@ -57,6 +59,20 @@ export async function POST(request: Request) {
 
   const db = await getDb();
   await db.collection<any>("meetings").insertOne(meeting);
+
+  if (Array.isArray(meeting.extractedTasks)) {
+    try {
+      await syncTasksForSource(db, meeting.extractedTasks as ExtractedTaskSchema[], {
+        userId,
+        sourceSessionId: meeting._id,
+        sourceSessionType: "meeting",
+        sourceSessionName: meeting.title,
+        origin: "meeting",
+      });
+    } catch (error) {
+      console.error("Failed to sync meeting tasks after creation:", error);
+    }
+  }
 
   return NextResponse.json(serializeMeeting(meeting));
 }

@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
 import { getSessionUserId } from "@/lib/server-auth";
 import { buildIdQuery } from "@/lib/mongo-id";
+import { syncTasksForSource } from "@/lib/task-sync";
+import type { ExtractedTaskSchema } from "@/types/chat";
 
 const serializeMeeting = (meeting: any) => ({
   ...meeting,
@@ -34,6 +36,45 @@ export async function PATCH(
   await db.collection<any>("meetings").updateOne(filter, { $set: update });
 
   const meeting = await db.collection<any>("meetings").findOne(filter);
+  if (Array.isArray(body.extractedTasks)) {
+    try {
+      await syncTasksForSource(db, body.extractedTasks as ExtractedTaskSchema[], {
+        userId,
+        sourceSessionId: String(meeting?._id ?? id),
+        sourceSessionType: "meeting",
+        sourceSessionName: meeting?.title || body.title || "Meeting",
+        origin: "meeting",
+      });
+    } catch (error) {
+      console.error("Failed to sync meeting tasks after update:", error);
+    }
+  }
+  return NextResponse.json(serializeMeeting(meeting));
+}
+
+export async function GET(
+  _request: Request,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const { id } = await params;
+  const userId = await getSessionUserId();
+  if (!userId) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  const db = await getDb();
+  const idQuery = buildIdQuery(id);
+  const userIdQuery = buildIdQuery(userId);
+  const filter = {
+    userId: userIdQuery,
+    $or: [{ _id: idQuery }, { id }],
+  };
+
+  const meeting = await db.collection<any>("meetings").findOne(filter);
+  if (!meeting) {
+    return NextResponse.json({ error: "Meeting not found." }, { status: 404 });
+  }
+
   return NextResponse.json(serializeMeeting(meeting));
 }
 

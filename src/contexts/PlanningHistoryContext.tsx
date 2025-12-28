@@ -1,4 +1,4 @@
-﻿// src/contexts/PlanningHistoryContext.tsx
+// src/contexts/PlanningHistoryContext.tsx
 "use client";
 
 import React, { createContext, useContext, useState, useEffect, ReactNode, useCallback } from 'react';
@@ -7,7 +7,7 @@ import type { PlanningSession, ExtractedTaskSchema } from '@/types/chat';
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from "@/hooks/use-toast";
 import { apiFetch } from '@/lib/api';
-import { sanitizeTaskForFirestore } from '@/lib/data';
+import { normalizeTask } from '@/lib/data';
 
 export type DetailLevel = 'light' | 'medium' | 'detailed';
 
@@ -48,20 +48,20 @@ export const PlanningHistoryProvider = ({ children }: { children: ReactNode }) =
             levels
               ? {
                   light: (levels.light || []).map((task: any) =>
-                    sanitizeTaskForFirestore(task as ExtractedTaskSchema)
+                    normalizeTask(task as ExtractedTaskSchema)
                   ),
                   medium: (levels.medium || []).map((task: any) =>
-                    sanitizeTaskForFirestore(task as ExtractedTaskSchema)
+                    normalizeTask(task as ExtractedTaskSchema)
                   ),
                   detailed: (levels.detailed || []).map((task: any) =>
-                    sanitizeTaskForFirestore(task as ExtractedTaskSchema)
+                    normalizeTask(task as ExtractedTaskSchema)
                   ),
                 }
               : null;
           const sanitizedSessions = loadedSessions.map(s => ({
               ...s,
-              extractedTasks: (s.extractedTasks || []).map(task => sanitizeTaskForFirestore(task as ExtractedTaskSchema)),
-              originalAiTasks: (s.originalAiTasks || []).map(task => sanitizeTaskForFirestore(task as ExtractedTaskSchema)),
+              extractedTasks: (s.extractedTasks || []).map(task => normalizeTask(task as ExtractedTaskSchema)),
+              originalAiTasks: (s.originalAiTasks || []).map(task => normalizeTask(task as ExtractedTaskSchema)),
               originalAllTaskLevels: sanitizeLevels(s.originalAllTaskLevels),
               allTaskLevels: sanitizeLevels(s.allTaskLevels),
               taskRevisions: s.taskRevisions || [],
@@ -109,18 +109,18 @@ export const PlanningHistoryProvider = ({ children }: { children: ReactNode }) =
     const now = new Date();
     const sessionTitle = title || inputText.substring(0, 40).split('\n')[0] + (inputText.length > 40 ? '...' : '') || `Plan ${now.toLocaleTimeString()}`;
 
-    const sanitizedExtractedTasks = (extractedTasks || []).map(task => sanitizeTaskForFirestore(task as ExtractedTaskSchema));
+    const sanitizedExtractedTasks = (extractedTasks || []).map(task => normalizeTask(task as ExtractedTaskSchema));
     const sanitizeLevels = (levels: any) =>
       levels
         ? {
             light: (levels.light || []).map((task: any) =>
-              sanitizeTaskForFirestore(task as ExtractedTaskSchema)
+              normalizeTask(task as ExtractedTaskSchema)
             ),
             medium: (levels.medium || []).map((task: any) =>
-              sanitizeTaskForFirestore(task as ExtractedTaskSchema)
+              normalizeTask(task as ExtractedTaskSchema)
             ),
             detailed: (levels.detailed || []).map((task: any) =>
-              sanitizeTaskForFirestore(task as ExtractedTaskSchema)
+              normalizeTask(task as ExtractedTaskSchema)
             ),
           }
         : null;
@@ -167,7 +167,7 @@ export const PlanningHistoryProvider = ({ children }: { children: ReactNode }) =
     if (!user?.uid) return;
     let fieldsToUpdate = { ...updatedFields };
     if (fieldsToUpdate.extractedTasks) {
-        fieldsToUpdate.extractedTasks = (fieldsToUpdate.extractedTasks || []).map(task => sanitizeTaskForFirestore(task as ExtractedTaskSchema));
+        fieldsToUpdate.extractedTasks = (fieldsToUpdate.extractedTasks || []).map(task => normalizeTask(task as ExtractedTaskSchema));
     }
      try {
       const updated = await apiFetch<PlanningSession>(`/api/planning-sessions/${sessionId}`, {
@@ -254,3 +254,4 @@ export const usePlanningHistory = () => {
   }
   return context;
 };
+

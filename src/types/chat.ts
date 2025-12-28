@@ -12,6 +12,14 @@ export interface TaskEvidence {
   timestamp?: string | null;
 }
 
+export interface TaskComment {
+  id: string;
+  text: string;
+  createdAt: number;
+  authorName?: string | null;
+  authorId?: string | null;
+}
+
 export interface CompletionTarget {
   sourceType: 'task' | 'meeting' | 'chat';
   sourceSessionId: string;
@@ -27,7 +35,7 @@ export interface TaskRevision {
   tasksSnapshot: ExtractedTaskSchema[];
 }
 
-// Task schema used throughout the application, including AI flows and Firestore.
+// Task schema used throughout the application, including AI flows and storage.
 export interface ExtractedTaskSchema {
   id: string; // Stable client-side UUID
   title: string;
@@ -41,11 +49,11 @@ export interface ExtractedTaskSchema {
   assigneeName?: string | null; // Name from AI, used for matching
   sourceEvidence?: TaskEvidence[] | null;
   aiProvider?: 'gemini' | 'openai' | null;
+  comments?: TaskComment[] | null;
   
   // UI/Client-side state fields
   addedToProjectId?: string | null;
   addedToProjectName?: string | null;
-  firestoreTaskId?: string | null;
   
   // AI-generated content
   researchBrief?: string | null;

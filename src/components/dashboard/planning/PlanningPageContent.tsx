@@ -1,4 +1,4 @@
-﻿// src/components/dashboard/planning/PlanningPageContent.tsx
+// src/components/dashboard/planning/PlanningPageContent.tsx
 "use client";
 
 import React, { useState, useCallback, useEffect, useMemo } from 'react';
@@ -22,7 +22,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { cn } from '@/lib/utils';
 import MindMapDisplay from './MindMapDisplay';
 import { useAuth } from '@/contexts/AuthContext';
-import { sanitizeTaskForFirestore as sanitizeTaskForFirestoreUtil, onPeopleSnapshot, addPerson } from '@/lib/data';
+import { normalizeTask as normalizeTaskUtil, onPeopleSnapshot, addPerson } from '@/lib/data';
 import HierarchicalTaskItem from './HierarchicalTaskItem';
 import TaskDetailDialog from './TaskDetailDialog';
 import SetDueDateDialog from './SetDueDateDialog';
@@ -84,7 +84,7 @@ import PushToTrelloDialog from '../common/PushToTrelloDialog';
 
 type DetailLevel = 'light' | 'medium' | 'detailed';
 
-// Helper to sanitize a single task for Firestore compatibility
+// Helper to normalize a single task for storage compatibility
 const sanitizeTaskForInternalState = (task: any): DisplayTask => {
   const newId = task.id || uuidv4();
   return {
@@ -100,9 +100,8 @@ const sanitizeTaskForInternalState = (task: any): DisplayTask => {
     subtasks: task.subtasks ? task.subtasks.map((st: any) => sanitizeTaskForInternalState(st)) : null,
     addedToProjectId: task.addedToProjectId === undefined ? null : task.addedToProjectId,
     addedToProjectName: task.addedToProjectName === undefined ? null : task.addedToProjectName,
-    firestoreTaskId: task.firestoreTaskId === undefined ? null : task.firestoreTaskId,
+    };
   };
-};
 
 
 const findTaskByIdRecursive = (tasks: DisplayTask[], taskId: string): DisplayTask | null => {
@@ -399,14 +398,14 @@ export default function PlanningPageContent() {
       if (activePlanningSessionId) {
         updateActivePlanningSession({ 
             inputText: pastedContent, 
-            extractedTasks: newDisplayTasks.map(sanitizeTaskForFirestoreUtil),
+            extractedTasks: newDisplayTasks.map(normalizeTaskUtil),
             allTaskLevels: result.allTaskLevels as any, // Save all levels
         });
         setEditableTitle(getActivePlanningSession()?.title || typedInput.substring(0,40) || "Updated Plan");
       } else {
         const newSession = await createNewPlanningSession(
             pastedContent, 
-            newDisplayTasks.map(sanitizeTaskForFirestoreUtil), 
+            newDisplayTasks.map(normalizeTaskUtil), 
             typedInput,
             result.allTaskLevels as any // Pass all levels to new session
         );
@@ -516,7 +515,7 @@ export default function PlanningPageContent() {
     const newExtractedTasks = updateRecursively(extractedTasks);
     setExtractedTasks(newExtractedTasks);
     if(activePlanningSessionId) {
-        updateActivePlanningSession({ inputText: pastedContent, extractedTasks: newExtractedTasks.map(sanitizeTaskForFirestoreUtil) });
+        updateActivePlanningSession({ inputText: pastedContent, extractedTasks: newExtractedTasks.map(normalizeTaskUtil) });
     }
       if (options?.close !== false) {
         setIsTaskDetailDialogVisible(false);
@@ -544,7 +543,7 @@ export default function PlanningPageContent() {
           const newTasks = result.tasks.map((t: DisplayTask) => sanitizeTaskForInternalState(t as DisplayTask));
           setExtractedTasks(newTasks);
           if (activePlanningSessionId) {
-              updateActivePlanningSession({ inputText: pastedContent, extractedTasks: newTasks.map(sanitizeTaskForFirestoreUtil) });
+              updateActivePlanningSession({ inputText: pastedContent, extractedTasks: newTasks.map(normalizeTaskUtil) });
           }
           toast({ title: "Sub-tasks Added", description: `Sub-tasks added under "${taskToBreakDown.title}".` });
       } else {
@@ -619,7 +618,7 @@ export default function PlanningPageContent() {
           }
       }
       if(activePlanningSessionId) {
-          updateActivePlanningSession({ inputText: pastedContent, extractedTasks: tempExtractedTasks.map(sanitizeTaskForFirestoreUtil) });
+          updateActivePlanningSession({ inputText: pastedContent, extractedTasks: tempExtractedTasks.map(normalizeTaskUtil) });
       }
 
     setIsProcessingBatchBriefs(false);
@@ -675,7 +674,7 @@ export default function PlanningPageContent() {
     });
 
     if (activePlanningSessionId) {
-      updateActivePlanningSession({ inputText: pastedContent, extractedTasks: newExtractedTasks.map(sanitizeTaskForFirestoreUtil) });
+      updateActivePlanningSession({ inputText: pastedContent, extractedTasks: newExtractedTasks.map(normalizeTaskUtil) });
     }
 
     toast({ title: "Task Deleted", description: `"${taskToDelete.title}" and its subtasks have been removed.` });
@@ -696,7 +695,7 @@ export default function PlanningPageContent() {
     toast({ title: "AI Simplifying Task...", description: `Processing "${taskToSimplify.title}".` });
 
     const mapToAISchema = (displayTask: DisplayTask): any => {
-        const { id, addedToProjectId, addedToProjectName, firestoreTaskId, researchBrief, ...aiTask } = displayTask;
+        const { id, addedToProjectId, addedToProjectName, researchBrief, ...aiTask } = displayTask;
         return {
             ...aiTask,
             title: displayTask.title || "Untitled",
@@ -750,7 +749,7 @@ export default function PlanningPageContent() {
         
         setExtractedTasks(finalUpdatedTasks);
         if (activePlanningSessionId) {
-            updateActivePlanningSession({ inputText: pastedContent, extractedTasks: finalUpdatedTasks.map(sanitizeTaskForFirestoreUtil) });
+            updateActivePlanningSession({ inputText: pastedContent, extractedTasks: finalUpdatedTasks.map(normalizeTaskUtil) });
         }
         
         setSelectedTaskIds(prev => {
@@ -799,7 +798,7 @@ export default function PlanningPageContent() {
     
     setExtractedTasks(newExtractedTasks);
     if (activePlanningSessionId) {
-      updateActivePlanningSession({ extractedTasks: newExtractedTasks.map(sanitizeTaskForFirestoreUtil) });
+      updateActivePlanningSession({ extractedTasks: newExtractedTasks.map(normalizeTaskUtil) });
     }
     
     toast({ title: `${selectedTaskIds.size} Tasks Deleted` });
@@ -843,7 +842,7 @@ export default function PlanningPageContent() {
     const newExtractedTasks = updateDueDatesRecursively(extractedTasks, selectedTaskIds);
     setExtractedTasks(newExtractedTasks);
     if (activePlanningSessionId) {
-      updateActivePlanningSession({ inputText: pastedContent, extractedTasks: newExtractedTasks.map(sanitizeTaskForFirestoreUtil) });
+      updateActivePlanningSession({ inputText: pastedContent, extractedTasks: newExtractedTasks.map(normalizeTaskUtil) });
     }
     toast({ title: "Due Dates Updated", description: `Due dates set for selected task(s) and their subtasks.` });
     setIsSetDueDateDialogOpen(false);
@@ -959,7 +958,7 @@ export default function PlanningPageContent() {
   
       setExtractedTasks(newExtractedTasks);
       if (activePlanningSessionId) {
-          updateActivePlanningSession({ extractedTasks: newExtractedTasks.map(sanitizeTaskForFirestoreUtil) });
+          updateActivePlanningSession({ extractedTasks: newExtractedTasks.map(normalizeTaskUtil) });
       }
       toast({ title: toastTitle, description: toastDescription });
       setIsAssignPersonDialogOpen(false);
@@ -1406,3 +1405,4 @@ export default function PlanningPageContent() {
     </>
   );
 }
+

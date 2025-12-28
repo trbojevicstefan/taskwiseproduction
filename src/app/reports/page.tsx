@@ -1,17 +1,17 @@
 // src/app/reports/page.tsx
 import DashboardPageLayout from '@/components/layouts/DashboardPageLayout';
-import MeetingPlannerPageContent from '@/components/dashboard/meetings/MeetingPlannerPageContent';
+import ReportsPageContent from '@/components/dashboard/reports/ReportsPageContent';
 import type { Metadata } from 'next';
 
 export const metadata: Metadata = {
-  title: 'Meeting Planner | TaskWiseAI',
-  description: 'Plan upcoming meetings with Taskwise agendas.',
+  title: 'Reports | TaskWiseAI',
+  description: 'Analytics and insights across meetings, tasks, and team performance.',
 };
 
 export default function ReportsPage() {
   return (
     <DashboardPageLayout>
-        <MeetingPlannerPageContent />
+        <ReportsPageContent />
     </DashboardPageLayout>
   );
 }

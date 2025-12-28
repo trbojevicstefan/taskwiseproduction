@@ -113,11 +113,11 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     const isAuthPage = pathname === '/login' || pathname === '/signup';
     const isHomePage = pathname === '/';
 
-    if (user && (isAuthPage || isHomePage)) {
-      // If user is logged in and on an auth or home page, redirect them away.
+    if (user && isAuthPage) {
+      // If user is logged in and on an auth page, redirect them away.
       router.push('/meetings');
-    } else if (!user && !isAuthPage) {
-      // If user is not logged in and not on an auth page, redirect to login.
+    } else if (!user && !isAuthPage && !isHomePage) {
+      // Keep the homepage public; redirect to login only for protected pages.
       router.push('/login');
     }
   }, [user, loading, pathname, router]);

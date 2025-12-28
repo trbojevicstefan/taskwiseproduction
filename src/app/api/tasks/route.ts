@@ -3,6 +3,7 @@ import { randomUUID } from "crypto";
 import { getDb } from "@/lib/db";
 import { getSessionUserId } from "@/lib/server-auth";
 import { buildIdQuery } from "@/lib/mongo-id";
+import { normalizePersonNameKey } from "@/lib/transcript-utils";
 
 const serializeTask = (task: any) => ({
   ...task,
@@ -42,6 +43,12 @@ export async function POST(request: Request) {
   }
 
   const now = new Date();
+  const assigneeNameKey = body.assigneeName
+    ? normalizePersonNameKey(body.assigneeName)
+    : body.assignee?.name
+    ? normalizePersonNameKey(body.assignee.name)
+    : null;
+
   const task = {
     _id: randomUUID(),
     title: body.title,
@@ -50,7 +57,10 @@ export async function POST(request: Request) {
     priority: body.priority || "medium",
     dueAt: body.dueAt ?? null,
     assignee: body.assignee ?? undefined,
+    assigneeName: body.assigneeName ?? null,
+    assigneeNameKey,
     aiSuggested: body.aiSuggested ?? false,
+    origin: body.origin || "manual",
     projectId: body.projectId || null,
     userId,
     parentId: body.parentId ?? null,
@@ -58,6 +68,8 @@ export async function POST(request: Request) {
     subtaskCount: body.subtaskCount ?? 0,
     sourceSessionId: body.sourceSessionId ?? null,
     sourceSessionName: body.sourceSessionName ?? null,
+    sourceSessionType: body.sourceSessionType ?? "task",
+    sourceTaskId: body.sourceTaskId ?? null,
     createdAt: now,
     lastUpdated: now,
   };

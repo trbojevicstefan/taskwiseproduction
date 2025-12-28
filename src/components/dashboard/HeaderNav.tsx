@@ -98,7 +98,7 @@ export default function HeaderNav() {
                         </DropdownMenuItem>
                         <DropdownMenuSeparator />
                         <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">
-                            You can paste content from anywhere in the app to get started. Select tasks in Chat or Planning to copy them.
+                            You can paste content from anywhere in the app to get started. Select tasks in Chat or Meeting Planner to copy them.
                         </DropdownMenuLabel>
                     </DropdownMenuContent>
                 </DropdownMenu>

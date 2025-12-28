@@ -1,4 +1,4 @@
-﻿// src/contexts/ChatHistoryContext.tsx
+// src/contexts/ChatHistoryContext.tsx
 "use client";
 
 import React, { createContext, useContext, useState, useEffect, ReactNode, useCallback } from 'react';
@@ -7,7 +7,7 @@ import type { Message, ChatSession, ExtractedTaskSchema } from '@/types/chat';
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from "@/hooks/use-toast";
 import { apiFetch } from '@/lib/api';
-import { sanitizeTaskForFirestore } from '@/lib/data';
+import { normalizeTask } from '@/lib/data';
 
 
 interface ChatHistoryContextType {
@@ -50,20 +50,20 @@ export const ChatHistoryProvider = ({ children }: { children: ReactNode }) => {
             levels
               ? {
                   light: (levels.light || []).map((task: any) =>
-                    sanitizeTaskForFirestore(task as ExtractedTaskSchema)
+                    normalizeTask(task as ExtractedTaskSchema)
                   ),
                   medium: (levels.medium || []).map((task: any) =>
-                    sanitizeTaskForFirestore(task as ExtractedTaskSchema)
+                    normalizeTask(task as ExtractedTaskSchema)
                   ),
                   detailed: (levels.detailed || []).map((task: any) =>
-                    sanitizeTaskForFirestore(task as ExtractedTaskSchema)
+                    normalizeTask(task as ExtractedTaskSchema)
                   ),
                 }
               : null;
           const sanitizedSessions = loadedSessions.map(s => ({
             ...s,
-            suggestedTasks: (s.suggestedTasks || []).map(t => sanitizeTaskForFirestore(t as ExtractedTaskSchema)),
-            originalAiTasks: (s.originalAiTasks || []).map(t => sanitizeTaskForFirestore(t as ExtractedTaskSchema)),
+            suggestedTasks: (s.suggestedTasks || []).map(t => normalizeTask(t as ExtractedTaskSchema)),
+            originalAiTasks: (s.originalAiTasks || []).map(t => normalizeTask(t as ExtractedTaskSchema)),
             originalAllTaskLevels: sanitizeLevels(s.originalAllTaskLevels),
             allTaskLevels: sanitizeLevels(s.allTaskLevels),
             taskRevisions: s.taskRevisions || [],
@@ -120,13 +120,13 @@ export const ChatHistoryProvider = ({ children }: { children: ReactNode }) => {
       levels
         ? {
             light: (levels.light || []).map((task: any) =>
-              sanitizeTaskForFirestore(task as ExtractedTaskSchema)
+              normalizeTask(task as ExtractedTaskSchema)
             ),
             medium: (levels.medium || []).map((task: any) =>
-              sanitizeTaskForFirestore(task as ExtractedTaskSchema)
+              normalizeTask(task as ExtractedTaskSchema)
             ),
             detailed: (levels.detailed || []).map((task: any) =>
-              sanitizeTaskForFirestore(task as ExtractedTaskSchema)
+              normalizeTask(task as ExtractedTaskSchema)
             ),
           }
         : null;
@@ -135,8 +135,8 @@ export const ChatHistoryProvider = ({ children }: { children: ReactNode }) => {
     const newSessionData: Omit<ChatSession, 'id' | 'userId' | 'createdAt' | 'lastActivityAt'> = {
       title: sessionTitle,
       messages: initialMessage ? [initialMessage] : [],
-      suggestedTasks: (initialTasks || []).map(sanitizeTaskForFirestore),
-      originalAiTasks: (initialTasks || []).map(sanitizeTaskForFirestore),
+      suggestedTasks: (initialTasks || []).map(normalizeTask),
+      originalAiTasks: (initialTasks || []).map(normalizeTask),
       originalAllTaskLevels: sanitizedTaskLevels,
       taskRevisions:
         initialTasks && initialTasks.length > 0
@@ -146,7 +146,7 @@ export const ChatHistoryProvider = ({ children }: { children: ReactNode }) => {
                 createdAt: Date.now(),
                 source: "ai",
                 summary: "Initial AI extraction",
-                tasksSnapshot: (initialTasks || []).map(sanitizeTaskForFirestore),
+                tasksSnapshot: (initialTasks || []).map(normalizeTask),
               },
             ]
           : [],
@@ -173,18 +173,34 @@ export const ChatHistoryProvider = ({ children }: { children: ReactNode }) => {
   const updateSession = useCallback(async (sessionId: string, updatedFields: Partial<Omit<ChatSession, 'id' | 'userId' | 'createdAt' | 'lastActivityAt'>>) => {
      if (!user?.uid) return;
       try {
+        const targetSession = sessions.find((session) => session.id === sessionId);
         const updated = await apiFetch<ChatSession>(`/api/chat-sessions/${sessionId}`, {
           method: "PATCH",
           body: JSON.stringify(updatedFields),
         });
         setSessions(prev => prev.map(session => session.id === updated.id ? updated : session));
-        
+
+        const isMeetingLinked =
+          Boolean(targetSession?.sourceMeetingId) ||
+          Boolean(updatedFields.sourceMeetingId);
+        if (updatedFields.suggestedTasks && !isMeetingLinked) {
+          await apiFetch("/api/tasks/sync", {
+            method: "POST",
+            body: JSON.stringify({
+              sourceSessionId: sessionId,
+              sourceSessionType: "chat",
+              sourceSessionName: updatedFields.title || targetSession?.title || updated.title,
+              origin: "chat",
+              tasks: updatedFields.suggestedTasks,
+            }),
+          });
+        }
       } catch (error) {
         console.error(`Failed to update session ${sessionId} in database`, error);
         // Do not show toast for every background save. Let caller decide.
         // toast({ title: "Error", description: "Could not save session changes.", variant: "destructive" });
       }
-  }, [user]);
+  }, [user, sessions]);
 
   const addMessageToActiveSession = useCallback(async (message: Message) => {
     if (!user?.uid || !activeSessionId) return;
@@ -274,7 +290,7 @@ export const ChatHistoryProvider = ({ children }: { children: ReactNode }) => {
   const updateActiveSessionSuggestions = useCallback(async (newSuggestions: ExtractedTaskSchema[]) => {
     if (!user?.uid || !activeSessionId) return;
     try {
-      const sanitizedSuggestions = newSuggestions.map(sanitizeTaskForFirestore);
+      const sanitizedSuggestions = newSuggestions.map(normalizeTask);
       await updateSession(activeSessionId, { suggestedTasks: sanitizedSuggestions });
     } catch (error) {
       console.error("Failed to update session suggestions in database", error);
@@ -288,7 +304,7 @@ export const ChatHistoryProvider = ({ children }: { children: ReactNode }) => {
 
     const updatedSuggestions = (currentSession.suggestedTasks || []).filter(task => task.id !== suggestionId);
     try {
-      const sanitizedUpdatedSuggestions = updatedSuggestions.map(sanitizeTaskForFirestore); 
+      const sanitizedUpdatedSuggestions = updatedSuggestions.map(normalizeTask); 
       await updateSession(activeSessionId, { suggestedTasks: sanitizedUpdatedSuggestions });
     } catch (error) {
       console.error("Failed to remove suggestion in database", error);
@@ -323,3 +339,4 @@ export const useChatHistory = () => {
   }
   return context;
 };
+

@@ -3,11 +3,10 @@
 
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { MessageSquare, CheckSquare, BarChart3, Settings as SettingsIcon, PlusCircle, Trash2, Edit3, Archive, Brain, Waypoints, Search, FolderOpen, MessageCircle as MessageCircleIcon, ListChecks as ListChecksIcon, LayoutTemplate, SquareKanban, Star, MoreVertical, Folder as FolderIcon, FolderPlus, X, Check, Users, Video, Calendar } from 'lucide-react';
+import { MessageSquare, CheckSquare, BarChart3, PlusCircle, Trash2, Edit3, Archive, Waypoints, Search, FolderOpen, MessageCircle as MessageCircleIcon, ListChecks as ListChecksIcon, LayoutTemplate, SquareKanban, Star, MoreVertical, Folder as FolderIcon, FolderPlus, X, Check, Users, Video, Calendar, PanelLeft } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useAuth } from '@/contexts/AuthContext';
 import { useChatHistory } from '@/contexts/ChatHistoryContext';
-import { usePlanningHistory } from '@/contexts/PlanningHistoryContext';
 import { useFolders } from '@/contexts/FolderContext';
 import type { Folder } from '@/types/folder';
 import {
@@ -53,9 +52,9 @@ import React, { useState, useMemo, useCallback } from 'react';
 const mainNavItems = [
   { href: '/meetings', label: 'Meetings', icon: Video },
   { href: '/chat', label: 'Chat', icon: MessageSquare },
-  { href: '/planning', label: 'Planning', icon: Brain },
+  { href: '/planning', label: 'Meeting Planner', icon: Calendar },
   { href: '/explore', label: 'Explore', icon: Search },
-  { href: '/reports', label: 'Meeting Planner', icon: Calendar },
+  { href: '/reports', label: 'Reports', icon: BarChart3 },
   { href: '/people', label: 'People', icon: Users },
 ];
 
@@ -73,7 +72,7 @@ export default function SidebarNav() {
   const router = useRouter();
   const { user } = useAuth();
   const { folders, addFolder, updateFolder, deleteFolder } = useFolders();
-  const { state } = useSidebar();
+  const { state, toggleSidebar } = useSidebar();
   const isCollapsed = state === 'collapsed';
 
   const {
@@ -85,16 +84,6 @@ export default function SidebarNav() {
     updateSession: updateChatSession,
     isLoadingHistory: isLoadingChatHistory,
   } = useChatHistory();
-
-  const {
-    planningSessions,
-    activePlanningSessionId,
-    setActivePlanningSessionId,
-    deletePlanningSession,
-    updatePlanningSessionTitle,
-    updatePlanningSession,
-    isLoadingPlanningHistory,
-  } = usePlanningHistory();
 
   const [editingId, setEditingId] = useState<string | null>(null);
   const [newTitle, setNewTitle] = useState("");
@@ -113,7 +102,6 @@ export default function SidebarNav() {
       } else {
          switch (item.type) {
            case 'chat': updateChatSessionTitle(item.id, newTitle.trim()); break;
-           case 'plan': updatePlanningSessionTitle(item.id, newTitle.trim()); break;
          }
       }
     }
@@ -121,15 +109,11 @@ export default function SidebarNav() {
     setNewTitle("");
   };
   
-  const handleSelectSession = (sessionType: 'chat' | 'plan', sessionId: string) => {
+  const handleSelectSession = (sessionType: 'chat', sessionId: string) => {
       switch (sessionType) {
         case 'chat':
             setActiveChatSessionId(sessionId);
             if (pathname !== '/chat') router.push('/chat');
-            break;
-        case 'plan':
-            setActivePlanningSessionId(sessionId);
-            if (pathname !== '/planning') router.push('/planning');
             break;
     }
   };
@@ -141,7 +125,6 @@ export default function SidebarNav() {
           const updatePayload = { folderId: newParentId };
           switch (item.type) {
               case 'chat': updateChatSession(item.id, updatePayload); break;
-              case 'plan': updatePlanningSession(item.id, updatePayload); break;
           }
       }
   };
@@ -157,13 +140,12 @@ export default function SidebarNav() {
   const allHistoryItems = useMemo(() => {
     return [
       ...chatSessions.map(s => ({...s, type: 'chat', icon: s.sourceMeetingId ? Video : MessageCircleIcon})),
-      ...planningSessions.map(s => ({...s, type: 'plan', icon: Brain})),
     ].sort((a,b) => {
         const timeA = a.lastActivityAt?.toMillis ? a.lastActivityAt.toMillis() : (a.lastActivityAt ? new Date(a.lastActivityAt).getTime() : 0);
         const timeB = b.lastActivityAt?.toMillis ? b.lastActivityAt.toMillis() : (b.lastActivityAt ? new Date(b.lastActivityAt).getTime() : 0);
         return timeB - timeA;
     });
-  }, [chatSessions, planningSessions]);
+  }, [chatSessions]);
 
   type FolderNode = Folder & { children: FolderNode[] };
 
@@ -257,10 +239,6 @@ export default function SidebarNav() {
          case 'chat':
             isActive = activeChatSessionId === id && pathname === '/chat';
             handleDelete = () => deleteChatSession(id);
-            break;
-         case 'plan':
-            isActive = activePlanningSessionId === id && pathname === '/planning';
-            handleDelete = () => deletePlanningSession(id);
             break;
      }
 
@@ -465,10 +443,9 @@ export default function SidebarNav() {
             </AccordionItem>
         </Accordion>
     );
-  }, [allHistoryItems, folders, editingId, newTitle, creatingFolderWithParent, newFolderName, pathname, activeChatSessionId, activePlanningSessionId, folderStructure, isCollapsed]);
+  }, [allHistoryItems, folders, editingId, newTitle, creatingFolderWithParent, newFolderName, pathname, activeChatSessionId, folderStructure, isCollapsed]);
 
   const unfiledChats = useMemo(() => allHistoryItems.filter(item => item.type === 'chat' && !item.folderId), [allHistoryItems]);
-  const unfiledPlans = useMemo(() => allHistoryItems.filter(item => item.type === 'plan' && !item.folderId), [allHistoryItems]);
   
   return (
     <nav className="flex flex-col h-full">
@@ -504,8 +481,8 @@ export default function SidebarNav() {
       </div>
 
         {!isCollapsed && (
-        <div className="px-2">
-            <Accordion type="multiple" className="w-full" defaultValue={['folders', 'chats', 'plans']}>
+                <div className="px-2">
+            <Accordion type="multiple" className="w-full" defaultValue={['folders', 'chats']}>
                 <AccordionItem value="folders">
                      <div className="flex items-center justify-between py-2 text-sidebar-foreground/70 hover:text-sidebar-foreground/90 text-xs font-semibold">
                       <div className="flex items-center gap-2">
@@ -555,23 +532,7 @@ export default function SidebarNav() {
                         </AccordionContent>
                     </AccordionItem>
                  )}
-                 {unfiledPlans.length > 0 && (
-                    <AccordionItem value="plans">
-                        <AccordionTrigger className="text-sidebar-foreground/70 hover:no-underline hover:text-sidebar-foreground/90 text-xs font-semibold py-2">
-                           <div className="flex items-center gap-2">
-                              <Brain size={14}/>
-                              <span>Plans</span>
-                           </div>
-                        </AccordionTrigger>
-                        <AccordionContent>
-                           <div className="space-y-0.5">
-                              {unfiledPlans.map(renderSessionItem)}
-                           </div>
-                        </AccordionContent>
-                    </AccordionItem>
-                 )}
-
-                 {(isLoadingChatHistory || isLoadingPlanningHistory) && (
+                 {isLoadingChatHistory && (
                      <p className="px-2 py-4 text-xs text-sidebar-foreground/60">Loading history...</p>
                  )}
 
@@ -579,25 +540,22 @@ export default function SidebarNav() {
         </div>
         )}
       </ScrollArea>
-      {!isCollapsed && (
-        <div className="p-2 mt-auto border-t border-sidebar-border">
-           <SidebarMenu>
-               <SidebarMenuItem>
-                  <SidebarMenuButton
-                      asChild
-                      className="w-full justify-start hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
-                      tooltip="Settings"
-                      isActive={pathname === '/settings'}
-                  >
-                      <Link href="/settings">
-                          <SettingsIcon />
-                          <span className="group-data-[collapsible=icon]:hidden">Settings</span>
-                      </Link>
-                  </SidebarMenuButton>
-              </SidebarMenuItem>
-           </SidebarMenu>
-        </div>
-      )}
+      <div className="p-2 mt-auto border-t border-sidebar-border">
+        <SidebarMenu>
+          <SidebarMenuItem>
+            <SidebarMenuButton
+              className="w-full justify-start hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+              tooltip={isCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+              onClick={toggleSidebar}
+            >
+              <PanelLeft />
+              <span className="group-data-[collapsible=icon]:hidden">
+                {isCollapsed ? "Expand" : "Collapse"}
+              </span>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+        </SidebarMenu>
+      </div>
     </nav>
   );
 }

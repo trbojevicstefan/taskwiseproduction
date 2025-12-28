@@ -6,7 +6,7 @@ import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { AnimatePresence, motion } from 'framer-motion';
 import TaskItem from './TaskItem';
-import { ChevronDown, Flame, Video, Users } from 'lucide-react';
+import { ChevronDown, Flame, Video, Users, ArrowUpRight } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { format } from 'date-fns';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -104,14 +104,22 @@ const SessionCard: React.FC<SessionCardProps> = ({ session, people, selectedTask
             </Badge>
         </div>
         <div className="flex items-center space-x-2" onClick={handleToggleSession}>
-          <button
-              className={cn(
-                  "flame-button",
-                  areAllTasksInSessionSelected && "is-lit",
-              )}
-              aria-label='Select all tasks in session'
+          <Link
+            href={`/meetings/${session.id}`}
+            className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-transparent text-muted-foreground hover:border-primary hover:text-primary"
+            onClick={(event) => event.stopPropagation()}
+            title="Open meeting details"
           >
-              <Flame className="flame-icon text-muted-foreground" />
+            <ArrowUpRight className="h-4 w-4" />
+          </Link>
+          <button
+            className={cn(
+              "flame-button",
+              areAllTasksInSessionSelected && "is-lit",
+            )}
+            aria-label='Select all tasks in session'
+          >
+            <Flame className="flame-icon text-muted-foreground" />
           </button>
         </div>
       </CardHeader>

@@ -10,7 +10,7 @@ import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { useAuth } from '@/contexts/AuthContext';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import { Loader2, Power, PowerOff, RefreshCw, Copy, Check, Save, Video, Users, Building, Send, Image as ImageIcon, Link as LinkIcon, Settings as SettingsIcon, ZoomIn, Bot, Slack, FileText, MessageSquare, User, Info as InfoIcon, ToyBrick, Webhook, ClipboardCheck } from 'lucide-react';
+import { Loader2, Power, PowerOff, RefreshCw, Copy, Check, Save, Video, Users, Building, Send, Image as ImageIcon, Link as LinkIcon, Settings as SettingsIcon, Settings2, ZoomIn, Bot, Slack, FileText, MessageSquare, User, Info as InfoIcon, ToyBrick, Webhook, ClipboardCheck, Trash2 } from 'lucide-react';
 import { useIntegrations } from '@/contexts/IntegrationsContext';
 import { useToast } from '@/hooks/use-toast';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogClose } from '@/components/ui/dialog';
@@ -46,6 +46,11 @@ const IntegrationCard: React.FC<{
   onConnect: () => void;
   onDisconnect: () => void;
   extraActions?: React.ReactNode;
+  settingsAction?: {
+    onClick: () => void;
+    disabled?: boolean;
+    ariaLabel?: string;
+  };
 }> = ({
   icon: Icon,
   title,
@@ -55,6 +60,7 @@ const IntegrationCard: React.FC<{
   onConnect,
   onDisconnect,
   extraActions,
+  settingsAction,
 }) => {
   return (
     <div className="flex items-center justify-between p-4 rounded-lg bg-card border border-border/50 hover:border-primary/50 transition-colors">
@@ -75,16 +81,40 @@ const IntegrationCard: React.FC<{
       ) : isConnected ? (
         <div className="flex items-center gap-2">
           {extraActions}
+          {settingsAction && (
+            <Button
+              variant="ghost"
+              size="icon"
+              aria-label={settingsAction.ariaLabel || `${title} settings`}
+              onClick={settingsAction.onClick}
+              disabled={settingsAction.disabled}
+            >
+              <Settings2 className="h-4 w-4" />
+            </Button>
+          )}
           <Button variant="secondary" size="sm" onClick={onDisconnect}>
             <PowerOff className="mr-2 h-4 w-4 text-red-500" />
             Disconnect
           </Button>
         </div>
       ) : (
-        <Button variant="outline" size="sm" onClick={onConnect}>
-          <Power className="mr-2 h-4 w-4 text-green-500" />
-          Connect
-        </Button>
+        <div className="flex items-center gap-2">
+          {settingsAction && (
+            <Button
+              variant="ghost"
+              size="icon"
+              aria-label={settingsAction.ariaLabel || `${title} settings`}
+              onClick={settingsAction.onClick}
+              disabled={settingsAction.disabled ?? true}
+            >
+              <Settings2 className="h-4 w-4" />
+            </Button>
+          )}
+          <Button variant="outline" size="sm" onClick={onConnect}>
+            <Power className="mr-2 h-4 w-4 text-green-500" />
+            Connect
+          </Button>
+        </div>
       )}
     </div>
   );
@@ -141,6 +171,10 @@ export default function SettingsPageContent() {
     createdAt: string;
   }>>([]);
   const [isLoadingFathomLogs, setIsLoadingFathomLogs] = useState(false);
+  const [isFathomSettingsOpen, setIsFathomSettingsOpen] = useState(false);
+  const [fathomWebhooks, setFathomWebhooks] = useState<any[]>([]);
+  const [isLoadingFathomWebhooks, setIsLoadingFathomWebhooks] = useState(false);
+  const [isDeletingFathomWebhooks, setIsDeletingFathomWebhooks] = useState(false);
 
   useEffect(() => {
     // This function will run when the component mounts and when searchParams change.
@@ -325,6 +359,89 @@ export default function SettingsPageContent() {
     await loadFathomLogs();
   };
 
+  const loadFathomWebhooks = async () => {
+    setIsLoadingFathomWebhooks(true);
+    try {
+      const response = await fetch("/api/fathom/webhooks");
+      const payload = await response.json().catch(() => []);
+      if (!response.ok) {
+        throw new Error(payload?.error || "Failed to load webhooks.");
+      }
+      setFathomWebhooks(Array.isArray(payload) ? payload : []);
+    } catch (error) {
+      console.error("Failed to load Fathom webhooks:", error);
+      toast({
+        title: "Could not load webhooks",
+        description: error instanceof Error ? error.message : "Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsLoadingFathomWebhooks(false);
+    }
+  };
+
+  const handleOpenFathomSettings = async () => {
+    setIsFathomSettingsOpen(true);
+    await loadFathomWebhooks();
+  };
+
+  const handleDeleteFathomWebhook = async (webhookId: string) => {
+    if (!webhookId) return;
+    setIsDeletingFathomWebhooks(true);
+    try {
+      const response = await fetch("/api/fathom/webhooks", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids: [webhookId] }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(payload?.error || "Failed to delete webhook.");
+      }
+      await loadFathomWebhooks();
+      toast({ title: "Webhook Deleted", description: "Fathom webhook removed." });
+    } catch (error) {
+      console.error("Failed to delete Fathom webhook:", error);
+      toast({
+        title: "Delete Failed",
+        description: error instanceof Error ? error.message : "Could not delete webhook.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsDeletingFathomWebhooks(false);
+    }
+  };
+
+  const handleDeleteAllFathomWebhooks = async () => {
+    if (!fathomWebhooks.length) return;
+    setIsDeletingFathomWebhooks(true);
+    try {
+      const response = await fetch("/api/fathom/webhooks", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ deleteAll: true }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(payload?.error || "Failed to delete webhooks.");
+      }
+      await loadFathomWebhooks();
+      toast({
+        title: "Webhooks Deleted",
+        description: "All Fathom webhooks were removed.",
+      });
+    } catch (error) {
+      console.error("Failed to delete Fathom webhooks:", error);
+      toast({
+        title: "Delete Failed",
+        description: error instanceof Error ? error.message : "Could not delete webhooks.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsDeletingFathomWebhooks(false);
+    }
+  };
+
   const handleRecreateFathomWebhook = async () => {
     if (!user?.fathomConnected) {
       toast({
@@ -363,6 +480,13 @@ export default function SettingsPageContent() {
   const getInitials = (name: string | null | undefined) => {
     if (!name) return 'U';
     return name.split(' ').map(n => n[0]).join('').toUpperCase().substring(0, 2);
+  };
+
+  const handleIntegrationSettingsComingSoon = (name: string) => {
+    toast({
+      title: `${name} Settings`,
+      description: "Settings will be available soon.",
+    });
   };
   
   const appBaseUrl =
@@ -500,7 +624,7 @@ export default function SettingsPageContent() {
                     <CardDescription>Connect TaskWiseAI with your favorite services.</CardDescription>
                   </CardHeader>
                   <CardContent className="space-y-4">
-                      <IntegrationCard 
+                        <IntegrationCard 
                             icon={Bot}
                             title="Google Workspace"
                             description="Connect Meet, Calendar, and Drive for meeting ingestion."
@@ -508,6 +632,10 @@ export default function SettingsPageContent() {
                             isLoading={isLoadingGoogleConnection}
                             onConnect={connectGoogleTasks}
                             onDisconnect={disconnectGoogleTasks}
+                            settingsAction={{
+                              onClick: () => handleIntegrationSettingsComingSoon("Google Workspace"),
+                              disabled: !isGoogleTasksConnected,
+                            }}
                         />
                         <IntegrationCard 
                             icon={ToyBrick}
@@ -517,6 +645,10 @@ export default function SettingsPageContent() {
                             isLoading={isLoadingTrelloConnection}
                             onConnect={connectTrello}
                             onDisconnect={disconnectTrello}
+                            settingsAction={{
+                              onClick: () => handleIntegrationSettingsComingSoon("Trello"),
+                              disabled: !isTrelloConnected,
+                            }}
                         />
                         <IntegrationCard 
                             icon={Slack}
@@ -526,6 +658,10 @@ export default function SettingsPageContent() {
                             isLoading={isLoadingSlackConnection}
                             onConnect={connectSlack}
                             onDisconnect={disconnectSlack}
+                            settingsAction={{
+                              onClick: () => handleIntegrationSettingsComingSoon("Slack"),
+                              disabled: !isSlackConnected,
+                            }}
                         />
                         <IntegrationCard 
                             icon={Video}
@@ -535,6 +671,10 @@ export default function SettingsPageContent() {
                             isLoading={isLoadingFathomConnection}
                             onConnect={connectFathom}
                             onDisconnect={disconnectFathom}
+                            settingsAction={{
+                              onClick: handleOpenFathomSettings,
+                              disabled: !isFathomConnected,
+                            }}
                             extraActions={isFathomConnected ? (
                               <Button variant="outline" size="sm" onClick={handleOpenFathomLogs}>
                                 <FileText className="mr-2 h-4 w-4" />
@@ -542,66 +682,6 @@ export default function SettingsPageContent() {
                               </Button>
                             ) : null}
                         />
-                        <div className="p-4 rounded-lg bg-card border border-border/50">
-                            <div className="flex items-center gap-4">
-                                <div className="p-2 bg-background rounded-lg"><Webhook className="h-8 w-8 text-green-400" /></div>
-                                <div>
-                                    <h4 className="font-semibold text-foreground">Fathom Webhook</h4>
-                                    <p className="text-sm text-muted-foreground">Receive finished Fathom recordings and auto-create meetings.</p>
-                                </div>
-                            </div>
-                            <div className="mt-4 flex flex-col sm:flex-row items-center gap-2">
-                                <Input
-                                    ref={webhookUrlInputRef}
-                                    id="webhook-url"
-                                    type="text"
-                                    readOnly
-                                    value={webhookUrl || 'Connect Fathom to create your webhook URL.'}
-                                    className="flex-1 bg-muted/50"
-                                />
-                                {user?.fathomWebhookToken ? (
-                                    <Button variant="ghost" size="sm" onClick={handleSelectAndCopy} className="w-full sm:w-auto">
-                                        {hasCopied ? <Check className="mr-2 h-4 w-4 text-green-500"/> : <Copy className="mr-2 h-4 w-4"/>}
-                                        {hasCopied ? "Copied!" : "Copy URL"}
-                                    </Button>
-                                ) : (
-                                    <Button onClick={connectFathom} className="w-full sm:w-auto">
-                                        <Send className="mr-2 h-4 w-4"/>
-                                        Connect Fathom
-                                    </Button>
-                                )}
-                            </div>
-                            {user?.fathomConnected && user?.fathomWebhookToken && (
-                                <div className="mt-3">
-                                    <Button
-                                        variant="outline"
-                                        size="sm"
-                                        onClick={handleRecreateFathomWebhook}
-                                        disabled={isCreatingFathomWebhook}
-                                    >
-                                        {isCreatingFathomWebhook ? (
-                                            <>
-                                                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                                                Creating...
-                                            </>
-                                        ) : (
-                                            <>
-                                                <RefreshCw className="mr-2 h-4 w-4" />
-                                                Recreate Webhook
-                                            </>
-                                        )}
-                                    </Button>
-                                </div>
-                            )}
-                            {user?.fathomWebhookToken && (
-                                <div className="mt-4 flex items-start gap-3 p-3 bg-background rounded-lg border border-border/30">
-                                    <InfoIcon className="h-5 w-5 mt-0.5 text-muted-foreground flex-shrink-0" />
-                                    <p className="text-xs text-muted-foreground">
-                                        In Fathom, create a webhook for the "new meeting content ready" event and paste this URL. TaskWiseAI will automatically create a meeting with tasks and a linked plan.
-                                    </p>
-                                </div>
-                            )}
-                        </div>
                   </CardContent>
                 </Card>
 
@@ -784,6 +864,197 @@ export default function SettingsPageContent() {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setIsFathomLogsOpen(false)}>
+              Close
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={isFathomSettingsOpen} onOpenChange={setIsFathomSettingsOpen}>
+        <DialogContent className="sm:max-w-3xl">
+          <DialogHeader>
+            <DialogTitle>Fathom Integration Settings</DialogTitle>
+            <DialogDescription>
+              Manage webhooks and automation for your Fathom workspace.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="rounded-lg border bg-muted/20 p-4 space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Webhook className="h-5 w-5 text-green-400" />
+                  <span className="text-sm font-semibold">Webhook URL</span>
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={loadFathomWebhooks}
+                  disabled={isLoadingFathomWebhooks}
+                >
+                  {isLoadingFathomWebhooks ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <RefreshCw className="mr-2 h-4 w-4" />
+                  )}
+                  Refresh
+                </Button>
+              </div>
+              <div className="flex flex-col sm:flex-row items-center gap-2">
+                <Input
+                  ref={webhookUrlInputRef}
+                  id="fathom-webhook-url"
+                  type="text"
+                  readOnly
+                  value={
+                    webhookUrl ||
+                    "Connect Fathom to generate a webhook URL."
+                  }
+                  className="flex-1 bg-background/70"
+                />
+                {user?.fathomWebhookToken ? (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={handleSelectAndCopy}
+                    className="w-full sm:w-auto"
+                  >
+                    {hasCopied ? (
+                      <Check className="mr-2 h-4 w-4 text-green-500" />
+                    ) : (
+                      <Copy className="mr-2 h-4 w-4" />
+                    )}
+                    {hasCopied ? "Copied!" : "Copy URL"}
+                  </Button>
+                ) : (
+                  <Button
+                    onClick={connectFathom}
+                    className="w-full sm:w-auto"
+                  >
+                    <Send className="mr-2 h-4 w-4" />
+                    Connect Fathom
+                  </Button>
+                )}
+              </div>
+              {user?.fathomConnected && user?.fathomWebhookToken && (
+                <div className="flex flex-wrap items-center gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleRecreateFathomWebhook}
+                    disabled={isCreatingFathomWebhook}
+                  >
+                    {isCreatingFathomWebhook ? (
+                      <>
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        Creating...
+                      </>
+                    ) : (
+                      <>
+                        <RefreshCw className="mr-2 h-4 w-4" />
+                        Create Webhook
+                      </>
+                    )}
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleDeleteAllFathomWebhooks}
+                    disabled={isDeletingFathomWebhooks || !fathomWebhooks.length}
+                  >
+                    <Trash2 className="mr-2 h-4 w-4 text-red-500" />
+                    Delete All
+                  </Button>
+                </div>
+              )}
+              <p className="text-xs text-muted-foreground">
+                TaskWiseAI will create a webhook that includes transcripts,
+                summaries, and action items. Use the URL above when creating
+                manual webhooks in Fathom.
+              </p>
+            </div>
+
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <h4 className="text-sm font-semibold">Active Webhooks</h4>
+                <span className="text-xs text-muted-foreground">
+                  {fathomWebhooks.length} webhook(s)
+                </span>
+              </div>
+              <div className="max-h-[320px] overflow-y-auto space-y-3">
+                {isLoadingFathomWebhooks && (
+                  <div className="text-sm text-muted-foreground">
+                    Loading webhooks...
+                  </div>
+                )}
+                {!isLoadingFathomWebhooks && fathomWebhooks.length === 0 && (
+                  <div className="text-sm text-muted-foreground">
+                    No webhooks found yet.
+                  </div>
+                )}
+                {fathomWebhooks.map((webhook) => {
+                  const webhookId = String(
+                    webhook?.id ||
+                      webhook?.webhook_id ||
+                      webhook?.webhookId ||
+                      ""
+                  );
+                  const webhookUrl =
+                    webhook?.url ||
+                    webhook?.webhook_url ||
+                    webhook?.destination_url ||
+                    "";
+                  const createdAt =
+                    webhook?.created_at ||
+                    webhook?.createdAt ||
+                    webhook?.created ||
+                    null;
+                  return (
+                    <div
+                      key={webhookId || webhookUrl}
+                      className="rounded-lg border bg-background/60 p-3"
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="text-sm font-semibold truncate">
+                            {webhookId || "Webhook"}
+                          </p>
+                          <p className="text-xs text-muted-foreground truncate">
+                            {webhookUrl || "No URL provided"}
+                          </p>
+                          <div className="flex flex-wrap gap-2 mt-2 text-xs text-muted-foreground">
+                            {webhook?.include_transcript && (
+                              <Badge variant="outline">Transcript</Badge>
+                            )}
+                            {webhook?.include_summary && (
+                              <Badge variant="outline">Summary</Badge>
+                            )}
+                            {webhook?.include_action_items && (
+                              <Badge variant="outline">Action Items</Badge>
+                            )}
+                            {createdAt && (
+                              <Badge variant="secondary">
+                                {new Date(createdAt).toLocaleString()}
+                              </Badge>
+                            )}
+                          </div>
+                        </div>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => handleDeleteFathomWebhook(webhookId)}
+                          disabled={isDeletingFathomWebhooks || !webhookId}
+                        >
+                          <Trash2 className="h-4 w-4 text-red-500" />
+                        </Button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsFathomSettingsOpen(false)}>
               Close
             </Button>
           </DialogFooter>

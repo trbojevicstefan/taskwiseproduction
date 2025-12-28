@@ -1,4 +1,4 @@
-﻿// src/components/dashboard/chat/ChatPageContent.tsx
+// src/components/dashboard/chat/ChatPageContent.tsx
 "use client";
 
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
@@ -64,7 +64,7 @@ import {
   DropdownMenuSubContent,
 } from "@/components/ui/dropdown-menu";
 import { Logo } from '@/components/ui/logo';
-import { sanitizeTaskForFirestore, addPerson, onPeopleSnapshot, updatePersonInFirestore } from '@/lib/data';
+import { normalizeTask, addPerson, onPeopleSnapshot, updatePerson } from '@/lib/data';
 import { extractTranscriptAttendees } from '@/lib/transcript-utils';
 import { getBestPersonMatch } from '@/lib/people-matching';
 import type { Person } from '@/types/person';
@@ -420,17 +420,42 @@ export default function ChatPageContent() {
 
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const layoutRef = useRef<HTMLDivElement>(null);
+  const activeSessionIdRef = useRef<string | null>(null);
+  const lastChatIdParamRef = useRef<string | null>(null);
+  const hasHandledChatParamRef = useRef(false);
 
   const chatIdParam = searchParams.get('id');
   const searchParamsString = searchParams.toString();
 
   useEffect(() => {
-    if (!chatIdParam || chatIdParam === activeSessionId) return;
+    activeSessionIdRef.current = activeSessionId;
+  }, [activeSessionId]);
+
+  useEffect(() => {
+    if (!chatIdParam) {
+      lastChatIdParamRef.current = null;
+      hasHandledChatParamRef.current = false;
+      return;
+    }
+
+    if (lastChatIdParamRef.current !== chatIdParam) {
+      lastChatIdParamRef.current = chatIdParam;
+      hasHandledChatParamRef.current = false;
+    }
+
+    if (hasHandledChatParamRef.current) return;
+
+    if (chatIdParam === activeSessionIdRef.current) {
+      hasHandledChatParamRef.current = true;
+      return;
+    }
+
     const exists = sessions.some((session) => session.id === chatIdParam);
     if (exists) {
       setActiveSessionId(chatIdParam);
     }
-  }, [chatIdParam, activeSessionId, sessions, setActiveSessionId]);
+    hasHandledChatParamRef.current = true;
+  }, [chatIdParam, sessions, setActiveSessionId]);
 
   useEffect(() => {
     if (activeSessionId) {
@@ -539,14 +564,31 @@ export default function ChatPageContent() {
     }
   }, [activeSessionId, getActiveSession]);
 
+  const getMeetingByChatSessionId = useCallback(
+    (chatSessionId: string) => {
+      const matching = meetings.filter(
+        (meeting) => meeting.chatSessionId === chatSessionId
+      );
+      if (matching.length === 0) return undefined;
+      const timeValue = (value: any) =>
+        value?.toMillis ? value.toMillis() : value ? new Date(value).getTime() : 0;
+      return [...matching].sort((a, b) => {
+        const aTime = timeValue(a.lastActivityAt ?? a.createdAt);
+        const bTime = timeValue(b.lastActivityAt ?? b.createdAt);
+        return bTime - aTime;
+      })[0];
+    },
+    [meetings]
+  );
+
   useEffect(() => {
     const activeSession = getActiveSession();
     if (!activeSession || activeSession.sourceMeetingId) return;
-    const meeting = meetings.find((item) => item.chatSessionId === activeSession.id);
-    if (meeting) {
-      updateSession(activeSession.id, { sourceMeetingId: meeting.id });
-    }
-  }, [activeSessionId, getActiveSession, meetings, updateSession]);
+    const mostRecent = getMeetingByChatSessionId(activeSession.id);
+    if (!mostRecent) return;
+    if (activeSession.sourceMeetingId === mostRecent.id) return;
+    updateSession(activeSession.id, { sourceMeetingId: mostRecent.id });
+  }, [activeSessionId, getActiveSession, getMeetingByChatSessionId, updateSession]);
 
 
   const getInitials = (name: string | null | undefined) => (name ? name.split(' ').map(n => n[0]).join('').toUpperCase().substring(0, 2) : 'U');
@@ -558,18 +600,18 @@ export default function ChatPageContent() {
     (session?: { sourceMeetingId?: string | null; id?: string | null }) => {
       if (session?.sourceMeetingId) {
         const bySource = meetings.find((meeting) => meeting.id === session.sourceMeetingId);
-        if (bySource) return bySource;
+        return bySource;
       }
       if (session?.id) {
-        const byChatId = meetings.find((meeting) => meeting.chatSessionId === session.id);
+        const byChatId = getMeetingByChatSessionId(session.id);
         if (byChatId) return byChatId;
       }
       if (activeSessionId) {
-        return meetings.find((meeting) => meeting.chatSessionId === activeSessionId);
+        return getMeetingByChatSessionId(activeSessionId);
       }
       return undefined;
     },
-    [meetings, activeSessionId]
+    [meetings, activeSessionId, getMeetingByChatSessionId]
   );
 
   useEffect(() => {
@@ -587,7 +629,7 @@ export default function ChatPageContent() {
       nextTasks: ExtractedTaskSchema[],
       options: { skipHistory?: boolean; skipPersist?: boolean } = {}
     ) => {
-      const sanitized = nextTasks.map((task) => sanitizeTaskForFirestore(task));
+      const sanitized = nextTasks.map((task) => normalizeTask(task));
       setSuggestedTasks((prev) => {
         if (!options.skipHistory) {
           setUndoStack((stack) => [...stack, prev]);
@@ -840,7 +882,7 @@ export default function ChatPageContent() {
     const applyBriefToTask = (nodes: ExtractedTaskSchema[], idToUpdate: string, brief: string): ExtractedTaskSchema[] => {
       return nodes.map((node) => {
         if (node.id === idToUpdate) {
-          return sanitizeTaskForFirestore({ ...node, researchBrief: brief });
+          return normalizeTask({ ...node, researchBrief: brief });
         }
         if (node.subtasks) {
           return { ...node, subtasks: applyBriefToTask(node.subtasks, idToUpdate, brief) };
@@ -1142,7 +1184,7 @@ export default function ChatPageContent() {
                 });
             } else {
                 if (result.tasks) {
-                    const newTasks = result.tasks.map((t: ExtractedTaskSchema) => sanitizeTaskForFirestore(t as ExtractedTaskSchema));
+                    const newTasks = result.tasks.map((t: ExtractedTaskSchema) => normalizeTask(t as ExtractedTaskSchema));
                     applyTaskUpdate(newTasks);
                 }
                 if (result.sessionTitle) {
@@ -1291,7 +1333,7 @@ export default function ChatPageContent() {
           sourceMeetingTranscript: transcript,
         });
       
-      applyTaskUpdate(result.tasks.map((t: ExtractedTaskSchema) => sanitizeTaskForFirestore(t as ExtractedTaskSchema)));
+      applyTaskUpdate(result.tasks.map((t: ExtractedTaskSchema) => normalizeTask(t as ExtractedTaskSchema)));
       toast({ title: "Sub-tasks Added", description: `Sub-tasks added under "${taskToBreakDown.title}".` });
 
     } catch (error) {
@@ -1320,7 +1362,7 @@ export default function ChatPageContent() {
           sourceMeetingTranscript: transcript,
         });
 
-        const newTasks = result.tasks.map((t: ExtractedTaskSchema) => sanitizeTaskForFirestore(t as ExtractedTaskSchema));
+        const newTasks = result.tasks.map((t: ExtractedTaskSchema) => normalizeTask(t as ExtractedTaskSchema));
         applyTaskUpdate(newTasks);
         
     } catch (error) {
@@ -1431,6 +1473,21 @@ export default function ChatPageContent() {
     return [...meetings].sort((a, b) => getTime(b.lastActivityAt) - getTime(a.lastActivityAt));
   }, [meetings]);
 
+  const clearDuplicateChatLinks = useCallback(
+    async (chatSessionId: string, meetingId: string) => {
+      const duplicates = meetings.filter(
+        (item) => item.chatSessionId === chatSessionId && item.id !== meetingId
+      );
+      if (duplicates.length === 0) return;
+      await Promise.all(
+        duplicates.map((duplicate) =>
+          updateMeeting(duplicate.id, { chatSessionId: null })
+        )
+      );
+    },
+    [meetings, updateMeeting]
+  );
+
   const handleOpenMeetingChat = async (meetingId: string) => {
     const meeting = meetings.find((m) => m.id === meetingId);
     if (!meeting) return;
@@ -1440,6 +1497,7 @@ export default function ChatPageContent() {
       (meeting.chatSessionId ? sessions.find((session) => session.id === meeting.chatSessionId) : undefined);
 
     if (existingSession) {
+      await clearDuplicateChatLinks(existingSession.id, meeting.id);
       if (!existingSession.sourceMeetingId) {
         await updateSession(existingSession.id, { sourceMeetingId: meeting.id });
       }
@@ -1459,6 +1517,7 @@ export default function ChatPageContent() {
     });
 
     if (newSession) {
+      await clearDuplicateChatLinks(newSession.id, meeting.id);
       await updateMeeting(meeting.id, { chatSessionId: newSession.id });
     }
   };
@@ -1552,7 +1611,7 @@ export default function ChatPageContent() {
         if (updatedTask.subtasks) {
           updatedTask.subtasks = updateAssigneeRecursively(updatedTask.subtasks);
         }
-        return sanitizeTaskForFirestore(updatedTask);
+        return normalizeTask(updatedTask);
       });
     };
   
@@ -1750,7 +1809,7 @@ export default function ChatPageContent() {
       ...(matchedPerson.title ? {} : person.title ? { title: person.title } : {}),
       ...(matchedPerson.avatarUrl ? {} : person.avatarUrl ? { avatarUrl: person.avatarUrl } : {}),
     };
-    await updatePersonInFirestore(user.uid, matchedPerson.id, update);
+    await updatePerson(user.uid, matchedPerson.id, update);
     toast({
       title: "Person matched",
       description: `${person.name} is now linked to ${matchedPerson.name}.`,
@@ -2491,3 +2550,4 @@ export default function ChatPageContent() {
     </>
   );
 }
+

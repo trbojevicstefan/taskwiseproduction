@@ -17,8 +17,8 @@ export interface Meeting extends BaseSession {
   
   // Meeting Details
   organizerEmail?: string;
-  startTime?: any; // Firestore Timestamp
-  endTime?: any; // Firestore Timestamp
+  startTime?: any; // Timestamp
+  endTime?: any; // Timestamp
   
   // Ingestion & Processing State
   state?: 'raw_data_in' | 'processing' | 'tasks_ready' | 'error';

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
 import { getSessionUserId } from "@/lib/server-auth";
 import { buildIdQuery } from "@/lib/mongo-id";
+import { normalizePersonNameKey } from "@/lib/transcript-utils";
 
 const serializePerson = (person: any) => ({
   ...person,
@@ -34,14 +35,85 @@ export async function GET(
     return NextResponse.json({ error: "Person not found" }, { status: 404 });
   }
 
+  type TaskStatus = "todo" | "inprogress" | "done" | "recurring";
+  const emptyCounts = () => ({
+    total: 0,
+    open: 0,
+    todo: 0,
+    inprogress: 0,
+    done: 0,
+    recurring: 0,
+  });
+  const normalizeStatus = (status: any): TaskStatus => {
+    const raw = typeof status === "string" ? status.toLowerCase().trim() : "";
+    if (raw === "in progress" || raw === "in-progress" || raw === "in_progress") {
+      return "inprogress";
+    }
+    if (raw === "todo" || raw === "to do" || raw === "to-do") {
+      return "todo";
+    }
+    if (raw === "done" || raw === "completed" || raw === "complete") {
+      return "done";
+    }
+    if (raw === "recurring") {
+      return "recurring";
+    }
+    if (status === "todo" || status === "inprogress" || status === "done" || status === "recurring") {
+      return status;
+    }
+    return "todo";
+  };
+  const increment = (counts: ReturnType<typeof emptyCounts>, status: TaskStatus) => {
+    counts.total += 1;
+    counts[status] += 1;
+    if (status !== "done") {
+      counts.open += 1;
+    }
+  };
+
   const assigneeId = person.id ?? person._id ?? id;
   const assigneeQuery = buildIdQuery(String(assigneeId));
-  const taskCount = await db.collection<any>("tasks").countDocuments({
-    userId: userIdQuery,
-    "assignee.uid": assigneeQuery,
+  const nameKeys = new Set<string>();
+  if (person.name) {
+    const normalized = normalizePersonNameKey(person.name);
+    if (normalized) nameKeys.add(normalized);
+  }
+  if (Array.isArray(person.aliases)) {
+    person.aliases.forEach((alias: string) => {
+      const normalized = normalizePersonNameKey(alias);
+      if (normalized) nameKeys.add(normalized);
+    });
+  }
+  const nameKeyList = Array.from(nameKeys).filter(Boolean);
+
+  const tasks = await db
+    .collection<any>("tasks")
+    .find({
+      userId: userIdQuery,
+      $or: [
+        { "assignee.uid": assigneeQuery },
+        ...(person.email ? [{ "assignee.email": person.email }] : []),
+        ...(nameKeyList.length
+          ? [
+              { assigneeNameKey: { $in: nameKeyList } },
+              { assigneeName: { $in: nameKeyList } },
+              { "assignee.name": { $in: nameKeyList } },
+            ]
+          : []),
+      ],
+    })
+    .toArray();
+
+  const taskCounts = emptyCounts();
+  tasks.forEach((task) => {
+    increment(taskCounts, normalizeStatus(task?.status));
   });
 
-  return NextResponse.json({ ...serializePerson(person), taskCount });
+  return NextResponse.json({
+    ...serializePerson(person),
+    taskCount: taskCounts.open,
+    taskCounts,
+  });
 }
 
 export async function PATCH(
@@ -78,14 +150,85 @@ export async function PATCH(
   const person = await db
     .collection<any>("people")
     .findOne({ _id: existing._id });
+  type TaskStatus = "todo" | "inprogress" | "done" | "recurring";
+  const emptyCounts = () => ({
+    total: 0,
+    open: 0,
+    todo: 0,
+    inprogress: 0,
+    done: 0,
+    recurring: 0,
+  });
+  const normalizeStatus = (status: any): TaskStatus => {
+    const raw = typeof status === "string" ? status.toLowerCase().trim() : "";
+    if (raw === "in progress" || raw === "in-progress" || raw === "in_progress") {
+      return "inprogress";
+    }
+    if (raw === "todo" || raw === "to do" || raw === "to-do") {
+      return "todo";
+    }
+    if (raw === "done" || raw === "completed" || raw === "complete") {
+      return "done";
+    }
+    if (raw === "recurring") {
+      return "recurring";
+    }
+    if (status === "todo" || status === "inprogress" || status === "done" || status === "recurring") {
+      return status;
+    }
+    return "todo";
+  };
+  const increment = (counts: ReturnType<typeof emptyCounts>, status: TaskStatus) => {
+    counts.total += 1;
+    counts[status] += 1;
+    if (status !== "done") {
+      counts.open += 1;
+    }
+  };
+
   const assigneeId = person.id ?? person._id ?? id;
   const assigneeQuery = buildIdQuery(String(assigneeId));
-  const taskCount = await db.collection<any>("tasks").countDocuments({
-    userId: userIdQuery,
-    "assignee.uid": assigneeQuery,
+  const nameKeys = new Set<string>();
+  if (person.name) {
+    const normalized = normalizePersonNameKey(person.name);
+    if (normalized) nameKeys.add(normalized);
+  }
+  if (Array.isArray(person.aliases)) {
+    person.aliases.forEach((alias: string) => {
+      const normalized = normalizePersonNameKey(alias);
+      if (normalized) nameKeys.add(normalized);
+    });
+  }
+  const nameKeyList = Array.from(nameKeys).filter(Boolean);
+
+  const tasks = await db
+    .collection<any>("tasks")
+    .find({
+      userId: userIdQuery,
+      $or: [
+        { "assignee.uid": assigneeQuery },
+        ...(person.email ? [{ "assignee.email": person.email }] : []),
+        ...(nameKeyList.length
+          ? [
+              { assigneeNameKey: { $in: nameKeyList } },
+              { assigneeName: { $in: nameKeyList } },
+              { "assignee.name": { $in: nameKeyList } },
+            ]
+          : []),
+      ],
+    })
+    .toArray();
+
+  const taskCounts = emptyCounts();
+  tasks.forEach((task) => {
+    increment(taskCounts, normalizeStatus(task?.status));
   });
 
-  return NextResponse.json({ ...serializePerson(person), taskCount });
+  return NextResponse.json({
+    ...serializePerson(person),
+    taskCount: taskCounts.open,
+    taskCounts,
+  });
 }
 
 export async function DELETE(

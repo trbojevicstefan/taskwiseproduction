@@ -6,7 +6,7 @@ import {
   fetchFathomTranscript,
   formatFathomTranscript,
 } from "@/lib/fathom";
-import { sanitizeTaskForFirestore } from "@/lib/data";
+import { normalizeTask } from "@/lib/data";
 import type { ExtractedTaskSchema } from "@/types/chat";
 import type { DbUser } from "@/lib/db/users";
 import {
@@ -15,6 +15,7 @@ import {
   type CompletionTarget,
 } from "@/lib/task-completion";
 import { buildIdQuery } from "@/lib/mongo-id";
+import { syncTasksForSource } from "@/lib/task-sync";
 
 type FathomIngestResult =
   | { status: "created"; meetingId: string }
@@ -34,13 +35,13 @@ const sanitizeLevels = (levels: any) =>
   levels
     ? {
         light: (levels.light || []).map((task: any) =>
-          sanitizeTaskForFirestore(task as ExtractedTaskSchema)
+          normalizeTask(task as ExtractedTaskSchema)
         ),
         medium: (levels.medium || []).map((task: any) =>
-          sanitizeTaskForFirestore(task as ExtractedTaskSchema)
+          normalizeTask(task as ExtractedTaskSchema)
         ),
         detailed: (levels.detailed || []).map((task: any) =>
-          sanitizeTaskForFirestore(task as ExtractedTaskSchema)
+          normalizeTask(task as ExtractedTaskSchema)
         ),
       }
     : null;
@@ -216,7 +217,7 @@ export const ingestFathomMeeting = async ({
     allTaskLevels?.[detailLevel as keyof typeof allTaskLevels] || [];
 
   const sanitizedTasks = selectedTasks.map((task: any) =>
-    sanitizeTaskForFirestore(task as ExtractedTaskSchema)
+    normalizeTask(task as ExtractedTaskSchema)
   );
   let sanitizedTaskLevels = sanitizeLevels(allTaskLevels);
 
@@ -397,6 +398,14 @@ export const ingestFathomMeeting = async ({
   await db.collection("meetings").insertOne(meeting);
   await db.collection("chatSessions").insertOne(chatSession);
   await db.collection("planningSessions").insertOne(planningSession);
+  await syncTasksForSource(db, finalizedTasks, {
+    userId: user._id.toString(),
+    sourceSessionId: meetingId,
+    sourceSessionType: "meeting",
+    sourceSessionName: meetingTitle,
+    origin: "meeting",
+  });
 
   return { status: "created", meetingId };
 };
+

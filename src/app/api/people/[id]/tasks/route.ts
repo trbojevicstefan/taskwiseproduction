@@ -42,6 +42,7 @@ const toTaskShape = (
     priority: task.priority || "medium",
     dueAt: task.dueAt ?? null,
     assignee: task.assignee ?? null,
+    comments: task.comments ?? null,
     aiSuggested: true,
     projectId: context.id,
     userId: context.userId,
@@ -95,6 +96,8 @@ export async function GET(
     return false;
   };
 
+  const nameKeyList = Array.from(nameKeys).filter(Boolean);
+
   const tasks = await db
     .collection<any>("tasks")
     .find({
@@ -102,10 +105,28 @@ export async function GET(
       $or: [
         { "assignee.uid": assigneeQuery },
         ...(person.email ? [{ "assignee.email": person.email }] : []),
+        ...(nameKeyList.length
+          ? [
+              { assigneeNameKey: { $in: nameKeyList } },
+              { assigneeName: { $in: nameKeyList } },
+              { "assignee.name": { $in: nameKeyList } },
+            ]
+          : []),
       ],
     })
     .sort({ createdAt: -1 })
     .toArray();
+
+  const meetingSessionsWithTasks = new Set<string>();
+  const chatSessionsWithTasks = new Set<string>();
+  tasks.forEach((task) => {
+    if (task?.sourceSessionType === "meeting" && task.sourceSessionId) {
+      meetingSessionsWithTasks.add(String(task.sourceSessionId));
+    }
+    if (task?.sourceSessionType === "chat" && task.sourceSessionId) {
+      chatSessionsWithTasks.add(String(task.sourceSessionId));
+    }
+  });
 
   const meetings = await db
     .collection<any>("meetings")
@@ -120,12 +141,14 @@ export async function GET(
     .toArray();
 
   const meetingTasks = meetings.flatMap((meeting) => {
+    const meetingId = String(meeting._id ?? meeting.id);
+    if (meetingSessionsWithTasks.has(meetingId)) return [];
     const extracted = flattenExtractedTasks(meeting.extractedTasks || []);
     return extracted
       .filter(matchesTaskAssignee)
       .map((task) =>
         toTaskShape(task, {
-          id: String(meeting._id),
+          id: meetingId,
           title: meeting.title,
           userId,
           sourceType: "meeting",
@@ -134,12 +157,14 @@ export async function GET(
   });
 
   const chatTasks = chatSessions.flatMap((session) => {
+    const sessionId = String(session._id ?? session.id);
+    if (chatSessionsWithTasks.has(sessionId)) return [];
     const extracted = flattenExtractedTasks(session.suggestedTasks || []);
     return extracted
       .filter(matchesTaskAssignee)
       .map((task) =>
         toTaskShape(task, {
-          id: String(session._id),
+          id: sessionId,
           title: session.title,
           userId,
           sourceType: "chat",
@@ -150,8 +175,10 @@ export async function GET(
   const normalizedTasks = [
     ...tasks.map((task) => ({
       ...serializeTask(task),
-      sourceSessionType: "task",
-      sourceTaskId: task._id?.toString?.() || task.id,
+      sourceSessionType: task.sourceSessionType || task.origin || "task",
+      sourceSessionId: task.sourceSessionId ?? null,
+      sourceSessionName: task.sourceSessionName ?? null,
+      sourceTaskId: task.sourceTaskId ?? (task._id?.toString?.() || task.id),
     })),
     ...meetingTasks,
     ...chatTasks,

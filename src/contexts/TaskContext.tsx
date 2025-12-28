@@ -74,6 +74,7 @@ export const TaskProvider = ({ children }: { children: ReactNode }) => {
         status: taskData.status || 'todo',
         priority: taskData.priority || 'medium',
         aiSuggested: taskData.aiSuggested || false,
+        origin: taskData.origin || 'manual',
         parentId: null,
         order: 0,
         subtaskCount: 0,
@@ -190,7 +191,7 @@ export const TaskProvider = ({ children }: { children: ReactNode }) => {
     const { assignee, sourceSessionId, sourceSessionName } = options;
     const addedTaskIds: string[] = [];
 
-    const addTaskRecursive = async (task: DisplayTask, parentFirestoreId: string | null): Promise<string> => {
+    const addTaskRecursive = async (task: DisplayTask, parentTaskId: string | null): Promise<string> => {
         const cleanAssignee = (rawAssignee: Partial<AppUser> | null | undefined): Partial<AppUser> | undefined => {
             if (!rawAssignee) return undefined;
             return {
@@ -212,7 +213,7 @@ export const TaskProvider = ({ children }: { children: ReactNode }) => {
             aiSuggested: true,
             projectId: projectId,
             userId: user.uid,
-            parentId: parentFirestoreId,
+            parentId: parentTaskId,
             order: 0, 
             subtaskCount: task.subtasks?.length || 0,
             assignee: cleanAssignee(finalAssignee),

@@ -1,8 +1,8 @@
-﻿
+
 // src/components/dashboard/meetings/MeetingsPageContent.tsx
 "use client";
 
-import React, { useMemo, useState, useCallback, useEffect } from "react";
+import React, { useMemo, useState, useCallback, useEffect, useRef } from "react";
 import { motion } from "framer-motion";
 import {
   Card,
@@ -90,6 +90,7 @@ import {
   UserCheck,
   Megaphone,
   Eye,
+  ArrowUpRight,
 } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import {
@@ -114,7 +115,7 @@ import type { Meeting } from "@/types/meeting";
 import type { ExtractedTaskSchema } from '@/types/chat';
 import AssignPersonDialog from '../planning/AssignPersonDialog';
 import { useAuth } from '@/contexts/AuthContext';
-import { onPeopleSnapshot, addPerson, sanitizeTaskForFirestore, updatePersonInFirestore } from '@/lib/data';
+import { onPeopleSnapshot, addPerson, normalizeTask, updatePerson } from '@/lib/data';
 import { getBestPersonMatch } from '@/lib/people-matching';
 import type { Person } from '@/types/person';
 import { cn } from "@/lib/utils";
@@ -249,8 +250,41 @@ function MeetingListItem({ m, onOpen, onChat }: { m: Meeting; onOpen: (id: strin
             </div>
             <div className="col-span-1 flex justify-end opacity-0 group-hover/item:opacity-100 transition-opacity">
                 <TooltipProvider>
-                    <Tooltip><TooltipTrigger asChild><Button size="icon" variant="ghost" className="h-7 w-7 rounded-full" onClick={(e) => handleNavigation(e, `/planning?fromMeeting=${m.id}`)}><Brain className="h-4 w-4 text-white/70"/></Button></TooltipTrigger><TooltipContent><p>Go to Plan</p></TooltipContent></Tooltip>
-                    <Tooltip><TooltipTrigger asChild><Button size="icon" variant="ghost" className="h-7 w-7 rounded-full" onClick={(e) => onChat(m)}><MessageSquareText className="h-4 w-4 text-white/70"/></Button></TooltipTrigger><TooltipContent><p>Go to Chat</p></TooltipContent></Tooltip>
+                    <div className="flex items-center gap-1">
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Button
+                              size="icon"
+                              variant="ghost"
+                              className="h-7 w-7 rounded-full"
+                              onClick={(e) => handleNavigation(e, `/meetings/${m.id}`)}
+                            >
+                              <ArrowUpRight className="h-4 w-4 text-white/70" />
+                            </Button>
+                          </TooltipTrigger>
+                          <TooltipContent>
+                            <p>Open Details</p>
+                          </TooltipContent>
+                        </Tooltip>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Button
+                              size="icon"
+                              variant="ghost"
+                              className="h-7 w-7 rounded-full"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onChat(m);
+                              }}
+                            >
+                              <MessageSquareText className="h-4 w-4 text-white/70"/>
+                            </Button>
+                          </TooltipTrigger>
+                          <TooltipContent>
+                            <p>Go to Chat</p>
+                          </TooltipContent>
+                        </Tooltip>
+                    </div>
                 </TooltipProvider>
             </div>
         </div>
@@ -640,7 +674,17 @@ function ArtifactsSection({ meeting }: { meeting: Meeting }) {
     );
 }
   
-function MeetingDetailSheet({ id, onClose, onNavigateToChat }: { id: string | null; onClose: () => void; onNavigateToChat: (meeting: Meeting) => void; }) {
+export function MeetingDetailSheet({
+    id,
+    onClose,
+    onNavigateToChat,
+    variant = "sheet",
+}: {
+    id: string | null;
+    onClose: () => void;
+    onNavigateToChat: (meeting: Meeting) => void;
+    variant?: "sheet" | "page";
+}) {
     const { user } = useAuth();
     const { meetings, isLoadingMeetingHistory, updateMeeting, deleteMeeting, refreshMeetings } = useMeetingHistory();
     const { isSlackConnected, isGoogleTasksConnected, isTrelloConnected } = useIntegrations();
@@ -672,11 +716,12 @@ function MeetingDetailSheet({ id, onClose, onNavigateToChat }: { id: string | nu
 
     const meeting = useMemo(() => meetings.find((m) => m.id === id) || null, [id, meetings]);
     const { toast } = useToast();
+    const isPageVariant = variant === "page";
 
     const syncMeetingTasks = useCallback(
       async (tasks: ExtractedTaskSchema[]) => {
         if (!meeting) return null;
-        const sanitized = tasks.map((task) => sanitizeTaskForFirestore(task));
+        const sanitized = tasks.map((task) => normalizeTask(task));
         const updated = await updateMeeting(meeting.id, { extractedTasks: sanitized });
         const chatSessionId = updated?.chatSessionId || meeting.chatSessionId;
         if (chatSessionId) {
@@ -972,6 +1017,26 @@ function MeetingDetailSheet({ id, onClose, onNavigateToChat }: { id: string | nu
         }
         return format(meetingStart, "h:mm a");
     }, [meetingStart, meetingEnd]);
+    const meetingDetailRows = useMemo(() => {
+        if (!meeting) return [];
+        const confidence = meeting.meetingMetadata?.confidence;
+        const sentiment = meeting.overallSentiment;
+        return [
+            { label: "Organizer", value: meeting.organizerEmail },
+            { label: "Meeting type", value: meeting.meetingMetadata?.type },
+            { label: "Confidence", value: confidence != null ? `${Math.round(confidence * 100)}%` : null },
+            { label: "Sentiment", value: sentiment != null ? `${Math.round(sentiment * 100)}%` : null },
+            { label: "Start time", value: meetingStart ? format(meetingStart, "PPpp") : null },
+            { label: "End time", value: meetingEnd ? format(meetingEnd, "PPpp") : null },
+            { label: "Duration", value: meetingDurationMinutes ? `${meetingDurationMinutes} min` : null },
+            { label: "State", value: meeting.state },
+            { label: "Recording ID", value: meeting.recordingId },
+            { label: "Calendar Event ID", value: meeting.calendarEventId },
+            { label: "Conference ID", value: meeting.conferenceId },
+        ].filter((row) => row.value);
+    }, [meeting, meetingDurationMinutes, meetingEnd, meetingStart]);
+
+    const meetingRecordingLink = meeting?.recordingUrl || meeting?.shareUrl;
     const isTaskDone = useCallback(
         (task: ExtractedTaskSchema) => (task.status || "todo") === "done",
         []
@@ -1483,7 +1548,7 @@ function MeetingDetailSheet({ id, onClose, onNavigateToChat }: { id: string | nu
             ...(matchedPerson.title ? {} : person.title ? { title: person.title } : {}),
             ...(matchedPerson.avatarUrl ? {} : person.avatarUrl ? { avatarUrl: person.avatarUrl } : {}),
         };
-        await updatePersonInFirestore(user.uid, matchedPerson.id, update);
+        await updatePerson(user.uid, matchedPerson.id, update);
         toast({
             title: "Person matched",
             description: `${person.name} is now linked to ${matchedPerson.name}.`,
@@ -1506,6 +1571,13 @@ function MeetingDetailSheet({ id, onClose, onNavigateToChat }: { id: string | nu
 
 
     if (isLoadingMeetingHistory && id) {
+      if (isPageVariant) {
+        return (
+          <div className="flex items-center justify-center py-24">
+            <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+          </div>
+        );
+      }
       return (
         <Sheet open={true} onOpenChange={onClose}>
           <SheetContent side="right" className="w-full sm:max-w-2xl p-0">
@@ -1517,14 +1589,93 @@ function MeetingDetailSheet({ id, onClose, onNavigateToChat }: { id: string | nu
       );
     }
     
-    return (
-      <>
-        <Sheet open={!!id} onOpenChange={(open) => { if (!open) onClose(); }}>
-            <SheetContent side="right" className="w-full sm:max-w-3xl p-0">
-            {meeting && flavor && (
-            <>
-            <div className="h-full grid grid-rows-[auto,1fr,auto]">
+    if (!meeting && id) {
+      if (isPageVariant) {
+        return (
+          <div className="flex h-full flex-col items-center justify-center gap-4 px-6 text-center">
+            <div className="rounded-full bg-muted p-3 text-muted-foreground">
+              <Info className="h-5 w-5" />
+            </div>
+            <div>
+              <p className="text-lg font-semibold">Meeting not found</p>
+              <p className="text-sm text-muted-foreground">
+                This meeting might have been removed or you no longer have access to it.
+              </p>
+            </div>
+            <Button variant="outline" onClick={onClose}>
+              Back to Meetings
+            </Button>
+          </div>
+        );
+      }
+      return (
+        <Sheet open={true} onOpenChange={onClose}>
+          <SheetContent side="right" className="w-full sm:max-w-2xl p-0">
+            <div className="flex h-full flex-col items-center justify-center gap-4 px-6 text-center">
+              <div className="rounded-full bg-muted p-3 text-muted-foreground">
+                <Info className="h-5 w-5" />
+              </div>
+              <div>
+                <p className="text-lg font-semibold">Meeting not found</p>
+                <p className="text-sm text-muted-foreground">
+                  This meeting might have been removed or you no longer have access to it.
+                </p>
+              </div>
+              <Button variant="outline" onClick={onClose}>
+                Back to Meetings
+              </Button>
+            </div>
+          </SheetContent>
+        </Sheet>
+      );
+    }
+    
+    const detailContent = meeting && flavor && (
+            <div className={cn("h-full grid grid-rows-[auto,1fr,auto]", isPageVariant && "max-w-6xl mx-auto w-full")}>
                 <div className="relative px-6 pt-6 pb-4 border-b">
+                {isPageVariant && (
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2">
+                      {isEditingTitle ? (
+                        <Input
+                          value={editableTitle}
+                          onChange={(e) => setEditableTitle(e.target.value)}
+                          onBlur={handleSaveTitle}
+                          onKeyDown={(e) => e.key === 'Enter' && handleSaveTitle()}
+                          className="text-xl font-bold tracking-tight h-9"
+                          autoFocus
+                        />
+                      ) : (
+                        <h1 className="text-2xl font-semibold tracking-tight flex-grow">{meeting.title}</h1>
+                      )}
+                      <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setIsEditingTitle(!isEditingTitle)}>
+                        <Edit2 className="h-4 w-4"/>
+                      </Button>
+                    </div>
+                    <div className="text-muted-foreground flex flex-wrap items-center gap-2 text-xs">
+                      <span>
+                        {toDateValue(meeting.lastActivityAt)
+                          ? formatDistanceToNow(toDateValue(meeting.lastActivityAt) as Date, { addSuffix: true })
+                          : "Just now"}
+                      </span>
+                      <span>|</span>
+                      <span>{meetingDurationMinutes ? `${meetingDurationMinutes} min` : "N/A"}</span>
+                      <span>|</span>
+                      <span className="flex items-center gap-1"><Users className="h-3 w-3"/>{meetingPeople.length}</span>
+                      {meetingDateLabel && (
+                        <>
+                          <span>|</span>
+                          <span className="flex items-center gap-1">
+                            <CalendarDays className="h-3 w-3" />
+                            {meetingDateLabel}
+                            {meetingTimeLabel ? ` - ${meetingTimeLabel}` : ""}
+                          </span>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                )}
+                {!isPageVariant && (
                 <SheetHeader>
                     <div className="flex items-center gap-2">
                         {isEditingTitle ? (
@@ -1562,20 +1713,49 @@ function MeetingDetailSheet({ id, onClose, onNavigateToChat }: { id: string | nu
                             <span className="flex items-center gap-1">
                               <CalendarDays className="h-3 w-3" />
                               {meetingDateLabel}
-                              {meetingTimeLabel ? ` • ${meetingTimeLabel}` : ""}
+                              {meetingTimeLabel ? ` - ${meetingTimeLabel}` : ""}
                             </span>
                           </>
                         )}
                     </div>
                     </SheetDescription>
                 </SheetHeader>
+                )}
                 <div className="mt-3 flex flex-wrap items-center gap-2">
                     {(meeting.tags || []).map((t: string, i: number) => (<Badge key={i} variant="secondary" className="rounded-full">{t}</Badge>))}
                 </div>
-                <div className="mt-3 flex items-center gap-2">
-                    <Button size="sm" className="h-8 gap-1"><PlayCircle className="h-4 w-4"/>Play Recording</Button>
-                    <Button size="sm" variant="outline" className="h-8 gap-1"><Brain className="h-4 w-4"/>Go to Plan</Button>
-                    <Button size="sm" variant="outline" className="h-8 gap-1" onClick={() => onNavigateToChat(meeting)}><MessageSquareText className="h-4 w-4"/>Go to Chat</Button>
+                <div className="mt-3 flex flex-wrap items-center gap-2">
+                    {isPageVariant && (
+                      <Button size="sm" variant="outline" className="h-8 gap-1" onClick={onClose}>
+                        <ChevronLeft className="h-4 w-4" />
+                        Back to Meetings
+                      </Button>
+                    )}
+                    {meetingRecordingLink ? (
+                      <Button size="sm" className="h-8 gap-1" asChild>
+                        <a href={meetingRecordingLink} target="_blank" rel="noreferrer">
+                          <PlayCircle className="h-4 w-4" />
+                          Play Recording
+                        </a>
+                      </Button>
+                    ) : (
+                      <Button size="sm" className="h-8 gap-1" disabled>
+                        <PlayCircle className="h-4 w-4" />
+                        Play Recording
+                      </Button>
+                    )}
+                    {!isPageVariant && (
+                      <Button size="sm" variant="outline" className="h-8 gap-1" asChild>
+                        <Link href={`/meetings/${meeting.id}`}>
+                          <ArrowUpRight className="h-4 w-4" />
+                          Open Details
+                        </Link>
+                      </Button>
+                    )}
+                    <Button size="sm" variant="outline" className="h-8 gap-1" onClick={() => onNavigateToChat(meeting)}>
+                      <MessageSquareText className="h-4 w-4"/>
+                      Go to Chat
+                    </Button>
                      <DropdownMenu>
                         <DropdownMenuTrigger asChild>
                             <Button variant="ghost" size="icon" className="h-8 w-8 ml-auto"><MoreHorizontal className="h-4 w-4"/></Button>
@@ -1600,6 +1780,7 @@ function MeetingDetailSheet({ id, onClose, onNavigateToChat }: { id: string | nu
                     <div className="flex items-center justify-between">
                         <TabsList>
                         <TabsTrigger value="summary">Summary</TabsTrigger>
+                        <TabsTrigger value="details">Details</TabsTrigger>
                         <TabsTrigger value="tasks">Tasks</TabsTrigger>
                         <TabsTrigger value="completed">Completed</TabsTrigger>
                         <TabsTrigger value="attendees">People</TabsTrigger>
@@ -1615,6 +1796,96 @@ function MeetingDetailSheet({ id, onClose, onNavigateToChat }: { id: string | nu
                                     <CardHeader className="pb-2"><CardTitle className="text-sm">Key Moments</CardTitle></CardHeader>
                                     <CardContent className="space-y-2 p-4 pt-0">
                                         {meeting.keyMoments.map((k, i) => (<MomentRow key={i} m={k} />))}
+                                    </CardContent>
+                                </Card>
+                            )}
+                        </TabsContent>
+
+                        <TabsContent value="details" className="space-y-4 m-0">
+                            <Card className="rounded-xl">
+                                <CardHeader className="pb-2">
+                                    <CardTitle className="text-sm">Meeting Metadata</CardTitle>
+                                </CardHeader>
+                                <CardContent className="grid gap-3 p-4 pt-0 text-sm md:grid-cols-2">
+                                    {meetingDetailRows.length === 0 && (
+                                        <p className="text-muted-foreground">No metadata available.</p>
+                                    )}
+                                    {meetingDetailRows.map((row) => (
+                                        <div key={row.label} className="space-y-1">
+                                            <p className="text-xs uppercase tracking-wide text-muted-foreground">{row.label}</p>
+                                            <p className="font-medium text-foreground">{row.value}</p>
+                                        </div>
+                                    ))}
+                                </CardContent>
+                            </Card>
+
+                            {(meetingRecordingLink || meeting.shareUrl) && (
+                                <Card className="rounded-xl">
+                                    <CardHeader className="pb-2">
+                                        <CardTitle className="text-sm">Links</CardTitle>
+                                    </CardHeader>
+                                    <CardContent className="flex flex-col gap-2 p-4 pt-0 text-sm">
+                                        {meetingRecordingLink && (
+                                            <a
+                                                href={meetingRecordingLink}
+                                                target="_blank"
+                                                rel="noreferrer"
+                                                className="flex items-center gap-2 text-primary hover:underline"
+                                            >
+                                                <Link2 className="h-4 w-4" />
+                                                Open Recording
+                                            </a>
+                                        )}
+                                        {meeting.shareUrl && (
+                                            <a
+                                                href={meeting.shareUrl}
+                                                target="_blank"
+                                                rel="noreferrer"
+                                                className="flex items-center gap-2 text-primary hover:underline"
+                                            >
+                                                <Link2 className="h-4 w-4" />
+                                                Share Link
+                                            </a>
+                                        )}
+                                    </CardContent>
+                                </Card>
+                            )}
+
+                            {(meeting.meetingMetadata?.reasoning || meeting.meetingMetadata?.blockers?.length) && (
+                                <Card className="rounded-xl">
+                                    <CardHeader className="pb-2">
+                                        <CardTitle className="text-sm">AI Insights</CardTitle>
+                                    </CardHeader>
+                                    <CardContent className="space-y-3 p-4 pt-0 text-sm">
+                                        {meeting.meetingMetadata?.reasoning && (
+                                            <p className="text-muted-foreground">{meeting.meetingMetadata.reasoning}</p>
+                                        )}
+                                        {meeting.meetingMetadata?.blockers && meeting.meetingMetadata.blockers.length > 0 && (
+                                            <div>
+                                                <p className="text-xs uppercase tracking-wide text-muted-foreground">Blockers</p>
+                                                <ul className="mt-2 list-disc space-y-1 pl-5 text-foreground">
+                                                    {meeting.meetingMetadata.blockers.map((blocker) => (
+                                                        <li key={blocker}>{blocker}</li>
+                                                    ))}
+                                                </ul>
+                                            </div>
+                                        )}
+                                    </CardContent>
+                                </Card>
+                            )}
+
+                            {meeting.speakerActivity && meeting.speakerActivity.length > 0 && (
+                                <Card className="rounded-xl">
+                                    <CardHeader className="pb-2">
+                                        <CardTitle className="text-sm">Speaker Activity</CardTitle>
+                                    </CardHeader>
+                                    <CardContent className="space-y-2 p-4 pt-0 text-sm">
+                                        {meeting.speakerActivity.map((speaker) => (
+                                            <div key={speaker.name} className="flex items-center justify-between">
+                                                <span className="font-medium text-foreground">{speaker.name}</span>
+                                                <span className="text-muted-foreground">{speaker.wordCount} words</span>
+                                            </div>
+                                        ))}
                                     </CardContent>
                                 </Card>
                             )}
@@ -1828,11 +2099,19 @@ function MeetingDetailSheet({ id, onClose, onNavigateToChat }: { id: string | nu
                     />
                 </div>
             </div>
-            
-            </>
-            )}
+    );
+
+    return (
+      <>
+        {isPageVariant ? (
+          <div className="flex flex-col h-full">{detailContent}</div>
+        ) : (
+          <Sheet open={!!id} onOpenChange={(open) => { if (!open) onClose(); }}>
+            <SheetContent side="right" className="w-full sm:max-w-3xl p-0">
+              {detailContent}
             </SheetContent>
-        </Sheet>
+          </Sheet>
+        )}
         <AssignPersonDialog 
             isOpen={isAssignDialogOpen}
             onClose={() => setIsAssignDialogOpen(false)}
@@ -1853,7 +2132,7 @@ function MeetingDetailSheet({ id, onClose, onNavigateToChat }: { id: string | nu
                 <AlertDialogHeader>
                     <AlertDialogTitle>Are you sure?</AlertDialogTitle>
                     <AlertDialogDescription>
-                        This will permanently delete the meeting "{meeting?.title}" and its linked Chat and Plan sessions. This action cannot be undone.
+                        This will permanently delete the meeting "{meeting?.title}" and its linked chat session. This action cannot be undone.
                     </AlertDialogDescription>
                 </AlertDialogHeader>
                 <AlertDialogFooter>
@@ -1981,6 +2260,23 @@ export default function MeetingsPageContent() {
   const [filter, setFilter] = useState<FilterOption>("all");
   const [isSyncingFathom, setIsSyncingFathom] = useState(false);
   const [fathomSyncRange, setFathomSyncRange] = useState<FathomSyncRange>("this_week");
+  const lastMeetingIdsRef = useRef<Set<string>>(new Set());
+  const hasInitializedMeetingPoll = useRef(false);
+
+  const clearDuplicateChatLinks = useCallback(
+    async (chatSessionId: string, meetingId: string) => {
+      const duplicates = meetings.filter(
+        (item) => item.chatSessionId === chatSessionId && item.id !== meetingId
+      );
+      if (duplicates.length === 0) return;
+      await Promise.all(
+        duplicates.map((duplicate) =>
+          updateMeeting(duplicate.id, { chatSessionId: null })
+        )
+      );
+    },
+    [meetings, updateMeeting]
+  );
 
   useEffect(() => {
     const meetingToOpen = searchParams.get('open');
@@ -1990,6 +2286,49 @@ export default function MeetingsPageContent() {
         router.replace('/meetings', { scroll: false });
     }
   }, [searchParams, router]);
+
+  useEffect(() => {
+    lastMeetingIdsRef.current = new Set(meetings.map((meeting) => meeting.id));
+  }, [meetings]);
+
+  useEffect(() => {
+    if (!isFathomConnected) return;
+    let isActive = true;
+
+    const pollForNewMeetings = async () => {
+      try {
+        const latestMeetings = await apiFetch<Meeting[]>("/api/meetings");
+        if (!isActive) return;
+        const latestIds = new Set(latestMeetings.map((meeting) => meeting.id));
+
+        if (!hasInitializedMeetingPoll.current) {
+          lastMeetingIdsRef.current = latestIds;
+          hasInitializedMeetingPoll.current = true;
+          return;
+        }
+
+        const previousIds = lastMeetingIdsRef.current;
+        const newlyAdded = latestMeetings.filter((meeting) => !previousIds.has(meeting.id));
+        if (newlyAdded.length > 0) {
+          lastMeetingIdsRef.current = latestIds;
+          await refreshMeetings();
+          toast({
+            title: "New meeting imported",
+            description: `${newlyAdded.length} new meeting${newlyAdded.length === 1 ? "" : "s"} added from Fathom.`,
+          });
+        }
+      } catch (error) {
+        console.error("Failed to check for new meetings:", error);
+      }
+    };
+
+    pollForNewMeetings();
+    const interval = setInterval(pollForNewMeetings, 20000);
+    return () => {
+      isActive = false;
+      clearInterval(interval);
+    };
+  }, [isFathomConnected, refreshMeetings, toast]);
 
   const handleChatNavigation = async (meeting: any) => {
     const sessionFromMeeting = meeting.chatSessionId
@@ -2001,6 +2340,7 @@ export default function MeetingsPageContent() {
     const existingSession = sessionFromMeeting || sessionFromLookup;
 
     if (existingSession) {
+      await clearDuplicateChatLinks(existingSession.id, meeting.id);
       if (meeting.chatSessionId !== existingSession.id) {
         await updateMeeting(meeting.id, { chatSessionId: existingSession.id });
       }
@@ -2018,6 +2358,7 @@ export default function MeetingsPageContent() {
     });
 
     if (newSession) {
+      await clearDuplicateChatLinks(newSession.id, meeting.id);
       await updateMeeting(meeting.id, { chatSessionId: newSession.id });
       setActiveSessionId(newSession.id);
       router.push('/chat');
@@ -2026,11 +2367,30 @@ export default function MeetingsPageContent() {
     }
   };
 
-  const handleSyncFathom = async () => {
+  const getFathomRangeLabel = (range: FathomSyncRange) => {
+    switch (range) {
+      case "today":
+        return "Today";
+      case "this_week":
+        return "This Week";
+      case "last_week":
+        return "Last Week";
+      case "this_month":
+        return "This Month";
+      default:
+        return "All Time";
+    }
+  };
+
+  const handleSyncFathom = async (rangeOverride?: FathomSyncRange) => {
     if (isSyncingFathom) return;
     setIsSyncingFathom(true);
     try {
-      const response = await fetch(`/api/fathom/sync?range=${fathomSyncRange}`, { method: "POST" });
+      const rangeToUse = rangeOverride || fathomSyncRange;
+      if (rangeOverride) {
+        setFathomSyncRange(rangeOverride);
+      }
+      const response = await fetch(`/api/fathom/sync?range=${rangeToUse}`, { method: "POST" });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) {
         throw new Error(payload.error || "Fathom sync failed.");
@@ -2169,48 +2529,28 @@ export default function MeetingsPageContent() {
                              Quick Paste
                         </Button>
                         {isFathomConnected && (
-                          <>
-                            <DropdownMenu>
-                              <DropdownMenuTrigger asChild>
-                                <Button variant="outline">
-                                  <CalendarDays className="mr-2 h-4 w-4" />
-                                  {fathomSyncRange === "today"
-                                    ? "Today"
-                                    : fathomSyncRange === "this_week"
-                                      ? "This Week"
-                                      : fathomSyncRange === "last_week"
-                                        ? "Last Week"
-                                        : fathomSyncRange === "this_month"
-                                          ? "This Month"
-                                          : "All Time"}
-                                </Button>
-                              </DropdownMenuTrigger>
-                              <DropdownMenuContent align="start">
-                                <DropdownMenuRadioGroup
-                                  value={fathomSyncRange}
-                                  onValueChange={(value) => setFathomSyncRange(value as FathomSyncRange)}
-                                >
-                                  <DropdownMenuRadioItem value="today">Today</DropdownMenuRadioItem>
-                                  <DropdownMenuRadioItem value="this_week">This Week</DropdownMenuRadioItem>
-                                  <DropdownMenuRadioItem value="last_week">Last Week</DropdownMenuRadioItem>
-                                  <DropdownMenuRadioItem value="this_month">This Month</DropdownMenuRadioItem>
-                                  <DropdownMenuRadioItem value="all">All Time</DropdownMenuRadioItem>
-                                </DropdownMenuRadioGroup>
-                              </DropdownMenuContent>
-                            </DropdownMenu>
-                            <Button
-                              variant="outline"
-                              onClick={handleSyncFathom}
-                              disabled={isSyncingFathom}
-                            >
-                              {isSyncingFathom ? (
-                                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                              ) : (
-                                <RefreshCw className="mr-2 h-4 w-4" />
-                              )}
-                              Sync Fathom
-                            </Button>
-                          </>
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <Button variant="outline" disabled={isSyncingFathom}>
+                                {isSyncingFathom ? (
+                                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                ) : (
+                                  <RefreshCw className="mr-2 h-4 w-4" />
+                                )}
+                                Sync Fathom
+                                <span className="ml-2 text-xs text-muted-foreground">
+                                  ({getFathomRangeLabel(fathomSyncRange)})
+                                </span>
+                              </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="start">
+                              <DropdownMenuItem onSelect={() => handleSyncFathom("today")}>Sync Today</DropdownMenuItem>
+                              <DropdownMenuItem onSelect={() => handleSyncFathom("this_week")}>Sync This Week</DropdownMenuItem>
+                              <DropdownMenuItem onSelect={() => handleSyncFathom("last_week")}>Sync Last Week</DropdownMenuItem>
+                              <DropdownMenuItem onSelect={() => handleSyncFathom("this_month")}>Sync This Month</DropdownMenuItem>
+                              <DropdownMenuItem onSelect={() => handleSyncFathom("all")}>Sync All Time</DropdownMenuItem>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
                         )}
                     </div>
                 </CardContent>
@@ -2229,50 +2569,28 @@ export default function MeetingsPageContent() {
                 <Input placeholder="Search meetings..." className="pl-9 h-9" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} />
             </div>
             {isFathomConnected && (
-              <>
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button variant="outline" size="sm" className="h-9">
-                      <CalendarDays className="mr-2 h-4 w-4" />
-                      {fathomSyncRange === "today"
-                        ? "Today"
-                        : fathomSyncRange === "this_week"
-                          ? "This Week"
-                          : fathomSyncRange === "last_week"
-                            ? "Last Week"
-                            : fathomSyncRange === "this_month"
-                              ? "This Month"
-                              : "All Time"}
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="start">
-                    <DropdownMenuRadioGroup
-                      value={fathomSyncRange}
-                      onValueChange={(value) => setFathomSyncRange(value as FathomSyncRange)}
-                    >
-                      <DropdownMenuRadioItem value="today">Today</DropdownMenuRadioItem>
-                      <DropdownMenuRadioItem value="this_week">This Week</DropdownMenuRadioItem>
-                      <DropdownMenuRadioItem value="last_week">Last Week</DropdownMenuRadioItem>
-                      <DropdownMenuRadioItem value="this_month">This Month</DropdownMenuRadioItem>
-                      <DropdownMenuRadioItem value="all">All Time</DropdownMenuRadioItem>
-                    </DropdownMenuRadioGroup>
-                  </DropdownMenuContent>
-                </DropdownMenu>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="h-9"
-                  onClick={handleSyncFathom}
-                  disabled={isSyncingFathom}
-                >
-                  {isSyncingFathom ? (
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  ) : (
-                    <RefreshCw className="mr-2 h-4 w-4" />
-                  )}
-                  Sync Fathom
-                </Button>
-              </>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="outline" size="sm" className="h-9" disabled={isSyncingFathom}>
+                    {isSyncingFathom ? (
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    ) : (
+                      <RefreshCw className="mr-2 h-4 w-4" />
+                    )}
+                    Sync Fathom
+                    <span className="ml-2 text-xs text-muted-foreground">
+                      ({getFathomRangeLabel(fathomSyncRange)})
+                    </span>
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start">
+                  <DropdownMenuItem onSelect={() => handleSyncFathom("today")}>Sync Today</DropdownMenuItem>
+                  <DropdownMenuItem onSelect={() => handleSyncFathom("this_week")}>Sync This Week</DropdownMenuItem>
+                  <DropdownMenuItem onSelect={() => handleSyncFathom("last_week")}>Sync Last Week</DropdownMenuItem>
+                  <DropdownMenuItem onSelect={() => handleSyncFathom("this_month")}>Sync This Month</DropdownMenuItem>
+                  <DropdownMenuItem onSelect={() => handleSyncFathom("all")}>Sync All Time</DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
             )}
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
@@ -2321,3 +2639,5 @@ export default function MeetingsPageContent() {
     </div>
   );
 }
+
+
