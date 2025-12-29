@@ -111,12 +111,12 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     }
 
     const isAuthPage = pathname === '/login' || pathname === '/signup';
-    const isHomePage = pathname === '/';
+    const isPublicPage = pathname === '/' || pathname === '/privacy' || pathname === '/terms';
 
     if (user && isAuthPage) {
       // If user is logged in and on an auth page, redirect them away.
       router.push('/meetings');
-    } else if (!user && !isAuthPage && !isHomePage) {
+    } else if (!user && !isAuthPage && !isPublicPage) {
       // Keep the homepage public; redirect to login only for protected pages.
       router.push('/login');
     }
