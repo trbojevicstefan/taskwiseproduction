@@ -10,39 +10,55 @@ export const metadata: Metadata = {
 export default function TermsOfServicePage() {
   return (
     <LegalPageLayout title="Terms of Service">
-        <p>Last updated: {new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}</p>
+        <p>Last updated: December 29, 2025</p>
 
-        <h2>1. Agreement to Terms</h2>
-        <p>By using our services, you agree to be bound by these Terms of Service. If you do not agree to these Terms, do not use the services.</p>
+        <h2>1. Acceptance of These Terms</h2>
+        <p>By accessing or using the Service, you agree to these Terms of Service. If you do not agree, do not use the Service.</p>
 
-        <h2>2. Description of Service</h2>
-        <p>TaskWiseAI provides a platform for task management, AI-powered task extraction, and integration with third-party services. The service is provided "as is" and we make no guarantees regarding its availability or functionality.</p>
-        
-        <h2>3. User Responsibilities</h2>
-        <p>You are responsible for your conduct and your content. You agree to comply with all applicable laws and regulations in connection with your use of the service. You are responsible for maintaining the confidentiality of your account and password.</p>
-        
-        <h2>4. Intellectual Property</h2>
-        <p>You retain full ownership of the content you create and submit to the service. By using the service, you grant us a worldwide, royalty-free license to use, reproduce, modify, and process the content solely for the purpose of providing the service to you. This includes sending your content to our third-party AI model providers for processing.</p>
+        <h2>2. Eligibility</h2>
+        <p>You must be at least 13 years old to use the Service. If you are using the Service on behalf of an organization, you represent that you have authority to bind that organization to these Terms.</p>
 
-        <h2>5. Prohibited Activities</h2>
-        <p>You agree not to engage in any of the following prohibited activities:</p>
+        <h2>3. Accounts and Security</h2>
+        <p>You are responsible for maintaining the confidentiality of your account credentials and for all activity that occurs under your account.</p>
+
+        <h2>4. The Service</h2>
+        <p>TaskWiseAI provides task management, AI-powered task extraction, meeting insights, and integrations with third-party services. We may update or modify the Service from time to time.</p>
+
+        <h2>5. Your Content</h2>
+        <p>You retain ownership of content you submit. You grant TaskWiseAI a worldwide, royalty-free license to host, store, reproduce, modify, and process your content solely to provide and improve the Service, including sending content to AI model providers for processing.</p>
+
+        <h2>6. Acceptable Use</h2>
+        <p>You agree not to misuse the Service. For example, you will not:</p>
         <ul>
-            <li>Using the service for any illegal purpose or in violation of any local, state, national, or international law.</li>
-            <li>Submitting content that is unlawful, harmful, defamatory, or otherwise objectionable.</li>
-            <li>Attempting to interfere with, compromise the system integrity or security, or decipher any transmissions to or from the servers running the service.</li>
+            <li>Use the Service for illegal activities or in violation of applicable laws.</li>
+            <li>Upload content that is unlawful, harmful, infringing, or otherwise objectionable.</li>
+            <li>Attempt to interfere with or compromise the integrity or security of the Service.</li>
+            <li>Reverse engineer or attempt to extract source code from the Service.</li>
         </ul>
 
-        <h2>6. Limitation of Liability</h2>
-        <p>To the fullest extent permitted by applicable law, TaskWiseAI shall not be liable for any indirect, incidental, special, consequential, or punitive damages, or any loss of profits or revenues, whether incurred directly or indirectly, or any loss of data, use, goodwill, or other intangible losses, resulting from (a) your access to or use of or inability to access or use the service; (b) any conduct or content of any third party on the service.</p>
-        
-        <h2>7. Termination</h2>
-        <p>We may terminate or suspend your access to our service immediately, without prior notice or liability, for any reason whatsoever, including without limitation if you breach the Terms.</p>
+        <h2>7. Third-Party Services</h2>
+        <p>If you connect third-party services, their terms and policies apply to your use of those services. TaskWiseAI is not responsible for third-party services.</p>
 
-        <h2>8. Changes to Terms</h2>
-        <p>We reserve the right, at our sole discretion, to modify or replace these Terms at any time. We will provide notice of any changes by posting the new Terms of Service on this page.</p>
-        
-        <h2>9. Contact Us</h2>
-        <p>If you have any questions about these Terms, please contact us at: support@taskwise.ai</p>
+        <h2>8. Fees and Billing</h2>
+        <p>Some plans may require payment. Prices and features are described on our pricing pages and may change with notice. Taxes may apply.</p>
+
+        <h2>9. Suspension and Termination</h2>
+        <p>We may suspend or terminate your access if you violate these Terms or if required to protect the Service or other users. You may stop using the Service at any time.</p>
+
+        <h2>10. Disclaimer</h2>
+        <p>The Service is provided on an "as is" and "as available" basis, without warranties of any kind.</p>
+
+        <h2>11. Limitation of Liability</h2>
+        <p>To the fullest extent permitted by law, TaskWiseAI will not be liable for any indirect, incidental, special, consequential, or punitive damages, or any loss of profits, revenues, data, or goodwill arising from your use of the Service.</p>
+
+        <h2>12. Indemnification</h2>
+        <p>You agree to indemnify and hold TaskWiseAI harmless from claims, damages, and expenses arising from your use of the Service or violation of these Terms.</p>
+
+        <h2>13. Changes to These Terms</h2>
+        <p>We may update these Terms from time to time. We will post the latest version on this page.</p>
+
+        <h2>14. Contact Us</h2>
+        <p>If you have questions about these Terms, contact us at: support@taskwise.ai</p>
     </LegalPageLayout>
   );
 }

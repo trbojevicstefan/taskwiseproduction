@@ -294,8 +294,8 @@ export default function TaskwiseAIPage() {
             <span className="text-white/40">(c) {new Date().getFullYear()}</span>
           </div>
           <div className="flex items-center justify-center md:justify-end gap-4">
-            <Link href="/privacy" className="text-sm text-white/60 hover:text-white">Privacy</Link>
-            <Link href="/terms" className="text-sm text-white/60 hover:text-white">Terms</Link>
+            <Link href="/privacy" className="text-sm text-white/60 hover:text-white">Privacy Policy</Link>
+            <Link href="/terms" className="text-sm text-white/60 hover:text-white">Terms of Service</Link>
             <Link href="/contact" className="text-sm text-white/60 hover:text-white">Contact</Link>
           </div>
         </div>
