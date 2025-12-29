@@ -2,7 +2,9 @@ import type { NextAuthOptions } from "next-auth";
 import CredentialsProvider from "next-auth/providers/credentials";
 import GoogleProvider from "next-auth/providers/google";
 import { randomBytes } from "crypto";
+import { cookies } from "next/headers";
 import { findUserByEmail, findUserById, verifyUserPassword, createUser, updateUserById } from "@/lib/db/users";
+import { GOOGLE_INTEGRATION_USER_COOKIE } from "@/lib/integration-cookies";
 
 const providers = [
   CredentialsProvider({
@@ -105,6 +107,19 @@ export const authOptions: NextAuthOptions = {
   },
   providers,
   callbacks: {
+    async signIn({ account }) {
+      if (account?.provider === "google-integration") {
+        const integrationUserId = cookies().get(GOOGLE_INTEGRATION_USER_COOKIE)?.value;
+        if (!integrationUserId) {
+          return false;
+        }
+        const dbUser = await findUserById(integrationUserId);
+        if (!dbUser) {
+          return false;
+        }
+      }
+      return true;
+    },
     async jwt({ token, user, account, profile }) {
       if (account?.provider === "google") {
         const email =
@@ -147,9 +162,9 @@ export const authOptions: NextAuthOptions = {
           (token.email as string | undefined);
         const normalizedEmail = email?.trim().toLowerCase();
         const existingUserId = (token.id as string | undefined) || (token.uid as string | undefined);
-        const dbUser =
-          (existingUserId ? await findUserById(existingUserId) : null) ||
-          (normalizedEmail ? await findUserByEmail(normalizedEmail) : null);
+        const integrationUserId = cookies().get(GOOGLE_INTEGRATION_USER_COOKIE)?.value;
+        const candidateUserId = existingUserId || integrationUserId;
+        const dbUser = candidateUserId ? await findUserById(candidateUserId) : null;
 
         if (dbUser) {
           const userId = dbUser._id.toString();

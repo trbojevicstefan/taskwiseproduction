@@ -5,6 +5,7 @@ import React, { createContext, useContext, useState, ReactNode, useCallback, use
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
 import { signIn } from "next-auth/react";
+import { GOOGLE_INTEGRATION_USER_COOKIE } from "@/lib/integration-cookies";
 
 export interface ClientSideGoogleTokenInfo {
   accessToken: string;
@@ -76,6 +77,24 @@ export const IntegrationsProvider = ({ children }: { children: ReactNode }) => {
   }, [toast]);
 
   const connectGoogleTasks = async () => {
+    if (!user?.uid) {
+      toast({
+        title: "Sign-in Required",
+        description: "Please sign in before connecting Google.",
+        variant: "destructive",
+      });
+      return;
+    }
+    const cookieParts = [
+      `${GOOGLE_INTEGRATION_USER_COOKIE}=${encodeURIComponent(user.uid)}`,
+      "Path=/",
+      "Max-Age=600",
+      "SameSite=Lax",
+    ];
+    if (typeof window !== "undefined" && window.location.protocol === "https:") {
+      cookieParts.push("Secure");
+    }
+    document.cookie = cookieParts.join("; ");
     await signIn("google-integration", { callbackUrl: "/settings?google_success=true" });
   };
 
@@ -94,7 +113,7 @@ export const IntegrationsProvider = ({ children }: { children: ReactNode }) => {
     }
   };
 
-  const getValidGoogleAccessToken = async () => {
+  const getValidGoogleAccessToken = useCallback(async () => {
     try {
       const response = await fetch("/api/google/token");
       if (!response.ok) {
@@ -117,7 +136,7 @@ export const IntegrationsProvider = ({ children }: { children: ReactNode }) => {
       console.error("Failed to fetch Google access token:", error);
       return null;
     }
-  };
+  }, [user?.uid]);
   const connectTrello = () => warnDisabled();
   const disconnectTrello = async () => warnDisabled();
   const connectSlack = () => {
