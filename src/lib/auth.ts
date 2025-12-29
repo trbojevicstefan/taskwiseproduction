@@ -147,13 +147,27 @@ export const authOptions: NextAuthOptions = {
           (token.email as string | undefined);
         const normalizedEmail = email?.trim().toLowerCase();
         const existingUserId = (token.id as string | undefined) || (token.uid as string | undefined);
-        const dbUser = existingUserId
-          ? await findUserById(existingUserId)
-          : normalizedEmail
-          ? await findUserByEmail(normalizedEmail)
-          : null;
+        const dbUser =
+          (existingUserId ? await findUserById(existingUserId) : null) ||
+          (normalizedEmail ? await findUserByEmail(normalizedEmail) : null);
 
         if (dbUser) {
+          const userId = dbUser._id.toString();
+          token.id = userId;
+          token.uid = userId;
+          token.userId = userId;
+          token.name = dbUser.name;
+          token.email = dbUser.email;
+          token.image = dbUser.avatarUrl || undefined;
+          token.displayName = dbUser.name;
+          token.photoURL = dbUser.avatarUrl || null;
+          token.avatarUrl = dbUser.avatarUrl || null;
+          token.onboardingCompleted = dbUser.onboardingCompleted;
+          token.workspace = dbUser.workspace;
+          token.firefliesWebhookToken = dbUser.firefliesWebhookToken;
+          token.slackTeamId = dbUser.slackTeamId;
+          token.taskGranularityPreference = dbUser.taskGranularityPreference;
+
           const update: Record<string, unknown> = {
             googleConnected: true,
             ...(normalizedEmail ? { googleEmail: normalizedEmail } : {}),
@@ -168,7 +182,7 @@ export const authOptions: NextAuthOptions = {
           if (account.expires_at) {
             update.googleTokenExpiry = account.expires_at * 1000;
           }
-          await updateUserById(dbUser._id.toString(), update);
+          await updateUserById(userId, update);
         }
       }
 
