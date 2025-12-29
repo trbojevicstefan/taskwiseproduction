@@ -109,7 +109,8 @@ export const authOptions: NextAuthOptions = {
   callbacks: {
     async signIn({ account }) {
       if (account?.provider === "google-integration") {
-        const integrationUserId = cookies().get(GOOGLE_INTEGRATION_USER_COOKIE)?.value;
+        const cookieStore = await cookies();
+        const integrationUserId = cookieStore.get(GOOGLE_INTEGRATION_USER_COOKIE)?.value;
         if (!integrationUserId) {
           return false;
         }
@@ -162,7 +163,8 @@ export const authOptions: NextAuthOptions = {
           (token.email as string | undefined);
         const normalizedEmail = email?.trim().toLowerCase();
         const existingUserId = (token.id as string | undefined) || (token.uid as string | undefined);
-        const integrationUserId = cookies().get(GOOGLE_INTEGRATION_USER_COOKIE)?.value;
+        const cookieStore = await cookies();
+        const integrationUserId = cookieStore.get(GOOGLE_INTEGRATION_USER_COOKIE)?.value;
         const candidateUserId = existingUserId || integrationUserId;
         const dbUser = candidateUserId ? await findUserById(candidateUserId) : null;
 
