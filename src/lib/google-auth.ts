@@ -37,8 +37,8 @@ export const getGoogleAccessTokenForUser = async (
     return user.googleAccessToken || null;
   }
 
-  const clientId = getEnv("GOOGLE_CLIENT_ID");
-  const clientSecret = getEnv("GOOGLE_CLIENT_SECRET");
+  const clientId = getEnv("GOOGLE_INTEGRATION_CLIENT_ID");
+  const clientSecret = getEnv("GOOGLE_INTEGRATION_CLIENT_SECRET");
 
   const body = new URLSearchParams({
     client_id: clientId,

@@ -51,8 +51,23 @@ const STOP_WORDS = new Set([
 
 const OPEN_ITEMS_TRIGGER = /task\s*-?\s*wise\s+open\s+items?|open\s+items|running\s+items/i;
 
-const normalizeAssigneeName = (value?: string | null) =>
-  value ? normalizePersonNameKey(value) : "";
+const UNASSIGNED_LABELS = new Set([
+  "unassigned",
+  "unknown",
+  "none",
+  "na",
+  "n a",
+  "tbd",
+  "un assigned",
+]);
+
+const normalizeAssigneeName = (value?: string | null) => {
+  if (!value) return "";
+  const normalized = normalizePersonNameKey(value);
+  if (!normalized) return "";
+  if (UNASSIGNED_LABELS.has(normalized)) return "";
+  return normalized;
+};
 
 const normalizeEmail = (value?: string | null) =>
   value ? value.trim().toLowerCase() : "";
@@ -216,44 +231,32 @@ export const buildCompletionSuggestions = async ({
   const attendeeEmails = new Set(
     attendees.map((person) => normalizeEmail(person.email)).filter(Boolean)
   );
+  const hasAttendees = attendeeNames.size > 0 || attendeeEmails.size > 0;
 
   const openItemsTrigger = OPEN_ITEMS_TRIGGER.test(transcript);
-  const allowUnassigned = openItemsTrigger;
+  let allowUnassigned = openItemsTrigger || !hasAttendees;
   const db = await getDb();
   const userIdQuery = buildIdQuery(userId);
-  const candidates = new Map<string, CompletionCandidate>();
+  const shouldIncludeAssignee = (
+    assigneeName?: string | null,
+    assigneeEmail?: string | null,
+    allowUnassignedMatch = false,
+    requireAttendeeMatch = true
+  ) => {
+    if (!hasAttendees || !requireAttendeeMatch) return true;
+    return matchesAttendee(
+      assigneeName,
+      assigneeEmail,
+      attendeeNames,
+      attendeeEmails,
+      allowUnassignedMatch
+    );
+  };
 
   const tasks = await db
     .collection<any>("tasks")
     .find({ userId: userIdQuery, status: { $ne: "done" } })
     .toArray();
-
-  tasks.forEach((task) => {
-    const assigneeName = task.assignee?.name || task.assigneeName || null;
-    const assigneeEmail = task.assignee?.email || task.assigneeEmail || null;
-    if (!matchesAttendee(assigneeName, assigneeEmail, attendeeNames, attendeeEmails, allowUnassigned)) {
-      return;
-    }
-    upsertCandidate(
-      candidates,
-      {
-        title: task.title,
-        description: task.description,
-        assigneeName,
-        assigneeEmail,
-        dueAt: task.dueAt ?? null,
-        priority: task.priority ?? null,
-        sourceRank: 0,
-      },
-      {
-        sourceType: "task",
-        sourceSessionId: task._id?.toString?.() || task.id,
-        taskId: task._id?.toString?.() || task.id,
-        sourceSessionName: null,
-      },
-      allowUnassigned
-    );
-  });
 
   const meetings = await db
     .collection<any>("meetings")
@@ -261,74 +264,137 @@ export const buildCompletionSuggestions = async ({
     .project({ _id: 1, title: 1, extractedTasks: 1 })
     .toArray();
 
-  meetings.forEach((meeting) => {
-    if (excludeMeetingId && String(meeting._id) === excludeMeetingId) return;
-    const extracted = flattenExtractedTasks(meeting.extractedTasks || []);
-    extracted.forEach((task) => {
-      if (!taskIsOpen(task)) return;
-      const assigneeName = task.assignee?.name || task.assigneeName || null;
-      const assigneeEmail = task.assignee?.email || null;
-      if (!matchesAttendee(assigneeName, assigneeEmail, attendeeNames, attendeeEmails, allowUnassigned)) {
-        return;
-      }
-      upsertCandidate(
-        candidates,
-        {
-          title: task.title,
-          description: task.description ?? null,
-          assigneeName,
-          assigneeEmail,
-          dueAt: task.dueAt ?? null,
-          priority: task.priority ?? null,
-          sourceRank: 1,
-        },
-        {
-          sourceType: "meeting",
-          sourceSessionId: String(meeting._id),
-          taskId: task.id,
-          sourceSessionName: meeting.title,
-        },
-        allowUnassigned
-      );
-    });
-  });
-
   const chatSessions = await db
     .collection<any>("chatSessions")
     .find({ userId: userIdQuery })
     .project({ _id: 1, title: 1, suggestedTasks: 1 })
     .toArray();
 
-  chatSessions.forEach((session) => {
-    const extracted = flattenExtractedTasks(session.suggestedTasks || []);
-    extracted.forEach((task) => {
-      if (!taskIsOpen(task)) return;
+  const buildCandidates = (
+    allowUnassignedMatch: boolean,
+    requireAttendeeMatch = true
+  ) => {
+    const candidates = new Map<string, CompletionCandidate>();
+
+    tasks.forEach((task) => {
       const assigneeName = task.assignee?.name || task.assigneeName || null;
-      const assigneeEmail = task.assignee?.email || null;
-      if (!matchesAttendee(assigneeName, assigneeEmail, attendeeNames, attendeeEmails, allowUnassigned)) {
+      const assigneeEmail = task.assignee?.email || task.assigneeEmail || null;
+      if (
+        !shouldIncludeAssignee(
+          assigneeName,
+          assigneeEmail,
+          allowUnassignedMatch,
+          requireAttendeeMatch
+        )
+      ) {
         return;
       }
       upsertCandidate(
         candidates,
         {
           title: task.title,
-          description: task.description ?? null,
+          description: task.description,
           assigneeName,
           assigneeEmail,
           dueAt: task.dueAt ?? null,
           priority: task.priority ?? null,
-          sourceRank: 2,
+          sourceRank: 0,
         },
         {
-          sourceType: "chat",
-          sourceSessionId: String(session._id),
-          taskId: task.id,
-          sourceSessionName: session.title,
+          sourceType: "task",
+          sourceSessionId: task._id?.toString?.() || task.id,
+          taskId: task._id?.toString?.() || task.id,
+          sourceSessionName: null,
         },
-        allowUnassigned
+        allowUnassignedMatch
       );
     });
-  });
+
+    meetings.forEach((meeting) => {
+      if (excludeMeetingId && String(meeting._id) === excludeMeetingId) return;
+      const extracted = flattenExtractedTasks(meeting.extractedTasks || []);
+      extracted.forEach((task) => {
+        if (!taskIsOpen(task)) return;
+        const assigneeName = task.assignee?.name || task.assigneeName || null;
+        const assigneeEmail = task.assignee?.email || null;
+        if (
+          !shouldIncludeAssignee(
+            assigneeName,
+            assigneeEmail,
+            allowUnassignedMatch,
+            requireAttendeeMatch
+          )
+        ) {
+          return;
+        }
+        upsertCandidate(
+          candidates,
+          {
+            title: task.title,
+            description: task.description ?? null,
+            assigneeName,
+            assigneeEmail,
+            dueAt: task.dueAt ?? null,
+            priority: task.priority ?? null,
+            sourceRank: 1,
+          },
+          {
+            sourceType: "meeting",
+            sourceSessionId: String(meeting._id),
+            taskId: task.id,
+            sourceSessionName: meeting.title,
+          },
+          allowUnassignedMatch
+        );
+      });
+    });
+
+    chatSessions.forEach((session) => {
+      const extracted = flattenExtractedTasks(session.suggestedTasks || []);
+      extracted.forEach((task) => {
+        if (!taskIsOpen(task)) return;
+        const assigneeName = task.assignee?.name || task.assigneeName || null;
+        const assigneeEmail = task.assignee?.email || null;
+        if (
+          !shouldIncludeAssignee(
+            assigneeName,
+            assigneeEmail,
+            allowUnassignedMatch,
+            requireAttendeeMatch
+          )
+        ) {
+          return;
+        }
+        upsertCandidate(
+          candidates,
+          {
+            title: task.title,
+            description: task.description ?? null,
+            assigneeName,
+            assigneeEmail,
+            dueAt: task.dueAt ?? null,
+            priority: task.priority ?? null,
+            sourceRank: 2,
+          },
+          {
+            sourceType: "chat",
+            sourceSessionId: String(session._id),
+            taskId: task.id,
+            sourceSessionName: session.title,
+          },
+          allowUnassignedMatch
+        );
+      });
+    });
+
+    return candidates;
+  };
+
+  let candidates = buildCandidates(allowUnassigned);
+  if (!candidates.size && hasAttendees) {
+    allowUnassigned = true;
+    candidates = buildCandidates(true, false);
+  }
 
   const allCandidates = Array.from(candidates.values());
   const filteredCandidates = filterCandidatesByTranscript(

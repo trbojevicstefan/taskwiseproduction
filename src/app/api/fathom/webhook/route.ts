@@ -166,7 +166,7 @@ export async function POST(request: Request) {
       user._id.toString(),
       "info",
       "webhook.ingest",
-      "Duplicate meeting ignored.",
+      "Duplicate meeting received; updated existing meeting.",
       { recordingId: String(recordingId) }
     );
     return NextResponse.json({ status: "duplicate", meetingId: result.meetingId });

@@ -2,7 +2,7 @@ import type { NextAuthOptions } from "next-auth";
 import CredentialsProvider from "next-auth/providers/credentials";
 import GoogleProvider from "next-auth/providers/google";
 import { randomBytes } from "crypto";
-import { findUserByEmail, verifyUserPassword, createUser, updateUserById } from "@/lib/db/users";
+import { findUserByEmail, findUserById, verifyUserPassword, createUser, updateUserById } from "@/lib/db/users";
 
 const providers = [
   CredentialsProvider({
@@ -51,14 +51,36 @@ const providers = [
   }),
 ];
 
-const googleClientId = process.env.GOOGLE_CLIENT_ID;
-const googleClientSecret = process.env.GOOGLE_CLIENT_SECRET;
+const googleAuthClientId = process.env.GOOGLE_CLIENT_ID;
+const googleAuthClientSecret = process.env.GOOGLE_CLIENT_SECRET;
+const googleIntegrationClientId = process.env.GOOGLE_INTEGRATION_CLIENT_ID;
+const googleIntegrationClientSecret = process.env.GOOGLE_INTEGRATION_CLIENT_SECRET;
 
-if (googleClientId && googleClientSecret) {
+if (googleAuthClientId && googleAuthClientSecret) {
   providers.push(
     GoogleProvider({
-      clientId: googleClientId,
-      clientSecret: googleClientSecret,
+      clientId: googleAuthClientId,
+      clientSecret: googleAuthClientSecret,
+      authorization: {
+        params: {
+          scope: [
+            "openid",
+            "email",
+            "profile",
+          ].join(" "),
+        },
+      },
+    })
+  );
+}
+
+if (googleIntegrationClientId && googleIntegrationClientSecret) {
+  providers.push(
+    GoogleProvider({
+      id: "google-integration",
+      name: "Google Calendar",
+      clientId: googleIntegrationClientId,
+      clientSecret: googleIntegrationClientSecret,
       authorization: {
         params: {
           scope: [
@@ -116,10 +138,25 @@ export const authOptions: NextAuthOptions = {
           token.firefliesWebhookToken = dbUser.firefliesWebhookToken;
           token.slackTeamId = dbUser.slackTeamId;
           token.taskGranularityPreference = dbUser.taskGranularityPreference;
+        }
+      }
 
+      if (account?.provider === "google-integration") {
+        const email =
+          (profile as { email?: string | null })?.email ||
+          (token.email as string | undefined);
+        const normalizedEmail = email?.trim().toLowerCase();
+        const existingUserId = (token.id as string | undefined) || (token.uid as string | undefined);
+        const dbUser = existingUserId
+          ? await findUserById(existingUserId)
+          : normalizedEmail
+          ? await findUserByEmail(normalizedEmail)
+          : null;
+
+        if (dbUser) {
           const update: Record<string, unknown> = {
             googleConnected: true,
-            googleEmail: normalizedEmail,
+            ...(normalizedEmail ? { googleEmail: normalizedEmail } : {}),
             ...(account.scope ? { googleScopes: account.scope } : {}),
           };
           if (account.access_token) {
@@ -131,11 +168,11 @@ export const authOptions: NextAuthOptions = {
           if (account.expires_at) {
             update.googleTokenExpiry = account.expires_at * 1000;
           }
-          await updateUserById(userId, update);
+          await updateUserById(dbUser._id.toString(), update);
         }
       }
 
-      if (user && account?.provider !== "google") {
+      if (user && account?.provider === "credentials") {
         token.id = user.id;
         token.uid = (user as any).uid;
         token.userId = (user as any).userId;

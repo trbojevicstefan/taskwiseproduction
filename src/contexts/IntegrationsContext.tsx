@@ -76,7 +76,7 @@ export const IntegrationsProvider = ({ children }: { children: ReactNode }) => {
   }, [toast]);
 
   const connectGoogleTasks = async () => {
-    await signIn("google", { callbackUrl: "/settings?google_success=true" });
+    await signIn("google-integration", { callbackUrl: "/settings?google_success=true" });
   };
 
   const disconnectGoogleTasks = async () => {

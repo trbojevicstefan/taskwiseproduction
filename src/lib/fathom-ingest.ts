@@ -179,10 +179,99 @@ export const ingestFathomMeeting = async ({
   accessToken: string;
 }): Promise<FathomIngestResult> => {
   const db = await getDb();
+  const userId = user._id.toString();
+  const userIdQuery = buildIdQuery(userId);
   const existing = await db
     .collection<any>("meetings")
-    .findOne({ userId: user._id.toString(), recordingId });
+    .findOne({ userId: userIdQuery, recordingId });
   if (existing) {
+    const payload = data || {};
+    const update: Record<string, any> = { lastActivityAt: new Date() };
+    const existingTranscript =
+      typeof existing.originalTranscript === "string"
+        ? existing.originalTranscript.trim()
+        : "";
+    let transcriptText = "";
+
+    if (!existingTranscript) {
+      let transcriptPayload =
+        payload.transcript ||
+        payload.transcript_segments ||
+        payload?.recording?.transcript ||
+        payload?.recording?.transcript_segments;
+      if (!transcriptPayload) {
+        transcriptPayload = await fetchFathomTranscript(recordingId, accessToken).catch(
+          () => null
+        );
+      }
+      transcriptText = formatFathomTranscript(transcriptPayload);
+      if (transcriptText) {
+        update.originalTranscript = transcriptText;
+      }
+    }
+
+    const existingSummary =
+      typeof existing.summary === "string" ? existing.summary.trim() : "";
+    if (!existingSummary) {
+      const summaryPayload =
+        payload.summary ||
+        payload?.recording?.summary ||
+        (await fetchFathomSummary(recordingId, accessToken).catch(() => null));
+      const summaryText =
+        payload?.default_summary?.markdown_formatted ||
+        (typeof summaryPayload === "string" ? summaryPayload : "");
+      if (summaryText) {
+        update.summary = summaryText;
+      }
+    }
+
+    const recordingUrl = pickFirst(
+      payload.url,
+      payload.meeting_url,
+      payload?.recording?.url
+    );
+    if (recordingUrl && !existing.recordingUrl) {
+      update.recordingUrl = recordingUrl;
+    }
+    const shareUrl = pickFirst(
+      payload.share_url,
+      payload.meeting_share_url,
+      payload?.recording?.share_url
+    );
+    if (shareUrl && !existing.shareUrl) {
+      update.shareUrl = shareUrl;
+    }
+
+    const startTime = toDateOrNull(
+      payload.recording_start_time ||
+        payload.start_time ||
+        payload.started_at ||
+        payload?.recording?.start_time ||
+        payload.scheduled_start_time
+    );
+    if (startTime && !existing.startTime) {
+      update.startTime = startTime;
+    }
+    const endTime = toDateOrNull(
+      payload.recording_end_time ||
+        payload.end_time ||
+        payload.ended_at ||
+        payload?.recording?.end_time ||
+        payload.scheduled_end_time
+    );
+    if (endTime && !existing.endTime) {
+      update.endTime = endTime;
+    }
+    const duration =
+      payload.duration || payload.duration_seconds || payload?.recording?.duration;
+    if (duration && !existing.duration) {
+      update.duration = duration;
+    }
+
+    await db.collection<any>("meetings").updateOne(
+      { _id: existing._id },
+      { $set: update }
+    );
     return { status: "duplicate", meetingId: existing._id.toString() };
   }
 
@@ -237,14 +326,14 @@ export const ingestFathomMeeting = async ({
   );
 
   const completionSuggestions = await buildCompletionSuggestions({
-    userId: user._id.toString(),
+    userId,
     transcript: transcriptText,
     attendees: uniquePeople,
   });
 
   const shouldAutoApprove = Boolean(user.autoApproveCompletedTasks);
   if (shouldAutoApprove && completionSuggestions.length) {
-    await applyCompletionTargets(db, user._id.toString(), completionSuggestions);
+    await applyCompletionTargets(db, userId, completionSuggestions);
   }
 
   const mergedTasks = mergeCompletionSuggestions(
@@ -302,7 +391,7 @@ export const ingestFathomMeeting = async ({
 
   const meeting = {
     _id: meetingId,
-    userId: user._id.toString(),
+    userId,
     title: meetingTitle,
     originalTranscript: transcriptText,
     summary: meetingSummary,
@@ -362,7 +451,7 @@ export const ingestFathomMeeting = async ({
 
   const chatSession = {
     _id: chatId,
-    userId: user._id.toString(),
+    userId,
     title: `Chat about "${meetingTitle}"`,
     messages: [],
     suggestedTasks: finalizedTasks,
@@ -380,7 +469,7 @@ export const ingestFathomMeeting = async ({
 
   const planningSession = {
     _id: planId,
-    userId: user._id.toString(),
+    userId,
     title: `Plan from "${meetingTitle}"`,
     inputText: meetingSummary,
     extractedTasks: finalizedTasks,
@@ -399,7 +488,7 @@ export const ingestFathomMeeting = async ({
   await db.collection("chatSessions").insertOne(chatSession);
   await db.collection("planningSessions").insertOne(planningSession);
   await syncTasksForSource(db, finalizedTasks, {
-    userId: user._id.toString(),
+    userId,
     sourceSessionId: meetingId,
     sourceSessionType: "meeting",
     sourceSessionName: meetingTitle,
