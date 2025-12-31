@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import {
   getFathomInstallation,
   getValidFathomAccessToken,
+  hashFathomRecordingId,
 } from "@/lib/fathom";
 import { ingestFathomMeeting } from "@/lib/fathom-ingest";
 import { findUserByFathomWebhookToken } from "@/lib/db/users";
@@ -153,6 +154,11 @@ export async function POST(request: Request) {
     );
   }
 
+  const recordingIdHash = hashFathomRecordingId(
+    user._id.toString(),
+    String(recordingId)
+  );
+
   const accessToken = await getValidFathomAccessToken(user._id.toString());
   const result = await ingestFathomMeeting({
     user,
@@ -167,7 +173,7 @@ export async function POST(request: Request) {
       "info",
       "webhook.ingest",
       "Duplicate meeting received; updated existing meeting.",
-      { recordingId: String(recordingId) }
+      { recordingIdHash }
     );
     return NextResponse.json({ status: "duplicate", meetingId: result.meetingId });
   }
@@ -178,7 +184,7 @@ export async function POST(request: Request) {
       "warn",
       "webhook.ingest",
       "Transcript missing for recording.",
-      { recordingId: String(recordingId) }
+      { recordingIdHash }
     );
     return NextResponse.json(
       { error: "Transcript unavailable for recording." },
@@ -191,7 +197,7 @@ export async function POST(request: Request) {
     "info",
     "webhook.ingest",
     "Meeting ingested from webhook.",
-    { recordingId: String(recordingId), meetingId: result.meetingId }
+    { recordingIdHash, meetingId: result.meetingId }
   );
 
   return NextResponse.json({ status: "ok", meetingId: result.meetingId });

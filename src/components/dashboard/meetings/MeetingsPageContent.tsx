@@ -209,7 +209,21 @@ const getMeetingDurationMinutes = (meeting: Meeting | null) => {
 };
 
 
-function MeetingListItem({ m, onOpen, onChat }: { m: Meeting; onOpen: (id: string) => void; onChat: (meeting: Meeting) => void; }) {
+function MeetingListItem({
+  m,
+  onOpen,
+  onChat,
+  isSelected,
+  onToggleSelection,
+  selectionDisabled = false,
+}: {
+  m: Meeting;
+  onOpen: (id: string) => void;
+  onChat: (meeting: Meeting) => void;
+  isSelected: boolean;
+  onToggleSelection: (checked: boolean) => void;
+  selectionDisabled?: boolean;
+}) {
   const router = useRouter();
   const flavor = flavorMap[(m.tags?.[0] || 'default').toLowerCase() as keyof typeof flavorMap] || flavorMap.default;
 
@@ -231,6 +245,15 @@ function MeetingListItem({ m, onOpen, onChat }: { m: Meeting; onOpen: (id: strin
         className="cursor-pointer relative rounded-xl border border-border/20 shadow-sm hover:border-primary/40 hover:shadow-lg transition-all h-full flex items-center p-3 gap-4 bg-card/60 dark:bg-black/30 hover:bg-card/90"
       >
         <div className={cn("w-1 self-stretch rounded-full", flavor.color)} />
+        {selectionDisabled ? (
+          <div className="h-4 w-4" />
+        ) : (
+          <Checkbox
+            checked={isSelected}
+            onCheckedChange={(checked) => onToggleSelection(!!checked)}
+            onClick={(event) => event.stopPropagation()}
+          />
+        )}
         <div className="flex-1 grid grid-cols-12 gap-4 items-center">
             <div className="col-span-5 min-w-0">
                 <p className="font-semibold text-foreground truncate">{m.title}</p>
@@ -900,6 +923,14 @@ export function MeetingDetailSheet({
         }
     }, [meeting, user?.onboardingCompleted, selectableMeetingPeople]);
 
+    useEffect(() => {
+        if (!meeting) return;
+        if (meeting.ingestSource !== "fathom" || meeting.fathomNotificationReadAt) return;
+        void updateMeeting(meeting.id, {
+            fathomNotificationReadAt: new Date().toISOString(),
+        });
+    }, [meeting, updateMeeting]);
+
     const handleTogglePersonSelection = useCallback((personKey: string, isSelected: boolean) => {
         setSelectedPeopleKeys((prev) => {
             const next = new Set(prev);
@@ -1030,7 +1061,6 @@ export function MeetingDetailSheet({
             { label: "End time", value: meetingEnd ? format(meetingEnd, "PPpp") : null },
             { label: "Duration", value: meetingDurationMinutes ? `${meetingDurationMinutes} min` : null },
             { label: "State", value: meeting.state },
-            { label: "Recording ID", value: meeting.recordingId },
             { label: "Calendar Event ID", value: meeting.calendarEventId },
             { label: "Conference ID", value: meeting.conferenceId },
         ].filter((row) => row.value);
@@ -1147,7 +1177,10 @@ export function MeetingDetailSheet({
         if (!meeting) return;
         try {
             await deleteMeeting(meeting.id);
-            toast({ title: "Meeting Deleted", description: `"${meeting.title}" and all linked sessions have been removed.` });
+            toast({
+              title: "Meeting Deleted",
+              description: `"${meeting.title}" was hidden and its extracted tasks were removed.`,
+            });
             onClose(); // Close the sheet after deletion
         } catch (error) {
             toast({ title: "Deletion Failed", description: "Could not delete the meeting.", variant: "destructive" });
@@ -2249,7 +2282,14 @@ type FilterOption = "all" | "today" | "this_week";
 type FathomSyncRange = "today" | "this_week" | "last_week" | "this_month" | "all";
 
 export default function MeetingsPageContent() {
-  const { meetings, isLoadingMeetingHistory, updateMeeting, deleteMeeting, refreshMeetings } = useMeetingHistory();
+  const {
+    meetings,
+    isLoadingMeetingHistory,
+    updateMeeting,
+    deleteMeeting,
+    deleteMeetings,
+    refreshMeetings,
+  } = useMeetingHistory();
   const { sessions, createNewSession, setActiveSessionId } = useChatHistory();
   const { isFathomConnected } = useIntegrations();
   const [openId, setOpenId] = useState<string | null>(null);
@@ -2259,9 +2299,12 @@ export default function MeetingsPageContent() {
   const [searchQuery, setSearchQuery] = useState("");
   const [filter, setFilter] = useState<FilterOption>("all");
   const [isSyncingFathom, setIsSyncingFathom] = useState(false);
+  const [isRestoringFathom, setIsRestoringFathom] = useState(false);
   const [fathomSyncRange, setFathomSyncRange] = useState<FathomSyncRange>("this_week");
   const lastMeetingIdsRef = useRef<Set<string>>(new Set());
   const hasInitializedMeetingPoll = useRef(false);
+  const [selectedMeetingIds, setSelectedMeetingIds] = useState<Set<string>>(new Set());
+  const [isBulkDeleteMeetingsOpen, setIsBulkDeleteMeetingsOpen] = useState(false);
 
   const clearDuplicateChatLinks = useCallback(
     async (chatSessionId: string, meetingId: string) => {
@@ -2289,6 +2332,19 @@ export default function MeetingsPageContent() {
 
   useEffect(() => {
     lastMeetingIdsRef.current = new Set(meetings.map((meeting) => meeting.id));
+  }, [meetings]);
+
+  useEffect(() => {
+    setSelectedMeetingIds((prev) => {
+      if (prev.size === 0) return prev;
+      const next = new Set<string>();
+      meetings.forEach((meeting) => {
+        if (prev.has(meeting.id)) {
+          next.add(meeting.id);
+        }
+      });
+      return next;
+    });
   }, [meetings]);
 
   useEffect(() => {
@@ -2412,6 +2468,33 @@ export default function MeetingsPageContent() {
     }
   };
 
+  const handleRestoreFathomMeetings = async () => {
+    if (isRestoringFathom) return;
+    setIsRestoringFathom(true);
+    try {
+      const response = await fetch("/api/fathom/restore", { method: "POST" });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(payload.error || "Restore failed.");
+      }
+      await refreshMeetings();
+      const restored = payload.restored || 0;
+      toast({
+        title: "Deleted meetings restored",
+        description: `Restored ${restored} meeting${restored === 1 ? "" : "s"}.`,
+      });
+    } catch (error) {
+      console.error("Fathom restore failed:", error);
+      toast({
+        title: "Restore failed",
+        description: error instanceof Error ? error.message : "Could not restore meetings.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsRestoringFathom(false);
+    }
+  };
+
   const filteredMeetings = useMemo(() => {
     let meetingsToFilter = [...meetings];
     
@@ -2441,6 +2524,56 @@ export default function MeetingsPageContent() {
     return meetingsToFilter;
 
   }, [meetings, searchQuery, filter]);
+
+  const selectedVisibleCount = useMemo(
+    () => filteredMeetings.filter((meeting) => selectedMeetingIds.has(meeting.id)).length,
+    [filteredMeetings, selectedMeetingIds]
+  );
+
+  const allVisibleSelected =
+    filteredMeetings.length > 0 && selectedVisibleCount === filteredMeetings.length;
+
+  const handleToggleMeetingSelection = useCallback(
+    (meetingId: string, checked: boolean) => {
+      setSelectedMeetingIds((prev) => {
+        const next = new Set(prev);
+        if (checked) {
+          next.add(meetingId);
+        } else {
+          next.delete(meetingId);
+        }
+        return next;
+      });
+    },
+    []
+  );
+
+  const handleSelectAllMeetings = useCallback(() => {
+    setSelectedMeetingIds((prev) => {
+      const next = new Set(prev);
+      if (allVisibleSelected) {
+        filteredMeetings.forEach((meeting) => next.delete(meeting.id));
+      } else {
+        filteredMeetings.forEach((meeting) => next.add(meeting.id));
+      }
+      return next;
+    });
+  }, [allVisibleSelected, filteredMeetings]);
+
+  const handleClearMeetingSelection = useCallback(() => {
+    setSelectedMeetingIds(new Set());
+  }, []);
+
+  const handleBulkDeleteMeetings = useCallback(async () => {
+    if (selectedMeetingIds.size === 0) return;
+    const ids = Array.from(selectedMeetingIds);
+    await deleteMeetings(ids);
+    if (openId && selectedMeetingIds.has(openId)) {
+      setOpenId(null);
+    }
+    setSelectedMeetingIds(new Set());
+    setIsBulkDeleteMeetingsOpen(false);
+  }, [deleteMeetings, openId, selectedMeetingIds]);
 
 
   const groupedMeetings = useMemo(() => {
@@ -2531,7 +2664,7 @@ export default function MeetingsPageContent() {
                         {isFathomConnected && (
                           <DropdownMenu>
                             <DropdownMenuTrigger asChild>
-                              <Button variant="outline" disabled={isSyncingFathom}>
+                              <Button variant="outline" disabled={isSyncingFathom || isRestoringFathom}>
                                 {isSyncingFathom ? (
                                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                                 ) : (
@@ -2549,6 +2682,13 @@ export default function MeetingsPageContent() {
                               <DropdownMenuItem onSelect={() => handleSyncFathom("last_week")}>Sync Last Week</DropdownMenuItem>
                               <DropdownMenuItem onSelect={() => handleSyncFathom("this_month")}>Sync This Month</DropdownMenuItem>
                               <DropdownMenuItem onSelect={() => handleSyncFathom("all")}>Sync All Time</DropdownMenuItem>
+                              <DropdownMenuSeparator />
+                              <DropdownMenuItem
+                                onSelect={handleRestoreFathomMeetings}
+                                disabled={isRestoringFathom || isSyncingFathom}
+                              >
+                                Restore deleted meetings
+                              </DropdownMenuItem>
                             </DropdownMenuContent>
                           </DropdownMenu>
                         )}
@@ -2571,7 +2711,7 @@ export default function MeetingsPageContent() {
             {isFathomConnected && (
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                  <Button variant="outline" size="sm" className="h-9" disabled={isSyncingFathom}>
+                  <Button variant="outline" size="sm" className="h-9" disabled={isSyncingFathom || isRestoringFathom}>
                     {isSyncingFathom ? (
                       <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                     ) : (
@@ -2589,6 +2729,13 @@ export default function MeetingsPageContent() {
                   <DropdownMenuItem onSelect={() => handleSyncFathom("last_week")}>Sync Last Week</DropdownMenuItem>
                   <DropdownMenuItem onSelect={() => handleSyncFathom("this_month")}>Sync This Month</DropdownMenuItem>
                   <DropdownMenuItem onSelect={() => handleSyncFathom("all")}>Sync All Time</DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem
+                    onSelect={handleRestoreFathomMeetings}
+                    disabled={isRestoringFathom || isSyncingFathom}
+                  >
+                    Restore deleted meetings
+                  </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
             )}
@@ -2605,6 +2752,15 @@ export default function MeetingsPageContent() {
                 </DropdownMenuRadioGroup>
               </DropdownMenuContent>
             </DropdownMenu>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-9"
+              onClick={handleSelectAllMeetings}
+              disabled={filteredMeetings.length === 0}
+            >
+              {allVisibleSelected ? "Clear selection" : "Select all"}
+            </Button>
         </div>
       </DashboardHeader>
       
@@ -2618,7 +2774,16 @@ export default function MeetingsPageContent() {
                   <DateSeparator label={group.label} />
                   <div className="space-y-4">
                     {group.meetings.map((m) => (
-                      <MeetingListItem key={m.id} m={m} onOpen={(id) => setOpenId(id)} onChat={handleChatNavigation} />
+                      <MeetingListItem
+                        key={m.id}
+                        m={m}
+                        onOpen={(id) => setOpenId(id)}
+                        onChat={handleChatNavigation}
+                        isSelected={selectedMeetingIds.has(m.id)}
+                        onToggleSelection={(checked) =>
+                          handleToggleMeetingSelection(m.id, checked)
+                        }
+                      />
                     ))}
                   </div>
                 </React.Fragment>
@@ -2636,6 +2801,33 @@ export default function MeetingsPageContent() {
       </ScrollArea>
 
       <MeetingDetailSheet id={openId} onClose={() => setOpenId(null)} onNavigateToChat={handleChatNavigation} />
+      <SelectionToolbar
+        selectedCount={selectedMeetingIds.size}
+        onDelete={() => setIsBulkDeleteMeetingsOpen(true)}
+        onClear={handleClearMeetingSelection}
+      />
+      <AlertDialog
+        open={isBulkDeleteMeetingsOpen}
+        onOpenChange={setIsBulkDeleteMeetingsOpen}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete selected meetings?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This hides the meetings and removes all tasks extracted from them. This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleBulkDeleteMeetings}
+              className="bg-destructive hover:bg-destructive/90 text-destructive-foreground"
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

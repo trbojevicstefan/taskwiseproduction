@@ -49,7 +49,7 @@ import { Input } from '@/components/ui/input';
 import React, { useState, useMemo, useCallback } from 'react';
 
 
-const mainNavItems = [
+const baseNavItems = [
   { href: '/meetings', label: 'Meetings', icon: Video },
   { href: '/chat', label: 'Chat', icon: MessageSquare },
   { href: '/planning', label: 'Meeting Planner', icon: Calendar },
@@ -89,6 +89,23 @@ export default function SidebarNav() {
   const [newTitle, setNewTitle] = useState("");
   const [creatingFolderWithParent, setCreatingFolderWithParent] = useState<string | null | 'root'>(null);
   const [newFolderName, setNewFolderName] = useState("");
+  const workspaceId = user?.workspace?.id;
+
+  const mainNavItems = useMemo(() => {
+    const boardHref = workspaceId
+      ? `/workspaces/${workspaceId}/board`
+      : "/workspaces/unknown/board";
+
+    return [
+      baseNavItems[0],
+      baseNavItems[1],
+      baseNavItems[2],
+      { href: boardHref, label: 'Board', icon: SquareKanban },
+      baseNavItems[3],
+      baseNavItems[4],
+      baseNavItems[5],
+    ];
+  }, [workspaceId]);
 
   const handleEdit = (type: 'session' | 'folder', item: {id: string, title?: string, name?: string}) => {
     setEditingId(`${type}-${item.id}`);

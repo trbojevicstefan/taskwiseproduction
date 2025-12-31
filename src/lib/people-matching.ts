@@ -95,10 +95,35 @@ const normalizeEmail = (email?: string | null) =>
 
 const hasAliasMatch = (source: CandidatePerson, target: Person) => {
   const sourceName = source.name ? normalizePersonNameKey(source.name) : "";
-  if (!sourceName) return false;
-  return (target.aliases || []).some(
-    (alias) => normalizePersonNameKey(alias) === sourceName
-  );
+  const sourceEmail = normalizeEmail(source.email);
+  if (!sourceName && !sourceEmail) return false;
+
+  const toTokens = (value: string) =>
+    value.split(" ").map((token) => token.trim()).filter(Boolean);
+  const isSubset = (subset: string[], container: Set<string>) =>
+    subset.every((token) => container.has(token));
+
+  return (target.aliases || []).some((alias) => {
+    const trimmed = alias?.trim();
+    if (!trimmed) return false;
+    const aliasEmail = normalizeEmail(trimmed);
+    if (sourceEmail && aliasEmail && aliasEmail === sourceEmail) {
+      return true;
+    }
+    if (sourceName) {
+      const aliasNameKey = normalizePersonNameKey(trimmed);
+      if (!aliasNameKey) return false;
+      if (aliasNameKey === sourceName) return true;
+      const sourceTokens = new Set(toTokens(sourceName));
+      const aliasTokens = toTokens(aliasNameKey);
+      if (!aliasTokens.length || !sourceTokens.size) return false;
+      return (
+        isSubset(aliasTokens, sourceTokens) ||
+        isSubset(Array.from(sourceTokens), new Set(aliasTokens))
+      );
+    }
+    return false;
+  });
 };
 
 export const getRankedPersonMatches = (

@@ -5,6 +5,7 @@ import {
   fetchFathomSummary,
   fetchFathomTranscript,
   formatFathomTranscript,
+  hashFathomRecordingId,
 } from "@/lib/fathom";
 import { normalizeTask } from "@/lib/data";
 import type { ExtractedTaskSchema } from "@/types/chat";
@@ -181,12 +182,20 @@ export const ingestFathomMeeting = async ({
   const db = await getDb();
   const userId = user._id.toString();
   const userIdQuery = buildIdQuery(userId);
+  const recordingIdHash = hashFathomRecordingId(userId, recordingId);
   const existing = await db
     .collection<any>("meetings")
-    .findOne({ userId: userIdQuery, recordingId });
+    .findOne({
+      userId: userIdQuery,
+      $or: [{ recordingIdHash }, { recordingId }],
+    });
   if (existing) {
     const payload = data || {};
-    const update: Record<string, any> = { lastActivityAt: new Date() };
+    const update: Record<string, any> = {
+      lastActivityAt: new Date(),
+      recordingIdHash,
+      ingestSource: existing.ingestSource || "fathom",
+    };
     const existingTranscript =
       typeof existing.originalTranscript === "string"
         ? existing.originalTranscript.trim()
@@ -268,9 +277,14 @@ export const ingestFathomMeeting = async ({
       update.duration = duration;
     }
 
+    const updateOps: Record<string, any> = { $set: update };
+    if (existing.recordingId) {
+      updateOps.$unset = { recordingId: "" };
+    }
+
     await db.collection<any>("meetings").updateOne(
       { _id: existing._id },
-      { $set: update }
+      updateOps
     );
     return { status: "duplicate", meetingId: existing._id.toString() };
   }
@@ -374,7 +388,7 @@ export const ingestFathomMeeting = async ({
     payload?.recording?.title,
     payload?.recording_name,
     analysisResult.sessionTitle,
-    `Fathom Meeting ${recordingId}`
+    "Fathom Meeting"
   );
 
   const meetingSummary =
@@ -418,12 +432,14 @@ export const ingestFathomMeeting = async ({
     overallSentiment: analysisResult.overallSentiment ?? null,
     speakerActivity: analysisResult.speakerActivity || [],
     meetingMetadata: analysisResult.meetingMetadata || undefined,
-    recordingId,
+    recordingIdHash,
     recordingUrl: pickFirst(
       payload.url,
       payload.meeting_url,
       payload?.recording?.url
     ),
+    ingestSource: "fathom",
+    fathomNotificationReadAt: null,
     shareUrl: pickFirst(
       payload.share_url,
       payload.meeting_share_url,

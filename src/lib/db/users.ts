@@ -1,4 +1,5 @@
 import { ObjectId } from "mongodb";
+import { randomUUID } from "crypto";
 import { compare, hash } from "bcryptjs";
 import { getDb } from "@/lib/db";
 
@@ -13,7 +14,7 @@ export interface DbUser {
   lastUpdated: Date;
   lastSeenAt: Date;
   onboardingCompleted: boolean;
-  workspace: { name: string };
+  workspace: { id: string; name: string };
   firefliesWebhookToken: string | null;
   slackTeamId?: string | null;
   fathomWebhookToken?: string | null;
@@ -69,7 +70,7 @@ export const createUser = async ({
     lastUpdated: now,
     lastSeenAt: now,
     onboardingCompleted: false,
-    workspace: { name: `${safeName}'s Workspace` },
+    workspace: { id: randomUUID(), name: `${safeName}'s Workspace` },
     firefliesWebhookToken: null,
     slackTeamId: null,
     fathomWebhookToken: null,

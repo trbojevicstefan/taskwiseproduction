@@ -7,6 +7,7 @@ import { signIn, signOut, useSession } from "next-auth/react";
 import type { Person } from '@/types/person';
 
 export interface Workspace {
+  id: string;
   name: string;
 }
 
@@ -30,13 +31,29 @@ export interface AppUser extends Person {
   googleEmail?: string | null;
 }
 
+type UserProfileUpdate = Partial<
+  Omit<
+    AppUser,
+    | "id"
+    | "uid"
+    | "email"
+    | "createdAt"
+    | "plan"
+    | "orgId"
+    | "tz"
+    | "firefliesWebhookToken"
+  >
+> & {
+  workspace?: { id?: string; name: string };
+};
+
 interface AuthContextType {
   user: AppUser | null;
   loading: boolean;
   login: (email?: string, password?: string) => Promise<void>;
   signup: (email?: string, password?: string, displayName?: string) => Promise<void>;
   logout: () => Promise<void>;
-  updateUserProfile: (data: Partial<Omit<AppUser, 'id' | 'uid' | 'email' | 'createdAt' | 'plan' | 'orgId' | 'tz' | 'firefliesWebhookToken'>>, avoidGlobalLoading?: boolean) => Promise<void>;
+  updateUserProfile: (data: UserProfileUpdate, avoidGlobalLoading?: boolean) => Promise<void>;
   completeOnboarding: () => Promise<void>;
   refreshUserProfile: () => Promise<void>;
 }
@@ -158,7 +175,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     }
   };
 
-  const updateUserProfile = async (data: Partial<Omit<AppUser, 'id' | 'uid' | 'email'>>, avoidGlobalLoading = false) => {
+  const updateUserProfile = async (data: UserProfileUpdate, avoidGlobalLoading = false) => {
     if (!avoidGlobalLoading) {
       setLoading(true);
     }

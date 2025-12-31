@@ -10,7 +10,7 @@ declare module "next-auth" {
       photoURL?: string | null;
       avatarUrl?: string | null;
       onboardingCompleted?: boolean;
-      workspace?: { name: string };
+      workspace?: { id: string; name: string };
       firefliesWebhookToken?: string | null;
       slackTeamId?: string | null;
       taskGranularityPreference?: "light" | "medium" | "detailed";
@@ -24,7 +24,7 @@ declare module "next-auth" {
     photoURL?: string | null;
     avatarUrl?: string | null;
     onboardingCompleted?: boolean;
-    workspace?: { name: string };
+    workspace?: { id: string; name: string };
     firefliesWebhookToken?: string | null;
     slackTeamId?: string | null;
     taskGranularityPreference?: "light" | "medium" | "detailed";
@@ -40,7 +40,7 @@ declare module "next-auth/jwt" {
     photoURL?: string | null;
     avatarUrl?: string | null;
     onboardingCompleted?: boolean;
-    workspace?: { name: string };
+    workspace?: { id: string; name: string };
     firefliesWebhookToken?: string | null;
     slackTeamId?: string | null;
     taskGranularityPreference?: "light" | "medium" | "detailed";

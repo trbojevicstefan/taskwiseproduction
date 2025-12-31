@@ -69,7 +69,7 @@ const fetchSlackMembers = async (accessToken: string): Promise<SlackMember[]> =>
   return members;
 };
 
-export async function POST() {
+export async function POST(request: Request) {
   const userId = await getSessionUserId();
   if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -84,14 +84,29 @@ export async function POST() {
   }
 
   try {
+    let selectedIds: Set<string> | null = null;
+    try {
+      const payload = await request.json();
+      if (Array.isArray(payload?.selectedIds)) {
+        selectedIds = new Set(
+          payload.selectedIds.filter((id: unknown) => typeof id === "string")
+        );
+      }
+    } catch (error) {
+      console.warn("Slack sync request body not provided or invalid:", error);
+    }
+
     const accessToken = await getValidSlackToken(user.slackTeamId);
     const members = await fetchSlackMembers(accessToken);
+    const membersToSync = selectedIds
+      ? members.filter((member) => selectedIds?.has(member.id))
+      : members;
     const db = await getDb();
 
     let created = 0;
     let updated = 0;
 
-    for (const member of members) {
+    for (const member of membersToSync) {
       if (!member.email) continue;
       const existing = await db.collection<any>("people").findOne({
         userId,

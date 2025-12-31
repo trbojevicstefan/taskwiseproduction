@@ -21,6 +21,7 @@ interface MeetingHistoryContextType {
   getActiveMeeting: () => Meeting | undefined;
   updateMeeting: (sessionId: string, updatedFields: Partial<Omit<Meeting, 'id' | 'userId' | 'createdAt' | 'lastActivityAt'>>) => Promise<Meeting | null>;
   deleteMeeting: (sessionId: string) => Promise<void>;
+  deleteMeetings: (sessionIds: string[]) => Promise<void>;
 }
 
 const MeetingHistoryContext = createContext<MeetingHistoryContextType | undefined>(undefined);
@@ -32,7 +33,7 @@ export const MeetingHistoryProvider = ({ children }: { children: ReactNode }) =>
   const [activeMeetingId, setActiveMeetingIdState] = useState<string | null>(null);
   const [isLoadingMeetingHistory, setIsLoadingMeetingHistory] = useState(true);
 
-  const loadMeetings = useCallback(async () => {
+  const loadMeetings = useCallback(async (options?: { silent?: boolean }) => {
     if (!user?.uid) {
       setMeetings([]);
       setActiveMeetingIdState(null);
@@ -40,7 +41,9 @@ export const MeetingHistoryProvider = ({ children }: { children: ReactNode }) =>
       return;
     }
 
-    setIsLoadingMeetingHistory(true);
+    if (!options?.silent) {
+      setIsLoadingMeetingHistory(true);
+    }
     try {
       const loadedMeetings = await apiFetch<Meeting[]>("/api/meetings");
       const sanitizeLevels = (levels: any) =>
@@ -82,13 +85,28 @@ export const MeetingHistoryProvider = ({ children }: { children: ReactNode }) =>
           return sortedMeetings.length > 0 ? sortedMeetings[0].id : null;
       });
     } finally {
-      setIsLoadingMeetingHistory(false);
+      if (!options?.silent) {
+        setIsLoadingMeetingHistory(false);
+      }
     }
   }, [user]);
 
   useEffect(() => {
     loadMeetings();
   }, [loadMeetings]);
+
+  useEffect(() => {
+    if (!user?.uid || !user?.fathomConnected) return;
+    let isActive = true;
+    const interval = setInterval(() => {
+      if (!isActive) return;
+      void loadMeetings({ silent: true });
+    }, 30000);
+    return () => {
+      isActive = false;
+      clearInterval(interval);
+    };
+  }, [loadMeetings, user?.fathomConnected, user?.uid]);
 
   const refreshMeetings = useCallback(async () => {
     await loadMeetings();
@@ -233,12 +251,60 @@ export const MeetingHistoryProvider = ({ children }: { children: ReactNode }) =>
       if (activeMeetingId === sessionId) {
         setActiveMeetingIdState(null); // Or set to the next available one
       }
-      toast({ title: "Meeting Deleted", description: "The meeting and its linked sessions have been removed." });
+      toast({
+        title: "Meeting Deleted",
+        description: "The meeting was hidden and its extracted tasks were removed.",
+      });
     } catch (error) {
       console.error("Failed to delete meeting from database", error);
       toast({ title: "Error", description: "Could not delete meeting.", variant: "destructive" });
     }
   }, [user, toast, activeMeetingId]);
+
+  const deleteMeetings = useCallback(
+    async (sessionIds: string[]) => {
+      if (!user?.uid) {
+        toast({
+          title: "Authentication Error",
+          description: "You must be logged in to delete meetings.",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      const uniqueIds = Array.from(new Set(sessionIds)).filter(Boolean);
+      if (uniqueIds.length === 0) return;
+
+      try {
+        if (uniqueIds.length === 1) {
+          await apiFetch(`/api/meetings/${uniqueIds[0]}`, { method: "DELETE" });
+        } else {
+          await apiFetch("/api/meetings/bulk-delete", {
+            method: "POST",
+            body: JSON.stringify({ ids: uniqueIds }),
+          });
+        }
+
+        const deletedSet = new Set(uniqueIds);
+        setMeetings((prev) => prev.filter((meeting) => !deletedSet.has(meeting.id)));
+        if (activeMeetingId && deletedSet.has(activeMeetingId)) {
+          setActiveMeetingIdState(null);
+        }
+        toast({
+          title: "Meetings Deleted",
+          description: `${uniqueIds.length} meeting${uniqueIds.length === 1 ? "" : "s"} removed.`,
+        });
+      } catch (error) {
+        console.error("Failed to delete meetings from database", error);
+        toast({
+          title: "Error",
+          description: "Could not delete meetings.",
+          variant: "destructive",
+        });
+      }
+    },
+    [user, toast, activeMeetingId]
+  );
 
   return (
     <MeetingHistoryContext.Provider value={{
@@ -251,6 +317,7 @@ export const MeetingHistoryProvider = ({ children }: { children: ReactNode }) =>
       getActiveMeeting,
       updateMeeting,
       deleteMeeting,
+      deleteMeetings,
     }}>
       {children}
     </MeetingHistoryContext.Provider>

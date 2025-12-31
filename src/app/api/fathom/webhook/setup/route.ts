@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { randomBytes } from "crypto";
 import { getSessionUserId } from "@/lib/server-auth";
 import {
+  deleteManagedFathomWebhooks,
   ensureFathomWebhook,
   getFathomInstallation,
   getFathomWebhookUrl,
@@ -30,14 +31,12 @@ export async function POST() {
     return NextResponse.json({ error: "User not found." }, { status: 404 });
   }
 
-  let webhookToken = user.fathomWebhookToken || null;
-  if (!webhookToken) {
-    webhookToken = randomBytes(24).toString("hex");
-    await updateUserById(userId, { fathomWebhookToken: webhookToken });
-  }
+  const webhookToken = randomBytes(24).toString("hex");
+  await updateUserById(userId, { fathomWebhookToken: webhookToken });
 
   try {
     const accessToken = await getValidFathomAccessToken(userId);
+    await deleteManagedFathomWebhooks(accessToken);
     const result = await ensureFathomWebhook(userId, accessToken, webhookToken);
     console.log("Fathom webhook setup result", {
       userId,

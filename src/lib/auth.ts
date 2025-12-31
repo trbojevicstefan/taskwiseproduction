@@ -1,10 +1,23 @@
 import type { NextAuthOptions } from "next-auth";
 import CredentialsProvider from "next-auth/providers/credentials";
 import GoogleProvider from "next-auth/providers/google";
-import { randomBytes } from "crypto";
+import { randomBytes, randomUUID } from "crypto";
 import { cookies } from "next/headers";
 import { findUserByEmail, findUserById, verifyUserPassword, createUser, updateUserById } from "@/lib/db/users";
 import { GOOGLE_INTEGRATION_USER_COOKIE } from "@/lib/integration-cookies";
+
+const ensureWorkspaceId = async (user: {
+  _id: { toString: () => string };
+  name?: string | null;
+  workspace?: { id?: string; name?: string };
+}) => {
+  if (user.workspace?.id) return user.workspace;
+  const workspaceName =
+    user.workspace?.name || `${user.name || "Workspace"}'s Workspace`;
+  const workspace = { id: randomUUID(), name: workspaceName };
+  await updateUserById(user._id.toString(), { workspace });
+  return workspace;
+};
 
 const providers = [
   CredentialsProvider({
@@ -31,6 +44,7 @@ const providers = [
         return null;
       }
 
+      const workspace = await ensureWorkspaceId(user);
       const userId = user._id.toString();
 
       return {
@@ -44,7 +58,7 @@ const providers = [
         photoURL: user.avatarUrl || null,
         avatarUrl: user.avatarUrl || null,
         onboardingCompleted: user.onboardingCompleted,
-        workspace: user.workspace,
+        workspace,
         firefliesWebhookToken: user.firefliesWebhookToken,
         slackTeamId: user.slackTeamId || null,
         taskGranularityPreference: user.taskGranularityPreference,
@@ -139,6 +153,7 @@ export const authOptions: NextAuthOptions = {
             });
           }
 
+          const workspace = await ensureWorkspaceId(dbUser);
           const userId = dbUser._id.toString();
           token.id = userId;
           token.uid = userId;
@@ -150,7 +165,7 @@ export const authOptions: NextAuthOptions = {
           token.photoURL = dbUser.avatarUrl || null;
           token.avatarUrl = dbUser.avatarUrl || null;
           token.onboardingCompleted = dbUser.onboardingCompleted;
-          token.workspace = dbUser.workspace;
+          token.workspace = workspace;
           token.firefliesWebhookToken = dbUser.firefliesWebhookToken;
           token.slackTeamId = dbUser.slackTeamId;
           token.taskGranularityPreference = dbUser.taskGranularityPreference;
@@ -169,6 +184,7 @@ export const authOptions: NextAuthOptions = {
         const dbUser = candidateUserId ? await findUserById(candidateUserId) : null;
 
         if (dbUser) {
+          const workspace = await ensureWorkspaceId(dbUser);
           const userId = dbUser._id.toString();
           token.id = userId;
           token.uid = userId;
@@ -180,7 +196,7 @@ export const authOptions: NextAuthOptions = {
           token.photoURL = dbUser.avatarUrl || null;
           token.avatarUrl = dbUser.avatarUrl || null;
           token.onboardingCompleted = dbUser.onboardingCompleted;
-          token.workspace = dbUser.workspace;
+          token.workspace = workspace;
           token.firefliesWebhookToken = dbUser.firefliesWebhookToken;
           token.slackTeamId = dbUser.slackTeamId;
           token.taskGranularityPreference = dbUser.taskGranularityPreference;

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
+import { randomUUID } from "crypto";
 import { z } from "zod";
 import { authOptions } from "@/lib/auth";
 import { findUserById, updateUserById } from "@/lib/db/users";
@@ -9,7 +10,9 @@ const updateSchema = z.object({
   displayName: z.string().min(1).optional(),
   avatarUrl: z.string().optional().nullable(),
   photoURL: z.string().optional().nullable(),
-  workspace: z.object({ name: z.string().min(1) }).optional(),
+  workspace: z
+    .object({ id: z.string().min(1).optional(), name: z.string().min(1) })
+    .optional(),
   onboardingCompleted: z.boolean().optional(),
   firefliesWebhookToken: z.string().optional().nullable(),
   slackTeamId: z.string().optional().nullable(),
@@ -58,9 +61,17 @@ export async function GET() {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const user = await findUserById(userId);
+  let user = await findUserById(userId);
   if (!user) {
     return NextResponse.json({ error: "User not found" }, { status: 404 });
+  }
+
+  if (!user.workspace?.id) {
+    const workspaceName =
+      user.workspace?.name || `${user.name || "Workspace"}'s Workspace`;
+    const workspace = { id: randomUUID(), name: workspaceName };
+    await updateUserById(userId, { workspace });
+    user = { ...user, workspace };
   }
 
   return NextResponse.json(toAppUser(user));
@@ -85,10 +96,23 @@ export async function PATCH(request: Request) {
   const name = update.displayName || update.name;
   const avatarUrl = update.photoURL || update.avatarUrl;
 
+  const existingUser = await findUserById(userId);
+  if (!existingUser) {
+    return NextResponse.json({ error: "User not found" }, { status: 404 });
+  }
+
+  const workspace =
+    update.workspace
+      ? {
+          id: update.workspace.id || existingUser.workspace?.id || randomUUID(),
+          name: update.workspace.name,
+        }
+      : undefined;
+
   await updateUserById(userId, {
     ...(name ? { name } : {}),
     ...(avatarUrl !== undefined ? { avatarUrl } : {}),
-    ...(update.workspace ? { workspace: update.workspace } : {}),
+    ...(workspace ? { workspace } : {}),
     ...(update.onboardingCompleted !== undefined
       ? { onboardingCompleted: update.onboardingCompleted }
       : {}),

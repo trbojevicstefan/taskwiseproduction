@@ -1,7 +1,11 @@
 import { NextResponse } from "next/server";
 import { getSessionUserId } from "@/lib/server-auth";
 import { findUserById } from "@/lib/db/users";
-import { fetchFathomMeetings, getValidFathomAccessToken } from "@/lib/fathom";
+import {
+  fetchFathomMeetings,
+  getValidFathomAccessToken,
+  hashFathomRecordingId,
+} from "@/lib/fathom";
 import { ingestFathomMeeting } from "@/lib/fathom-ingest";
 import { getDb } from "@/lib/db";
 import { buildIdQuery } from "@/lib/mongo-id";
@@ -110,15 +114,32 @@ export async function POST(request: Request) {
       .map((meeting: any) => extractRecordingId(meeting))
       .filter((id: any): id is string | number => Boolean(id))
       .map((id) => String(id));
+    const recordingIdHashes = recordingIds.map((id) =>
+      hashFathomRecordingId(userId, id)
+    );
     const existing = recordingIds.length
       ? await db
           .collection<any>("meetings")
-          .find({ userId: userIdQuery, recordingId: { $in: recordingIds } })
-          .project({ recordingId: 1 })
+          .find({
+            userId: userIdQuery,
+            $or: [
+              { recordingIdHash: { $in: recordingIdHashes } },
+              { recordingId: { $in: recordingIds } },
+            ],
+          })
+          .project({ recordingId: 1, recordingIdHash: 1 })
           .toArray()
       : [];
+    const existingHashes = new Set(
+      existing
+        .map((meeting) => meeting.recordingIdHash)
+        .filter((value) => typeof value === "string")
+    );
     const existingIds = new Set(
-      existing.map((meeting) => String(meeting.recordingId))
+      existing
+        .map((meeting) => meeting.recordingId)
+        .filter((value) => typeof value === "string")
+        .map((value) => String(value))
     );
 
     let created = 0;
@@ -131,7 +152,11 @@ export async function POST(request: Request) {
         skipped += 1;
         continue;
       }
-      if (existingIds.has(String(recordingId))) {
+      const recordingIdHash = hashFathomRecordingId(userId, String(recordingId));
+      if (
+        existingHashes.has(recordingIdHash) ||
+        existingIds.has(String(recordingId))
+      ) {
         duplicate += 1;
         continue;
       }

@@ -64,6 +64,19 @@ export const getFathomRedirectUri = () =>
 
 export const getFathomWebhookUrl = (token: string) =>
   `${getBaseUrl()}/api/fathom/webhook?token=${token}`;
+export const getFathomWebhookUrlPrefix = () =>
+  `${getBaseUrl()}/api/fathom/webhook?token=`;
+
+const getRecordingHashKey = () =>
+  process.env.NEXTAUTH_SECRET || process.env.FATHOM_CLIENT_SECRET || "";
+
+export const hashFathomRecordingId = (userId: string, recordingId: string) => {
+  const key = getRecordingHashKey() || userId;
+  return crypto
+    .createHmac("sha256", key)
+    .update(`${userId}:${recordingId}`)
+    .digest("hex");
+};
 
 export const createFathomOAuthState = async (userId: string): Promise<string> => {
   const db = await getDb();
@@ -257,6 +270,35 @@ export const listFathomWebhooks = async (accessToken: string) => {
   return payload?.webhooks || payload?.data || payload?.items || [];
 };
 
+const getWebhookUrl = (webhook: any) =>
+  webhook?.destination_url ||
+  webhook?.destinationUrl ||
+  webhook?.url ||
+  webhook?.webhook_url ||
+  webhook?.webhookUrl ||
+  null;
+
+const getWebhookId = (webhook: any) =>
+  webhook?.id || webhook?.webhook_id || null;
+
+export const deleteManagedFathomWebhooks = async (accessToken: string) => {
+  const webhooks = await listFathomWebhooks(accessToken);
+  const prefix = getFathomWebhookUrlPrefix();
+  const pathMarker = "/api/fathom/webhook?token=";
+  const managed = webhooks.filter((webhook: any) => {
+    const url = getWebhookUrl(webhook);
+    return (
+      typeof url === "string" &&
+      (url.startsWith(prefix) || url.includes(pathMarker))
+    );
+  });
+  if (!managed.length) return 0;
+  await Promise.allSettled(
+    managed.map((webhook: any) => deleteFathomWebhook(accessToken, webhook))
+  );
+  return managed.length;
+};
+
 const resolveWebhookDeleteUrl = (webhook: any) => {
   const candidate =
     webhook?.actions?.deleteUrl ||
@@ -370,6 +412,61 @@ export const ensureFathomWebhook = async (
     ];
     return merged;
   };
+
+  try {
+    const existingWebhooks = await listFathomWebhooks(accessToken);
+    const matches = existingWebhooks.filter(
+      (webhook: any) => getWebhookUrl(webhook) === webhookUrl
+    );
+    if (matches.length > 0) {
+      const sorted = [...matches].sort((a, b) => {
+        const aCreated = new Date(a.created_at || a.createdAt || 0).getTime();
+        const bCreated = new Date(b.created_at || b.createdAt || 0).getTime();
+        return bCreated - aCreated;
+      });
+      const primary = sorted[0];
+      const primaryId = getWebhookId(primary);
+      const { webhookId, createdUrl, merged } = upsertWebhook(
+        primary,
+        installation,
+        webhookUrl
+      );
+
+      await saveFathomInstallation({
+        ...installation,
+        webhookId: webhookId || primaryId,
+        webhookUrl: createdUrl,
+        webhookEvent: FATHOM_WEBHOOK_EVENT,
+        webhookSecret: installation.webhookSecret || null,
+        webhooks: merged,
+        updatedAt: new Date(),
+      });
+
+      if (sorted.length > 1) {
+        await Promise.allSettled(
+          sorted.slice(1).map((webhook) =>
+            deleteFathomWebhook(accessToken, webhook)
+          )
+        );
+      }
+
+      await logFathomIntegration(
+        userId,
+        "info",
+        "webhook.create",
+        "Webhook already exists.",
+        {
+          status: "existing",
+          webhookId: webhookId || primaryId,
+          destinationUrl: createdUrl,
+        }
+      );
+
+      return { status: "existing", webhookId: webhookId || primaryId, webhookUrl: createdUrl };
+    }
+  } catch (error) {
+    console.warn("Failed to list existing Fathom webhooks:", error);
+  }
 
   try {
     const created = await createFathomWebhook(

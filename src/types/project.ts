@@ -1,6 +1,6 @@
 // src/types/project.ts
 import type { AppUser } from '@/contexts/AuthContext';
-import type { TaskComment } from '@/types/chat';
+import type { CompletionTarget, TaskComment, TaskEvidence } from '@/types/chat';
 
 export interface Project {
   id: string; // Document ID
@@ -33,4 +33,8 @@ export interface Task {
   sourceSessionType?: 'task' | 'meeting' | 'chat' | null;
   sourceTaskId?: string | null;
   comments?: TaskComment[] | null;
+  completionSuggested?: boolean | null;
+  completionConfidence?: number | null;
+  completionEvidence?: TaskEvidence[] | null;
+  completionTargets?: CompletionTarget[] | null;
 }

@@ -175,10 +175,14 @@ export default function SettingsPageContent() {
   const [fathomWebhooks, setFathomWebhooks] = useState<any[]>([]);
   const [isLoadingFathomWebhooks, setIsLoadingFathomWebhooks] = useState(false);
   const [isDeletingFathomWebhooks, setIsDeletingFathomWebhooks] = useState(false);
+  const hasHandledOauthRedirect = useRef(false);
 
   useEffect(() => {
     // This function will run when the component mounts and when searchParams change.
     const handleRedirect = async () => {
+      if (hasHandledOauthRedirect.current) {
+        return;
+      }
       const slackSuccess = searchParams.get('slack_success');
       const trelloSuccess = searchParams.get('trello_success');
       const googleSuccess = searchParams.get('google_success');
@@ -186,6 +190,16 @@ export default function SettingsPageContent() {
       const fathomWebhook = searchParams.get('fathom_webhook');
       const error = searchParams.get('error');
       const message = searchParams.get('message');
+
+      const hasOauthParams = Boolean(
+        slackSuccess || trelloSuccess || googleSuccess || fathomSuccess || fathomWebhook || error
+      );
+      if (!hasOauthParams) {
+        return;
+      }
+
+      hasHandledOauthRedirect.current = true;
+      router.replace('/settings', { scroll: false });
       
       let needsRefresh = false;
 
@@ -232,11 +246,6 @@ export default function SettingsPageContent() {
       if (needsRefresh) {
         await refreshUserProfile(); // Refresh the main user object
         await triggerTokenFetch();  // Refresh the integration-specific tokens
-      }
-
-      // Clean the URL if any of our params were present
-      if(slackSuccess || trelloSuccess || googleSuccess || fathomSuccess || fathomWebhook || error) {
-        router.replace('/settings', { scroll: false });
       }
     };
     

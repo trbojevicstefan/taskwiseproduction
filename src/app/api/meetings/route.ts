@@ -6,13 +6,16 @@ import { buildIdQuery } from "@/lib/mongo-id";
 import { syncTasksForSource } from "@/lib/task-sync";
 import type { ExtractedTaskSchema } from "@/types/chat";
 
-const serializeMeeting = (meeting: any) => ({
-  ...meeting,
-  id: meeting._id,
-  _id: undefined,
-  createdAt: meeting.createdAt?.toISOString?.() || meeting.createdAt,
-  lastActivityAt: meeting.lastActivityAt?.toISOString?.() || meeting.lastActivityAt,
-});
+const serializeMeeting = (meeting: any) => {
+  const { recordingId, recordingIdHash, ...rest } = meeting;
+  return {
+    ...rest,
+    id: meeting._id,
+    _id: undefined,
+    createdAt: meeting.createdAt?.toISOString?.() || meeting.createdAt,
+    lastActivityAt: meeting.lastActivityAt?.toISOString?.() || meeting.lastActivityAt,
+  };
+};
 
 export async function GET() {
   const userId = await getSessionUserId();
@@ -24,7 +27,7 @@ export async function GET() {
   const db = await getDb();
   const meetings = await db
     .collection<any>("meetings")
-    .find({ userId: userIdQuery })
+    .find({ userId: userIdQuery, isHidden: { $ne: true } })
     .sort({ lastActivityAt: -1 })
     .toArray();
 
@@ -38,21 +41,22 @@ export async function POST(request: Request) {
   }
 
   const body = await request.json().catch(() => ({}));
+  const { recordingId, recordingIdHash, ...safeBody } = body || {};
   const now = new Date();
   const meeting = {
     _id: randomUUID(),
     userId,
-    title: body.title || "Meeting",
-    originalTranscript: body.originalTranscript || "",
-    summary: body.summary || "",
-    attendees: body.attendees || [],
-    extractedTasks: body.extractedTasks || [],
-    originalAiTasks: body.originalAiTasks || body.extractedTasks || [],
-    originalAllTaskLevels: body.originalAllTaskLevels || body.allTaskLevels || null,
-    taskRevisions: body.taskRevisions || [],
-    chatSessionId: body.chatSessionId ?? null,
-    planningSessionId: body.planningSessionId ?? null,
-    allTaskLevels: body.allTaskLevels ?? null,
+    title: safeBody.title || "Meeting",
+    originalTranscript: safeBody.originalTranscript || "",
+    summary: safeBody.summary || "",
+    attendees: safeBody.attendees || [],
+    extractedTasks: safeBody.extractedTasks || [],
+    originalAiTasks: safeBody.originalAiTasks || safeBody.extractedTasks || [],
+    originalAllTaskLevels: safeBody.originalAllTaskLevels || safeBody.allTaskLevels || null,
+    taskRevisions: safeBody.taskRevisions || [],
+    chatSessionId: safeBody.chatSessionId ?? null,
+    planningSessionId: safeBody.planningSessionId ?? null,
+    allTaskLevels: safeBody.allTaskLevels ?? null,
     createdAt: now,
     lastActivityAt: now,
   };

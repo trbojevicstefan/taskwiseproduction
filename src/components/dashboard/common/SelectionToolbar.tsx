@@ -3,7 +3,7 @@ import React from 'react';
 import ReactDOM from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Button } from '@/components/ui/button';
-import { Copy, UserPlus, Trash2, X, Send, File, MessageCircle, Sheet, Bell, Slack, Ticket, CalendarDays, Brain, FileDown, Eye, Edit3 } from 'lucide-react';
+import { CheckCircle2, Copy, UserPlus, Trash2, X, Send, File, MessageCircle, Sheet, Bell, Slack, Ticket, CalendarDays, Brain, FileDown, Eye, Edit3 } from 'lucide-react';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
 import { SiGoogletasks, SiTrello } from '@icons-pack/react-simple-icons';
 import { cn } from '@/lib/utils';
@@ -23,6 +23,7 @@ interface SelectionToolbarProps {
   onSend?: (format: 'csv' | 'md' | 'pdf') => void; // For exporting
   onAssign?: () => void;
   onSetDueDate?: () => void;
+  onChangeStatus?: () => void;
   onDelete?: () => void;
   onClear: () => void;
   onView?: () => void;
@@ -44,6 +45,7 @@ const SelectionToolbar: React.FC<SelectionToolbarProps> = ({
   onSend,
   onAssign,
   onSetDueDate,
+  onChangeStatus,
   onDelete,
   onClear,
   onView,
@@ -114,6 +116,11 @@ const SelectionToolbar: React.FC<SelectionToolbarProps> = ({
                 {onSetDueDate && (
                     <Button variant="ghost" size="sm" onClick={onSetDueDate} className="rounded-full">
                         <CalendarDays size={16} className="mr-2" /> Due Date
+                    </Button>
+                )}
+                {onChangeStatus && (
+                    <Button variant="ghost" size="sm" onClick={onChangeStatus} className="rounded-full">
+                        <CheckCircle2 size={16} className="mr-2" /> Status
                     </Button>
                 )}
                 

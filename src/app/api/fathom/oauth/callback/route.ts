@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server";
 import { randomBytes } from "crypto";
-import { findUserById, updateUserById } from "@/lib/db/users";
+import { updateUserById } from "@/lib/db/users";
 import {
   consumeFathomOAuthState,
+  deleteManagedFathomWebhooks,
   getFathomRedirectUri,
   ensureFathomWebhook,
   saveFathomInstallation,
@@ -110,10 +111,7 @@ export async function GET(request: Request) {
       updatedAt: new Date(),
     });
 
-    const user = await findUserById(userId);
-    const existingToken = user?.fathomWebhookToken || null;
-    const webhookToken =
-      existingToken || randomBytes(24).toString("hex");
+    const webhookToken = randomBytes(24).toString("hex");
 
     await updateUserById(userId, {
       fathomWebhookToken: webhookToken,
@@ -122,6 +120,7 @@ export async function GET(request: Request) {
 
     let webhookStatus = "unknown";
     try {
+      await deleteManagedFathomWebhooks(payload.access_token);
       const result = await ensureFathomWebhook(
         userId,
         payload.access_token,

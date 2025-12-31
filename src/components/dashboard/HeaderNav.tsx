@@ -5,6 +5,7 @@
 import { useAuth } from '@/contexts/AuthContext';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -22,6 +23,7 @@ import { useUIState } from '@/contexts/UIStateContext';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { useToast } from '@/hooks/use-toast';
 import { useIsMobile } from '@/hooks/use-mobile'; // Import the hook
+import { useMeetingHistory } from '@/contexts/MeetingHistoryContext';
 
 export default function HeaderNav() {
   const { user, logout, updateUserProfile } = useAuth();
@@ -31,11 +33,28 @@ export default function HeaderNav() {
   const { showCopyHint } = useUIState();
   const { toast } = useToast();
   const isMobile = useIsMobile(); // Use the hook
+  const { meetings, updateMeeting } = useMeetingHistory();
 
 
   const getInitials = (name: string | null | undefined) => {
     if (!name) return 'U';
     return name.split(' ').map(n => n[0]).join('').toUpperCase().substring(0, 2);
+  };
+
+  const unreadFathomMeetings = meetings.filter(
+    (meeting) =>
+      meeting.ingestSource === "fathom" && !meeting.fathomNotificationReadAt
+  );
+  const unreadCount = unreadFathomMeetings.length;
+
+  const handleOpenNotification = async (meetingId: string) => {
+    const meeting = unreadFathomMeetings.find((item) => item.id === meetingId);
+    if (meeting) {
+      await updateMeeting(meeting.id, {
+        fathomNotificationReadAt: new Date().toISOString(),
+      });
+    }
+    router.push(`/meetings/${meetingId}`);
   };
   
   const handleResetOnboarding = async () => {
@@ -134,6 +153,11 @@ export default function HeaderNav() {
                 />
                 <AvatarFallback>{getInitials(user.displayName)}</AvatarFallback>
                 </Avatar>
+                {unreadCount > 0 && (
+                    <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 rounded-full bg-red-500 text-[10px] font-semibold text-white flex items-center justify-center">
+                        {unreadCount > 9 ? "9+" : unreadCount}
+                    </span>
+                )}
             </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent className="w-56" align="end" forceMount>
@@ -145,6 +169,27 @@ export default function HeaderNav() {
                 </p>
                 </div>
             </DropdownMenuLabel>
+            <DropdownMenuSeparator />
+            <DropdownMenuLabel className="flex items-center justify-between text-[11px] uppercase tracking-wide text-muted-foreground">
+                <span>Notifications</span>
+                {unreadCount > 0 && <Badge variant="destructive">{unreadCount}</Badge>}
+            </DropdownMenuLabel>
+            {unreadCount > 0 ? (
+                unreadFathomMeetings.map((meeting) => (
+                    <DropdownMenuItem
+                        key={meeting.id}
+                        onClick={() => handleOpenNotification(meeting.id)}
+                    >
+                        <span className="text-sm truncate">
+                            {(meeting.title || "Meeting")} available
+                        </span>
+                    </DropdownMenuItem>
+                ))
+            ) : (
+                <DropdownMenuItem disabled>
+                    <span className="text-sm text-muted-foreground">No new meetings</span>
+                </DropdownMenuItem>
+            )}
             <DropdownMenuSeparator />
             <DropdownMenuItem onClick={() => router.push('/settings')}>
                 <UserPlus className="mr-2 h-4 w-4" />

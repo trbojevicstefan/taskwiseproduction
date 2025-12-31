@@ -5,13 +5,16 @@ import { buildIdQuery } from "@/lib/mongo-id";
 import { syncTasksForSource } from "@/lib/task-sync";
 import type { ExtractedTaskSchema } from "@/types/chat";
 
-const serializeMeeting = (meeting: any) => ({
-  ...meeting,
-  id: meeting._id,
-  _id: undefined,
-  createdAt: meeting.createdAt?.toISOString?.() || meeting.createdAt,
-  lastActivityAt: meeting.lastActivityAt?.toISOString?.() || meeting.lastActivityAt,
-});
+const serializeMeeting = (meeting: any) => {
+  const { recordingId, recordingIdHash, ...rest } = meeting;
+  return {
+    ...rest,
+    id: meeting._id,
+    _id: undefined,
+    createdAt: meeting.createdAt?.toISOString?.() || meeting.createdAt,
+    lastActivityAt: meeting.lastActivityAt?.toISOString?.() || meeting.lastActivityAt,
+  };
+};
 
 export async function PATCH(
   request: Request,
@@ -24,7 +27,8 @@ export async function PATCH(
   }
 
   const body = await request.json().catch(() => ({}));
-  const update = { ...body, lastActivityAt: new Date() };
+  const { recordingId, recordingIdHash, ...safeBody } = body || {};
+  const update = { ...safeBody, lastActivityAt: new Date() };
 
   const db = await getDb();
   const idQuery = buildIdQuery(id);
@@ -71,7 +75,7 @@ export async function GET(
   };
 
   const meeting = await db.collection<any>("meetings").findOne(filter);
-  if (!meeting) {
+  if (!meeting || meeting.isHidden) {
     return NextResponse.json({ error: "Meeting not found." }, { status: 404 });
   }
 
@@ -96,28 +100,48 @@ export async function DELETE(
     $or: [{ _id: idQuery }, { id }],
   };
   const meeting = await db.collection<any>("meetings").findOne(filter);
-
-  const result = await db.collection<any>("meetings").deleteOne(filter);
-  if (!result.deletedCount) {
+  if (!meeting) {
     return NextResponse.json({ error: "Meeting not found." }, { status: 404 });
   }
-
-  if (meeting?.recordingId) {
-    await db
-      .collection<any>("meetings")
-      .deleteMany({ userId: userIdQuery, recordingId: meeting.recordingId });
+  const now = new Date();
+  const sessionIds = new Set<string>();
+  if (meeting?._id) sessionIds.add(String(meeting._id));
+  if (meeting?.id) sessionIds.add(String(meeting.id));
+  sessionIds.add(String(id));
+  const chatSessionIds = new Set<string>();
+  if (meeting?.chatSessionId) {
+    chatSessionIds.add(String(meeting.chatSessionId));
   }
 
-  if (meeting?.chatSessionId) {
-    await db.collection<any>("chatSessions").deleteOne({
-      _id: buildIdQuery(meeting.chatSessionId),
+  await db.collection<any>("meetings").updateOne(filter, {
+    $set: {
+      isHidden: true,
+      hiddenAt: now,
+      lastActivityAt: now,
+      extractedTasks: [],
+    },
+  });
+
+  if (sessionIds.size > 0) {
+    await db.collection<any>("tasks").deleteMany({
       userId: userIdQuery,
+      sourceSessionType: "meeting",
+      sourceSessionId: { $in: Array.from(sessionIds) },
     });
   }
-  if (meeting?.planningSessionId) {
-    await db.collection<any>("planningSessions").deleteOne({
-      _id: buildIdQuery(meeting.planningSessionId),
+
+  const chatMeetingIds = Array.from(sessionIds);
+  const chatIds = Array.from(chatSessionIds);
+  if (chatMeetingIds.length || chatIds.length) {
+    await db.collection<any>("chatSessions").deleteMany({
       userId: userIdQuery,
+      $or: [
+        chatMeetingIds.length
+          ? { sourceMeetingId: { $in: chatMeetingIds } }
+          : undefined,
+        chatIds.length ? { _id: { $in: chatIds } } : undefined,
+        chatIds.length ? { id: { $in: chatIds } } : undefined,
+      ].filter(Boolean),
     });
   }
 

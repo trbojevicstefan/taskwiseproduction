@@ -1,7 +1,7 @@
 // src/components/dashboard/reports/ReportsPageContent.tsx
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { format, isSameMonth, isSameWeek, addDays, subDays } from "date-fns";
 import DashboardHeader from "@/components/dashboard/DashboardHeader";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -22,6 +22,13 @@ import {
 import { useMeetingHistory } from "@/contexts/MeetingHistoryContext";
 import { useTasks } from "@/contexts/TaskContext";
 import Link from "next/link";
+import { apiFetch } from "@/lib/api";
+import { normalizePersonNameKey } from "@/lib/transcript-utils";
+import {
+  getAssigneeLabel,
+  resolveAssigneePersonId,
+} from "@/lib/task-assignee";
+import type { Person } from "@/types/person";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -115,7 +122,10 @@ const getRangeStart = (range: ReportRange, now: Date) => {
   }
 };
 
-const flattenMeetingTasks = (meetingTasks: any[], meetingMeta: { createdAt?: any; startTime?: any; lastActivityAt?: any; id?: string }) => {
+const flattenMeetingTasks = (
+  meetingTasks: any[],
+  meetingMeta: { createdAt?: any; startTime?: any; lastActivityAt?: any; id?: string }
+) => {
   const createdAt =
     meetingMeta.startTime ||
     meetingMeta.createdAt ||
@@ -128,6 +138,9 @@ const flattenMeetingTasks = (meetingTasks: any[], meetingMeta: { createdAt?: any
         ...task,
         createdAt,
         sourceMeetingId: meetingMeta.id || null,
+        sourceSessionId: meetingMeta.id || null,
+        sourceSessionType: "meeting",
+        origin: "meeting",
       };
       const subtasks = task.subtasks ? walk(task.subtasks) : [];
       return [base, ...subtasks];
@@ -140,6 +153,64 @@ export default function ReportsPageContent() {
   const { meetings, isLoadingMeetingHistory } = useMeetingHistory();
   const { tasks, isLoadingTasks } = useTasks();
   const [range, setRange] = useState<ReportRange>("30d");
+  const [people, setPeople] = useState<Person[]>([]);
+
+  useEffect(() => {
+    let isActive = true;
+    apiFetch<Person[]>("/api/people")
+      .then((data) => {
+        if (!isActive) return;
+        setPeople(data);
+      })
+      .catch((error) => {
+        console.error("Failed to load people for reports:", error);
+      });
+    return () => {
+      isActive = false;
+    };
+  }, []);
+
+  const peopleById = useMemo(() => {
+    const map = new Map<string, Person>();
+    people.forEach((person) => map.set(person.id, person));
+    return map;
+  }, [people]);
+
+  const personNameKeyToId = useMemo(() => {
+    const map = new Map<string, string>();
+    people.forEach((person) => {
+      const nameKey = normalizePersonNameKey(person.name || "");
+      if (nameKey && !map.has(nameKey)) {
+        map.set(nameKey, person.id);
+      }
+      if (Array.isArray(person.aliases)) {
+        person.aliases.forEach((alias) => {
+          const aliasKey = normalizePersonNameKey(alias || "");
+          if (aliasKey && !map.has(aliasKey)) {
+            map.set(aliasKey, person.id);
+          }
+        });
+      }
+    });
+    return map;
+  }, [people]);
+
+  const personEmailToId = useMemo(() => {
+    const map = new Map<string, string>();
+    people.forEach((person) => {
+      if (person.email) {
+        map.set(person.email.toLowerCase(), person.id);
+      }
+      if (Array.isArray(person.aliases)) {
+        person.aliases.forEach((alias) => {
+          if (alias && alias.includes("@")) {
+            map.set(alias.toLowerCase(), person.id);
+          }
+        });
+      }
+    });
+    return map;
+  }, [people]);
 
   const metrics = useMemo(() => {
     const now = new Date();
@@ -195,28 +266,29 @@ export default function ReportsPageContent() {
       return "medium";
     };
 
-    const getAssigneeName = (task: any) =>
-      task.assignee?.name ||
-      task.assignee?.displayName ||
-      task.assignee?.email ||
-      task.assigneeName ||
-      null;
+    const resolveAssigneeId = (task: any) =>
+      resolveAssigneePersonId(task, {
+        peopleById,
+        personNameKeyToId,
+        personEmailToId,
+      });
+    const isAssigned = (task: any) => Boolean(resolveAssigneeId(task));
 
     const totalTasks = tasksInRange.length;
     const completedTasks = tasksInRange.filter((task) => normalizeStatus(task.status) === "done").length;
     const openTasks = tasksInRange.filter((task) => normalizeStatus(task.status) !== "done").length;
-    const unassignedTasks = tasksInRange.filter((task) => !getAssigneeName(task)).length;
+    const unassignedTasks = tasksInRange.filter((task) => !isAssigned(task)).length;
     const completionRate = totalTasks === 0 ? 0 : Math.round((completedTasks / totalTasks) * 100);
 
     const tasksByPriority = tasksInRange
-      .filter((task) => task.status !== "done")
+      .filter((task) => normalizeStatus(task.status) !== "done")
       .reduce(
         (acc, task) => {
-        acc[normalizePriority(task.priority)] += 1;
-        return acc;
-      },
-      { high: 0, medium: 0, low: 0 }
-    );
+          acc[normalizePriority(task.priority)] += 1;
+          return acc;
+        },
+        { high: 0, medium: 0, low: 0 }
+      );
 
     const tasksByStatus = tasksInRange.reduce(
       (acc, task) => {
@@ -241,13 +313,17 @@ export default function ReportsPageContent() {
     );
     const avgActions = meetingsInRange.length > 0 ? Math.round(totalActionItems / meetingsInRange.length) : 0;
 
-    const topAssignees = tasksInRange
-      .filter((task) => getAssigneeName(task))
-      .reduce((acc: Record<string, number>, task) => {
-        const key = getAssigneeName(task) || "Unknown";
-        acc[key] = (acc[key] || 0) + 1;
-        return acc;
-      }, {});
+    const topAssignees = tasksInRange.reduce((acc: Record<string, number>, task) => {
+      if (!isAssigned(task)) return acc;
+      const label = getAssigneeLabel(task, {
+        peopleById,
+        personNameKeyToId,
+        personEmailToId,
+      });
+      if (!label) return acc;
+      acc[label] = (acc[label] || 0) + 1;
+      return acc;
+    }, {});
 
     const topAssigneeList = Object.entries(topAssignees)
       .sort((a, b) => b[1] - a[1])
@@ -274,6 +350,46 @@ export default function ReportsPageContent() {
       const withinWeek = dueDate >= now && dueDate <= addDays(now, 7);
       return withinWeek && normalizeStatus(task.status) !== "done";
     });
+
+    const normalizeOrigin = (task: any) => {
+      const raw =
+        (task?.origin || task?.sourceSessionType || "manual")
+          .toString()
+          .toLowerCase()
+          .trim();
+      if (raw === "task") return "manual";
+      if (raw === "meeting" || raw === "chat" || raw === "manual") return raw;
+      return "other";
+    };
+
+    const tasksBySource = tasksInRange.reduce(
+      (acc, task) => {
+        const origin = normalizeOrigin(task);
+        acc[origin] += 1;
+        return acc;
+      },
+      { manual: 0, meeting: 0, chat: 0, other: 0 } as Record<string, number>
+    );
+
+    const hasCompletionSignals = (task: any) => {
+      const evidenceCount = Array.isArray(task?.completionEvidence)
+        ? task.completionEvidence.length
+        : 0;
+      return (
+        evidenceCount > 0 ||
+        task?.completionConfidence != null ||
+        task?.completionSuggested === true
+      );
+    };
+
+    const completionAnalysisTasks = tasksInRange.filter(hasCompletionSignals);
+    const completionAnalysisSuggested = completionAnalysisTasks.filter(
+      (task) => task?.completionSuggested
+    ).length;
+    const completionAnalysisAutoCompleted = completionAnalysisTasks.filter(
+      (task) =>
+        normalizeStatus(task.status) === "done" && !task?.completionSuggested
+    ).length;
 
     const bestMeetings = meetingsInRange
       .map((meeting) => {
@@ -311,13 +427,16 @@ export default function ReportsPageContent() {
       sentimentLeaders,
       meetingsInRangeCount: meetingsInRange.length,
       unassignedTasks,
+      tasksBySource,
+      completionAnalysisSuggested,
+      completionAnalysisAutoCompleted,
     };
-  }, [meetings, tasks, range]);
+  }, [meetings, tasks, range, peopleById, personEmailToId, personNameKeyToId]);
 
   const isLoading = isLoadingMeetingHistory || isLoadingTasks;
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col h-full min-h-0">
       <DashboardHeader
         pageIcon={BarChart3}
         pageTitle={<h1 className="text-2xl font-bold font-headline">Reports</h1>}
@@ -339,7 +458,7 @@ export default function ReportsPageContent() {
           </DropdownMenuContent>
         </DropdownMenu>
       </DashboardHeader>
-      <div className="flex-grow space-y-6 p-6">
+      <div className="flex-1 min-h-0 space-y-6 p-6 overflow-auto">
         {isLoading ? (
           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
             {Array.from({ length: 4 }).map((_, index) => (
@@ -364,7 +483,7 @@ export default function ReportsPageContent() {
             <StatCard
               title="Open Tasks"
               value={metrics.openTasks}
-              description={`${metrics.completedTasks} completed • ${metrics.unassignedTasks} unassigned`}
+              description={`${metrics.completedTasks} completed | ${metrics.unassignedTasks} unassigned`}
               icon={CheckCircle2}
               tone="default"
             />
@@ -448,6 +567,66 @@ export default function ReportsPageContent() {
                       <TrendingUp className="h-4 w-4" /> Total open
                     </span>
                     <Badge variant="outline">{metrics.openTasks}</Badge>
+                  </div>
+                </>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+
+        <div className="grid gap-6 lg:grid-cols-[1fr,1fr]">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-lg">Task Sources</CardTitle>
+              <CardDescription>Where tasks originated during this range.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {isLoading ? (
+                <Skeleton className="h-24 w-full" />
+              ) : (
+                <>
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm text-muted-foreground">Manual</span>
+                    <Badge variant="outline">{metrics.tasksBySource.manual}</Badge>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm text-muted-foreground">Meeting extracted</span>
+                    <Badge variant="secondary">{metrics.tasksBySource.meeting}</Badge>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm text-muted-foreground">Chat created</span>
+                    <Badge variant="outline">{metrics.tasksBySource.chat}</Badge>
+                  </div>
+                  {metrics.tasksBySource.other > 0 && (
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm text-muted-foreground">Other</span>
+                      <Badge variant="outline">{metrics.tasksBySource.other}</Badge>
+                    </div>
+                  )}
+                </>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-lg">Completion Analysis</CardTitle>
+              <CardDescription>Auto-detected completions from recent sessions.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {isLoading ? (
+                <Skeleton className="h-24 w-full" />
+              ) : (
+                <>
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm text-muted-foreground">Auto completed</span>
+                    <Badge variant="secondary">
+                      {metrics.completionAnalysisAutoCompleted}
+                    </Badge>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm text-muted-foreground">Needs review</span>
+                    <Badge variant="outline">{metrics.completionAnalysisSuggested}</Badge>
                   </div>
                 </>
               )}
@@ -634,3 +813,4 @@ export default function ReportsPageContent() {
     </div>
   );
 }
+

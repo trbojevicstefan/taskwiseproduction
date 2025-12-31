@@ -561,7 +561,7 @@ export default function MeetingPlannerPageContent() {
   };
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col h-full min-h-0">
       <DashboardHeader
         pageIcon={Wand2}
         pageTitle={<h1 className="text-2xl font-bold font-headline">Meeting Planner</h1>}
@@ -572,7 +572,7 @@ export default function MeetingPlannerPageContent() {
           </Button>
         )}
       </DashboardHeader>
-      <div className="flex flex-1 gap-6 p-4 sm:p-6 lg:p-8 overflow-hidden">
+      <div className="flex flex-1 gap-6 p-4 sm:p-6 lg:p-8 overflow-auto">
         <Card className="w-full max-w-xs flex flex-col">
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-base">
@@ -633,7 +633,7 @@ export default function MeetingPlannerPageContent() {
           </CardContent>
         </Card>
 
-        <div className="flex-1 grid grid-cols-1 xl:grid-cols-2 gap-6 overflow-hidden">
+        <div className="flex-1 grid grid-cols-1 xl:grid-cols-2 gap-6">
           <Card className="flex flex-col">
             <CardHeader>
               <CardTitle className="flex items-center gap-2 text-base">
