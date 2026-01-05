@@ -171,22 +171,6 @@ export const MeetingHistoryProvider = ({ children }: { children: ReactNode }) =>
         method: "POST",
         body: JSON.stringify(sanitizedData),
       });
-      if (sanitizedData.extractedTasks?.length) {
-        try {
-          await apiFetch("/api/tasks/sync", {
-            method: "POST",
-            body: JSON.stringify({
-              sourceSessionId: created.id,
-              sourceSessionType: "meeting",
-              sourceSessionName: created.title,
-              origin: "meeting",
-              tasks: sanitizedData.extractedTasks,
-            }),
-          });
-        } catch (syncError) {
-          console.error("Failed to sync meeting tasks to task list", syncError);
-        }
-      }
       setActiveMeetingIdState(created.id);
       toast({ title: "Meeting Created", description: `Meeting "${meetingData.title}" has been saved.` });
       setMeetings(prev => [created, ...prev]);
@@ -211,22 +195,6 @@ export const MeetingHistoryProvider = ({ children }: { children: ReactNode }) =>
         method: "PATCH",
         body: JSON.stringify(sanitizedFields),
       });
-      if (sanitizedFields.extractedTasks) {
-        try {
-          await apiFetch("/api/tasks/sync", {
-            method: "POST",
-            body: JSON.stringify({
-              sourceSessionId: updated.id,
-              sourceSessionType: "meeting",
-              sourceSessionName: updated.title,
-              origin: "meeting",
-              tasks: sanitizedFields.extractedTasks,
-            }),
-          });
-        } catch (syncError) {
-          console.error("Failed to sync meeting tasks to task list", syncError);
-        }
-      }
       setMeetings(prev => prev.map(meeting => meeting.id === updated.id ? updated : meeting));
       return updated;
     } catch (error) {

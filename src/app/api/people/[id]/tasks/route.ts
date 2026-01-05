@@ -77,11 +77,16 @@ export async function GET(
   }
 
   const nameKeys = new Set<string>();
-  if (person.name) nameKeys.add(normalizePersonNameKey(person.name));
+  const nameVariants = new Set<string>();
+  if (person.name) {
+    nameKeys.add(normalizePersonNameKey(person.name));
+    nameVariants.add(person.name.trim());
+  }
   if (Array.isArray(person.aliases)) {
     person.aliases.forEach((alias: string) => {
       const normalized = normalizePersonNameKey(alias);
       if (normalized) nameKeys.add(normalized);
+      if (alias && alias.trim()) nameVariants.add(alias.trim());
     });
   }
 
@@ -97,6 +102,7 @@ export async function GET(
   };
 
   const nameKeyList = Array.from(nameKeys).filter(Boolean);
+  const nameVariantList = Array.from(nameVariants).filter(Boolean);
 
   const tasks = await db
     .collection<any>("tasks")
@@ -106,10 +112,12 @@ export async function GET(
         { "assignee.uid": assigneeQuery },
         ...(person.email ? [{ "assignee.email": person.email }] : []),
         ...(nameKeyList.length
+          ? [{ assigneeNameKey: { $in: nameKeyList } }]
+          : []),
+        ...(nameVariantList.length
           ? [
-              { assigneeNameKey: { $in: nameKeyList } },
-              { assigneeName: { $in: nameKeyList } },
-              { "assignee.name": { $in: nameKeyList } },
+              { assigneeName: { $in: nameVariantList } },
+              { "assignee.name": { $in: nameVariantList } },
             ]
           : []),
       ],
@@ -130,7 +138,7 @@ export async function GET(
 
   const meetings = await db
     .collection<any>("meetings")
-    .find({ userId: userIdQuery })
+    .find({ userId: userIdQuery, isHidden: { $ne: true } })
     .project({ _id: 1, title: 1, extractedTasks: 1 })
     .toArray();
 

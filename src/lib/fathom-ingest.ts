@@ -16,7 +16,10 @@ import {
   type CompletionTarget,
 } from "@/lib/task-completion";
 import { buildIdQuery } from "@/lib/mongo-id";
+import { upsertPeopleFromAttendees } from "@/lib/people-sync";
 import { syncTasksForSource } from "@/lib/task-sync";
+import { ensureDefaultBoard } from "@/lib/boards";
+import { ensureBoardItemsForTasks } from "@/lib/board-items";
 
 type FathomIngestResult =
   | { status: "created"; meetingId: string }
@@ -46,6 +49,53 @@ const sanitizeLevels = (levels: any) =>
         ),
       }
     : null;
+
+const resolveDetailLevel = (user: DbUser): "light" | "medium" | "detailed" => {
+  const preference = user.taskGranularityPreference;
+  if (preference === "light" || preference === "medium" || preference === "detailed") {
+    return preference;
+  }
+  return "medium";
+};
+
+const resolveSummaryText = (payload: any, summaryPayload: any) => {
+  const payloadSummary =
+    payload?.default_summary?.markdown_formatted ||
+    payload?.default_summary?.markdownFormatted ||
+    payload?.summary ||
+    payload?.recording?.summary;
+  const payloadSummaryText =
+    typeof payloadSummary === "string"
+      ? payloadSummary
+      : payloadSummary?.markdown_formatted ||
+        payloadSummary?.markdownFormatted ||
+        payloadSummary?.text ||
+        payloadSummary?.summary ||
+        null;
+  const summaryText =
+    typeof summaryPayload === "string"
+      ? summaryPayload
+      : summaryPayload?.markdown_formatted ||
+        summaryPayload?.markdownFormatted ||
+        summaryPayload?.text ||
+        summaryPayload?.summary ||
+        null;
+  return pickFirst(payloadSummaryText, summaryText);
+};
+
+const selectTasksForLevel = (
+  allTaskLevels: any,
+  detailLevel: "light" | "medium" | "detailed"
+) => {
+  if (!allTaskLevels) return [];
+  return (
+    allTaskLevels[detailLevel] ||
+    allTaskLevels.medium ||
+    allTaskLevels.light ||
+    allTaskLevels.detailed ||
+    []
+  );
+};
 
 const updateTaskStatusInList = (
   tasks: ExtractedTaskSchema[],
@@ -159,11 +209,40 @@ const applyCompletionTargets = async (
     });
   };
 
+  const updateTaskCollectionForSessionTarget = async (target: CompletionTarget) => {
+    const sessionIdQuery = buildIdQuery(target.sourceSessionId);
+    const taskIdQuery = buildIdQuery(target.taskId);
+    await db.collection("tasks").updateMany(
+      {
+        userId: userIdQuery,
+        sourceSessionType: target.sourceType,
+        $and: [
+          {
+            $or: [
+              { sourceSessionId: sessionIdQuery },
+              { sourceSessionId: target.sourceSessionId },
+            ],
+          },
+          {
+            $or: [
+              { _id: taskIdQuery },
+              { sourceTaskId: target.taskId },
+              { sourceTaskId: taskIdQuery },
+            ],
+          },
+        ],
+      },
+      { $set: { status: "done", completionSuggested: false, lastUpdated: new Date() } }
+    );
+  };
+
   for (const target of uniqueTargets) {
     if (target.sourceType === "meeting") {
       await updateSessionTasks("meetings", "extractedTasks", target);
+      await updateTaskCollectionForSessionTarget(target);
     } else if (target.sourceType === "chat") {
       await updateSessionTasks("chatSessions", "suggestedTasks", target);
+      await updateTaskCollectionForSessionTarget(target);
     }
   }
 };
@@ -217,6 +296,8 @@ export const ingestFathomMeeting = async ({
       if (transcriptText) {
         update.originalTranscript = transcriptText;
       }
+    } else {
+      transcriptText = existingTranscript;
     }
 
     const existingSummary =
@@ -226,9 +307,7 @@ export const ingestFathomMeeting = async ({
         payload.summary ||
         payload?.recording?.summary ||
         (await fetchFathomSummary(recordingId, accessToken).catch(() => null));
-      const summaryText =
-        payload?.default_summary?.markdown_formatted ||
-        (typeof summaryPayload === "string" ? summaryPayload : "");
+      const summaryText = resolveSummaryText(payload, summaryPayload);
       if (summaryText) {
         update.summary = summaryText;
       }
@@ -286,6 +365,282 @@ export const ingestFathomMeeting = async ({
       { _id: existing._id },
       updateOps
     );
+
+    const workspaceId = existing.workspaceId || user.workspace?.id || null;
+    const shouldReanalyze =
+      !existing.extractedTasks?.length ||
+      !existingTranscript ||
+      !existing.allTaskLevels ||
+      !existing.chatSessionId ||
+      !existing.planningSessionId;
+
+    if (shouldReanalyze) {
+      if (!transcriptText) {
+        return { status: "no_transcript" };
+      }
+
+      const summaryPayload =
+        payload.summary ||
+        payload?.recording?.summary ||
+        (await fetchFathomSummary(recordingId, accessToken).catch(() => null));
+      const summaryText = resolveSummaryText(payload, summaryPayload);
+      const detailLevel = resolveDetailLevel(user);
+
+      const analysisResult = await analyzeMeeting({
+        transcript: transcriptText,
+        requestedDetailLevel: detailLevel,
+      });
+
+      const allTaskLevels = analysisResult.allTaskLevels || null;
+      const selectedTasks = selectTasksForLevel(allTaskLevels, detailLevel);
+
+      const sanitizedTasks = selectedTasks.map((task: any) =>
+        normalizeTask(task as ExtractedTaskSchema)
+      );
+      let sanitizedTaskLevels = sanitizeLevels(allTaskLevels);
+
+      const attendees = (analysisResult.attendees || []).map((person) => ({
+        ...person,
+        role: "attendee" as const,
+      }));
+      const mentioned = (analysisResult.mentionedPeople || []).map((person) => ({
+        ...person,
+        role: "mentioned" as const,
+      }));
+      const combinedPeople = [...attendees, ...mentioned];
+      const uniquePeople = Array.from(
+        new Map(
+          combinedPeople.map((person) => [person.name.toLowerCase(), person])
+        ).values()
+      );
+
+      const completionSuggestions = await buildCompletionSuggestions({
+        userId,
+        transcript: transcriptText,
+        attendees: uniquePeople,
+      });
+
+      const shouldAutoApprove = Boolean(user.autoApproveCompletedTasks);
+      if (shouldAutoApprove && completionSuggestions.length) {
+        await applyCompletionTargets(db, userId, completionSuggestions);
+      }
+
+      const mergedTasks = mergeCompletionSuggestions(
+        sanitizedTasks,
+        completionSuggestions
+      );
+      const finalizedTasks = shouldAutoApprove
+        ? applyAutoApprovalFlags(mergedTasks)
+        : mergedTasks;
+
+      if (sanitizedTaskLevels) {
+        sanitizedTaskLevels = {
+          light: mergeCompletionSuggestions(
+            sanitizedTaskLevels.light || [],
+            completionSuggestions
+          ),
+          medium: mergeCompletionSuggestions(
+            sanitizedTaskLevels.medium || [],
+            completionSuggestions
+          ),
+          detailed: mergeCompletionSuggestions(
+            sanitizedTaskLevels.detailed || [],
+            completionSuggestions
+          ),
+        };
+        if (shouldAutoApprove) {
+          sanitizedTaskLevels = {
+            light: applyAutoApprovalFlags(sanitizedTaskLevels.light || []),
+            medium: applyAutoApprovalFlags(sanitizedTaskLevels.medium || []),
+            detailed: applyAutoApprovalFlags(sanitizedTaskLevels.detailed || []),
+          };
+        }
+      }
+
+      const meetingTitle = pickFirst(
+        existing.title,
+        payload.meeting_title,
+        payload.title,
+        payload?.recording?.title,
+        payload?.recording_name,
+        analysisResult.sessionTitle,
+        "Fathom Meeting"
+      );
+
+      const meetingSummary =
+        pickFirst(
+          existingSummary,
+          analysisResult.meetingSummary,
+          analysisResult.chatResponseText,
+          summaryText
+        ) || "";
+
+      const now = new Date();
+      const meetingUpdate: Record<string, any> = {
+        lastActivityAt: now,
+        title: meetingTitle,
+        summary: meetingSummary,
+        attendees: uniquePeople,
+        extractedTasks: finalizedTasks,
+        allTaskLevels: sanitizedTaskLevels,
+        originalAiTasks: sanitizedTasks,
+        originalAllTaskLevels: sanitizedTaskLevels,
+        keyMoments: analysisResult.keyMoments || [],
+        overallSentiment: analysisResult.overallSentiment ?? null,
+        speakerActivity: analysisResult.speakerActivity || [],
+        meetingMetadata: analysisResult.meetingMetadata || undefined,
+        state: "tasks_ready",
+      };
+
+      let chatSessionId = existing.chatSessionId
+        ? String(existing.chatSessionId)
+        : null;
+      if (!chatSessionId) {
+        chatSessionId = randomUUID();
+        meetingUpdate.chatSessionId = chatSessionId;
+        await db.collection("chatSessions").insertOne({
+          _id: chatSessionId,
+          userId,
+          workspaceId,
+          title: `Chat about "${meetingTitle}"`,
+          messages: [],
+          suggestedTasks: finalizedTasks,
+          originalAiTasks: sanitizedTasks,
+          originalAllTaskLevels: sanitizedTaskLevels,
+          taskRevisions: [],
+          people: uniquePeople,
+          folderId: null,
+          sourceMeetingId: existing._id.toString(),
+          allTaskLevels: sanitizedTaskLevels,
+          meetingMetadata: analysisResult.meetingMetadata || undefined,
+          createdAt: now,
+          lastActivityAt: now,
+        });
+      } else {
+        await db.collection("chatSessions").updateMany(
+          {
+            userId: userIdQuery,
+            $or: [{ _id: buildIdQuery(chatSessionId) }, { id: chatSessionId }],
+          },
+          {
+            $set: {
+              title: `Chat about "${meetingTitle}"`,
+              suggestedTasks: finalizedTasks,
+              originalAiTasks: sanitizedTasks,
+              originalAllTaskLevels: sanitizedTaskLevels,
+              people: uniquePeople,
+              allTaskLevels: sanitizedTaskLevels,
+              meetingMetadata: analysisResult.meetingMetadata || undefined,
+              lastActivityAt: now,
+            },
+          }
+        );
+      }
+
+      let planningSessionId = existing.planningSessionId
+        ? String(existing.planningSessionId)
+        : null;
+      if (!planningSessionId) {
+        planningSessionId = randomUUID();
+        meetingUpdate.planningSessionId = planningSessionId;
+        await db.collection("planningSessions").insertOne({
+          _id: planningSessionId,
+          userId,
+          workspaceId,
+          title: `Plan from "${meetingTitle}"`,
+          inputText: meetingSummary,
+          extractedTasks: finalizedTasks,
+          originalAiTasks: sanitizedTasks,
+          originalAllTaskLevels: sanitizedTaskLevels,
+          taskRevisions: [],
+          folderId: null,
+          sourceMeetingId: existing._id.toString(),
+          allTaskLevels: sanitizedTaskLevels,
+          meetingMetadata: analysisResult.meetingMetadata || undefined,
+          createdAt: now,
+          lastActivityAt: now,
+        });
+      } else {
+        await db.collection("planningSessions").updateMany(
+          {
+            userId: userIdQuery,
+            $or: [
+              { _id: buildIdQuery(planningSessionId) },
+              { id: planningSessionId },
+            ],
+          },
+          {
+            $set: {
+              title: `Plan from "${meetingTitle}"`,
+              inputText: meetingSummary,
+              extractedTasks: finalizedTasks,
+              originalAiTasks: sanitizedTasks,
+              originalAllTaskLevels: sanitizedTaskLevels,
+              allTaskLevels: sanitizedTaskLevels,
+              meetingMetadata: analysisResult.meetingMetadata || undefined,
+              lastActivityAt: now,
+            },
+          }
+        );
+      }
+
+      await db.collection<any>("meetings").updateOne(
+        { _id: existing._id },
+        { $set: meetingUpdate }
+      );
+
+      if (uniquePeople.length) {
+        try {
+          await upsertPeopleFromAttendees({
+            db,
+            userId,
+            attendees: uniquePeople,
+            sourceSessionId: existing._id.toString(),
+          });
+        } catch (error) {
+          console.error("Failed to upsert people from Fathom attendees:", error);
+        }
+      }
+
+      await syncTasksForSource(db, finalizedTasks, {
+        userId,
+        workspaceId,
+        sourceSessionId: existing._id.toString(),
+        sourceSessionType: "meeting",
+        sourceSessionName: meetingTitle,
+        origin: "meeting",
+        taskState: "active",
+      });
+
+      if (workspaceId) {
+        const defaultBoard = await ensureDefaultBoard(db, userId, workspaceId);
+        await ensureBoardItemsForTasks(db, {
+          userId,
+          workspaceId,
+          boardId: defaultBoard._id,
+          tasks: finalizedTasks,
+        });
+      }
+    } else if (Array.isArray(existing.extractedTasks) && existing.extractedTasks.length) {
+      await syncTasksForSource(db, existing.extractedTasks as ExtractedTaskSchema[], {
+        userId,
+        workspaceId,
+        sourceSessionId: existing._id.toString(),
+        sourceSessionType: "meeting",
+        sourceSessionName: existing.title || "Meeting",
+        origin: "meeting",
+        taskState: "active",
+      });
+      if (workspaceId) {
+        const defaultBoard = await ensureDefaultBoard(db, userId, workspaceId);
+        await ensureBoardItemsForTasks(db, {
+          userId,
+          workspaceId,
+          boardId: defaultBoard._id,
+          tasks: existing.extractedTasks as ExtractedTaskSchema[],
+        });
+      }
+    }
     return { status: "duplicate", meetingId: existing._id.toString() };
   }
 
@@ -308,16 +663,16 @@ export const ingestFathomMeeting = async ({
     payload.summary ||
     payload?.recording?.summary ||
     (await fetchFathomSummary(recordingId, accessToken).catch(() => null));
+  const summaryText = resolveSummaryText(payload, summaryPayload);
 
-  const detailLevel = "light";
+  const detailLevel = resolveDetailLevel(user);
   const analysisResult = await analyzeMeeting({
     transcript: transcriptText,
     requestedDetailLevel: detailLevel,
   });
 
   const allTaskLevels = analysisResult.allTaskLevels || null;
-  const selectedTasks =
-    allTaskLevels?.[detailLevel as keyof typeof allTaskLevels] || [];
+  const selectedTasks = selectTasksForLevel(allTaskLevels, detailLevel);
 
   const sanitizedTasks = selectedTasks.map((task: any) =>
     normalizeTask(task as ExtractedTaskSchema)
@@ -392,20 +747,22 @@ export const ingestFathomMeeting = async ({
   );
 
   const meetingSummary =
-    analysisResult.meetingSummary ||
-    analysisResult.chatResponseText ||
-    payload?.default_summary?.markdown_formatted ||
-    (typeof summaryPayload === "string" ? summaryPayload : "") ||
-    "";
+    pickFirst(
+      analysisResult.meetingSummary,
+      analysisResult.chatResponseText,
+      summaryText
+    ) || "";
 
   const now = new Date();
   const meetingId = randomUUID();
   const chatId = randomUUID();
   const planId = randomUUID();
 
+  const workspaceId = user.workspace?.id || null;
   const meeting = {
     _id: meetingId,
     userId,
+    workspaceId,
     title: meetingTitle,
     originalTranscript: transcriptText,
     summary: meetingSummary,
@@ -468,6 +825,7 @@ export const ingestFathomMeeting = async ({
   const chatSession = {
     _id: chatId,
     userId,
+    workspaceId,
     title: `Chat about "${meetingTitle}"`,
     messages: [],
     suggestedTasks: finalizedTasks,
@@ -486,6 +844,7 @@ export const ingestFathomMeeting = async ({
   const planningSession = {
     _id: planId,
     userId,
+    workspaceId,
     title: `Plan from "${meetingTitle}"`,
     inputText: meetingSummary,
     extractedTasks: finalizedTasks,
@@ -503,13 +862,37 @@ export const ingestFathomMeeting = async ({
   await db.collection("meetings").insertOne(meeting);
   await db.collection("chatSessions").insertOne(chatSession);
   await db.collection("planningSessions").insertOne(planningSession);
+  if (uniquePeople.length) {
+    try {
+      await upsertPeopleFromAttendees({
+        db,
+        userId,
+        attendees: uniquePeople,
+        sourceSessionId: meetingId,
+      });
+    } catch (error) {
+      console.error("Failed to upsert people from Fathom attendees:", error);
+    }
+  }
   await syncTasksForSource(db, finalizedTasks, {
     userId,
+    workspaceId,
     sourceSessionId: meetingId,
     sourceSessionType: "meeting",
     sourceSessionName: meetingTitle,
     origin: "meeting",
+    taskState: "active",
   });
+
+  if (workspaceId) {
+    const defaultBoard = await ensureDefaultBoard(db, userId, workspaceId);
+    await ensureBoardItemsForTasks(db, {
+      userId,
+      workspaceId,
+      boardId: defaultBoard._id,
+      tasks: finalizedTasks,
+    });
+  }
 
   return { status: "created", meetingId };
 };

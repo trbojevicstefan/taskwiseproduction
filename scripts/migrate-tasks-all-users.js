@@ -208,17 +208,18 @@ const run = async () => {
     const meetings = await db
       .collection("meetings")
       .find({ userId: userIdQuery })
-      .project({ _id: 1, title: 1, extractedTasks: 1 })
+      .project({ _id: 1, id: 1, title: 1, extractedTasks: 1, chatSessionId: 1 })
       .toArray();
     const chatSessions = await db
       .collection("chatSessions")
       .find({ userId: userIdQuery })
-      .project({ _id: 1, title: 1, suggestedTasks: 1 })
+      .project({ _id: 1, id: 1, title: 1, suggestedTasks: 1, sourceMeetingId: 1 })
       .toArray();
 
     let userUpserted = 0;
     let userDeleted = 0;
 
+    const skipChatIds = new Set();
     for (const meeting of meetings) {
       const result = await syncTasksForSource(db, meeting.extractedTasks || [], {
         userId,
@@ -230,12 +231,35 @@ const run = async () => {
       totals.meetings += 1;
       userUpserted += result.upserted;
       userDeleted += result.deleted;
+      if (meeting.chatSessionId) {
+        skipChatIds.add(String(meeting.chatSessionId));
+      }
+    }
+
+    chatSessions.forEach((session) => {
+      if (session.sourceMeetingId) {
+        if (session._id) skipChatIds.add(String(session._id));
+        if (session.id) skipChatIds.add(String(session.id));
+      }
+    });
+
+    if (skipChatIds.size) {
+      const cleanup = await db.collection("tasks").deleteMany({
+        userId: userIdQuery,
+        sourceSessionType: "chat",
+        sourceSessionId: { $in: Array.from(skipChatIds) },
+      });
+      userDeleted += cleanup.deletedCount || 0;
     }
 
     for (const session of chatSessions) {
+      const sessionId = String(session._id ?? session.id);
+      if (skipChatIds.has(sessionId)) {
+        continue;
+      }
       const result = await syncTasksForSource(db, session.suggestedTasks || [], {
         userId,
-        sourceSessionId: String(session._id),
+        sourceSessionId: sessionId,
         sourceSessionType: "chat",
         sourceSessionName: session.title,
         origin: "chat",

@@ -3,6 +3,7 @@ import { randomUUID } from "crypto";
 import { getDb } from "@/lib/db";
 import { getSessionUserId } from "@/lib/server-auth";
 import { buildIdQuery } from "@/lib/mongo-id";
+import { getWorkspaceIdForUser } from "@/lib/workspace";
 
 const serializeSession = (session: any) => ({
   ...session,
@@ -37,9 +38,12 @@ export async function POST(request: Request) {
 
   const body = await request.json().catch(() => ({}));
   const now = new Date();
+  const db = await getDb();
+  const workspaceId = await getWorkspaceIdForUser(db, userId);
   const session = {
     _id: randomUUID(),
     userId,
+    workspaceId,
     title: body.title || "New Chat",
     messages: body.messages || [],
     suggestedTasks: body.suggestedTasks || [],
@@ -54,7 +58,6 @@ export async function POST(request: Request) {
     lastActivityAt: now,
   };
 
-  const db = await getDb();
   await db.collection<any>("chatSessions").insertOne(session);
 
   return NextResponse.json(serializeSession(session));

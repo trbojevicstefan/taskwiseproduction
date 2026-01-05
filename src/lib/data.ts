@@ -150,6 +150,8 @@ export function normalizeTask(task: any): ExtractedTaskSchema {
     subtasks: sanitizedSubtasks,
     addedToProjectId: task.addedToProjectId === undefined ? null : task.addedToProjectId,
     addedToProjectName: task.addedToProjectName === undefined ? null : task.addedToProjectName,
+    addedToBoardId: task.addedToBoardId === undefined ? null : task.addedToBoardId,
+    addedToBoardName: task.addedToBoardName === undefined ? null : task.addedToBoardName,
     completionSuggested:
       task.completionSuggested === undefined ? null : task.completionSuggested,
     completionConfidence:

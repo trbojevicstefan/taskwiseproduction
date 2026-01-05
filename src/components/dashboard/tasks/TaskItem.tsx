@@ -7,7 +7,7 @@ import type { ExtractedTaskSchema as DisplayTask } from '@/types/chat';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
-import { Bot, ChevronDown, ChevronRight, MoreVertical, Loader2, Brain, Zap as SimplifyIcon, Edit3, Trash2, UserPlus, Sparkles } from 'lucide-react';
+import { Bot, ChevronDown, ChevronRight, MoreVertical, Loader2, Brain, Zap as SimplifyIcon, Edit3, Trash2, UserPlus, Sparkles, LayoutGrid } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import {
   DropdownMenu,
@@ -43,6 +43,7 @@ interface TaskItemProps {
   onDeleteTask: (taskId: string) => void;
   onSimplifyTask: (task: DisplayTask) => void;
   onAssignPerson: (task: DisplayTask) => void;
+  onAddToBoard?: (task: DisplayTask) => void;
   getCheckboxState: (task: DisplayTask, currentSelectedIds: Set<string>, allDisplayTasks: DisplayTask[]) => 'checked' | 'unchecked' | 'indeterminate';
   isProcessing: boolean;
   taskBeingProcessedId: string | null;
@@ -63,6 +64,7 @@ const TaskItem: React.FC<TaskItemProps> = ({
   onDeleteTask,
   onSimplifyTask,
   onAssignPerson,
+  onAddToBoard,
   getCheckboxState,
 }) => {
   const [isExpanded, setIsExpanded] = useState(true);
@@ -127,6 +129,11 @@ const TaskItem: React.FC<TaskItemProps> = ({
                   {task.priority}
                 </Badge>
             )}
+            {task.addedToBoardName && (
+              <Badge variant="outline" className="text-[10px]">
+                {task.addedToBoardName}
+              </Badge>
+            )}
              {task.assignee?.name && (
                 <TooltipProvider>
                   <Tooltip>
@@ -153,6 +160,15 @@ const TaskItem: React.FC<TaskItemProps> = ({
                   <DropdownMenuContent align="end">
                     <DropdownMenuItem onClick={() => onViewDetails(task)} disabled={isProcessing}><Edit3 className="mr-2 h-4 w-4" />View/Edit Details</DropdownMenuItem>
                     <DropdownMenuItem onClick={() => onAssignPerson(task)} disabled={isProcessing}><UserPlus className="mr-2 h-4 w-4" />Assign Person</DropdownMenuItem>
+                    {onAddToBoard ? (
+                      <DropdownMenuItem
+                        onClick={() => onAddToBoard(task)}
+                        disabled={isProcessing || Boolean(task.addedToBoardId)}
+                      >
+                        <LayoutGrid className="mr-2 h-4 w-4" />
+                        {task.addedToBoardId ? "Added to board" : "Add to board"}
+                      </DropdownMenuItem>
+                    ) : null}
                     <DropdownMenuSeparator />
                     <DropdownMenuItem onClick={() => onBreakDown(task)} disabled={isProcessing}><Brain className="mr-2 h-4 w-4" />Break Down with AI</DropdownMenuItem>
                     <DropdownMenuItem onClick={() => onSimplifyTask(task)} disabled={isProcessing}><SimplifyIcon className="mr-2 h-4 w-4" />Simplify with AI</DropdownMenuItem>

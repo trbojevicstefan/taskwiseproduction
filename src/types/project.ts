@@ -13,6 +13,7 @@ export interface Project {
 
 export interface Task {
   id: string;
+  workspaceId?: string | null;
   title: string;
   description?: string;
   status: 'todo' | 'inprogress' | 'done' | 'recurring';
@@ -37,4 +38,5 @@ export interface Task {
   completionConfidence?: number | null;
   completionEvidence?: TaskEvidence[] | null;
   completionTargets?: CompletionTarget[] | null;
+  taskState?: "active" | "suggested" | "archived" | null;
 }

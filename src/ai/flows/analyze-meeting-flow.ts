@@ -498,6 +498,7 @@ const analyzeMeetingFlow = ai.defineFlow(
   },
   async (input: AnalyzeMeetingInput) => {
     const transcriptText = getString(input.transcript) || "";
+    const requestedDetailLevel = input.requestedDetailLevel || "medium";
     const currentDate = new Date().toISOString().slice(0, 10);
     const openItemsTrigger = OPEN_ITEMS_TRIGGER_REGEX.test(transcriptText);
 
@@ -610,7 +611,8 @@ const analyzeMeetingFlow = ai.defineFlow(
       auditedTasks = auditedItems.length ? auditedItems : actionItems;
     }
 
-    const lightTasks = finalizeTasks(auditedTasks);
+    const rawTasks = auditedTasks.length ? auditedTasks : actionItems;
+    const lightTasks = finalizeTasks(rawTasks);
     const lightWithEvidence = applyCompletionReviewFlags(
       attachEvidenceToTasks(lightTasks, transcriptText)
     );
@@ -686,23 +688,35 @@ const analyzeMeetingFlow = ai.defineFlow(
         subtasks: task.subtasks ? ensureTaskDescriptions(task.subtasks) : task.subtasks,
       }));
 
-    const finalLight = applyTaskMetadata(
-      ensureTaskDescriptions(
-        sanitizeTaskDescriptions(
-          sanitizeTaskAssignees(
-            assignAssigneesFromTranscript(rewrittenLight, transcriptText),
-            validNameSet
+    const enrichTasks = (tasks: TaskType[]): TaskType[] =>
+      applyTaskMetadata(
+        ensureTaskDescriptions(
+          sanitizeTaskDescriptions(
+            sanitizeTaskAssignees(
+              assignAssigneesFromTranscript(tasks, transcriptText),
+              validNameSet
+            )
           )
         )
-      )
+      );
+
+    const finalLight = enrichTasks(rewrittenLight);
+    const expandedWithEvidence = applyCompletionReviewFlags(
+      attachEvidenceToTasks(rawTasks, transcriptText)
     );
+    const finalExpanded = rawTasks.length
+      ? enrichTasks(expandedWithEvidence)
+      : finalLight;
 
     const taskProvider = auditorProvider || specialistProvider || routerProvider;
     const tagProvider = (tasks: TaskType[]) =>
       annotateTasksWithProvider(tasks, taskProvider as any);
     const taggedLight = tagProvider(finalLight);
+    const taggedExpanded = tagProvider(finalExpanded);
     const taggedDefaultTasks = tagProvider(defaultTasks);
     const fallbackTasks = taggedLight.length ? taggedLight : finalizeTasks(taggedDefaultTasks);
+    const resolvedLight = taggedLight.length ? taggedLight : fallbackTasks;
+    const resolvedExpanded = taggedExpanded.length ? taggedExpanded : resolvedLight;
 
     const mergePeople = (
       primary: Array<{ name: string; email?: string; title?: string }>,
@@ -743,8 +757,15 @@ const analyzeMeetingFlow = ai.defineFlow(
         };
       });
 
+    const tasksForAssigneeScan =
+      requestedDetailLevel === "detailed"
+        ? resolvedExpanded
+        : requestedDetailLevel === "medium"
+          ? resolvedExpanded
+          : resolvedLight;
+
     const assigneeNames = new Set(
-      taggedLight
+      tasksForAssigneeScan
         .map((task) => task.assigneeName)
         .filter((name): name is string => Boolean(name))
         .map((name) => normalizeName(name))
@@ -778,9 +799,9 @@ const analyzeMeetingFlow = ai.defineFlow(
         getString(specialistRaw.session_title) ||
         undefined,
       allTaskLevels: {
-        light: taggedLight.length ? taggedLight : fallbackTasks,
-        medium: taggedLight.length ? taggedLight : fallbackTasks,
-        detailed: taggedLight.length ? taggedLight : fallbackTasks,
+        light: resolvedLight,
+        medium: resolvedExpanded,
+        detailed: resolvedExpanded,
       },
       attendees: attendees.length ? attendees : [],
       mentionedPeople: mentionedPeople.length ? mentionedPeople : [],

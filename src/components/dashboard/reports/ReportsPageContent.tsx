@@ -234,15 +234,20 @@ export default function ReportsPageContent() {
     const meetingDerivedTasks = meetings.flatMap((meeting) =>
       flattenMeetingTasks(meeting.extractedTasks || [], meeting)
     );
-    const hasSessionTasks = tasks.some(
-      (task) => task.sourceSessionType === "meeting" || task.sourceSessionType === "chat"
+    const sessionIdsWithTasks = new Set(
+      tasks
+        .filter(
+          (task) => task.sourceSessionType === "meeting" || task.sourceSessionType === "chat"
+        )
+        .map((task) => (task.sourceSessionId ? String(task.sourceSessionId) : ""))
+        .filter(Boolean)
     );
+    const fallbackMeetingTasks = meetingDerivedTasks.filter((task) => {
+      const sessionId = task.sourceSessionId ? String(task.sourceSessionId) : "";
+      return !sessionId || !sessionIdsWithTasks.has(sessionId);
+    });
     const reportTasks =
-      tasks.length === 0
-        ? meetingDerivedTasks
-        : hasSessionTasks
-          ? tasks
-          : [...tasks, ...meetingDerivedTasks];
+      tasks.length === 0 ? meetingDerivedTasks : [...tasks, ...fallbackMeetingTasks];
 
     const tasksInRange = reportTasks.filter((task) => {
       const createdAt = toDateValue(task.createdAt);

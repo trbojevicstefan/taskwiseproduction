@@ -34,6 +34,18 @@ const decodeWebhookSecret = (secret: string) => {
 const buildSignedPayload = (id: string, timestamp: string, body: string) =>
   `${id}.${timestamp}.${body}`;
 
+const MAX_WEBHOOK_AGE_MS = 5 * 60 * 1000;
+
+const parseWebhookTimestamp = (value: string | null) => {
+  if (!value) return null;
+  const numeric = Number(value);
+  if (Number.isFinite(numeric)) {
+    return numeric > 1e12 ? numeric : numeric * 1000;
+  }
+  const parsed = Date.parse(value);
+  return Number.isNaN(parsed) ? null : parsed;
+};
+
 const verifyWebhookSignature = (
   rawBody: string,
   signatureHeader: string | null,
@@ -41,9 +53,15 @@ const verifyWebhookSignature = (
   webhookId: string | null,
   webhookTimestamp: string | null
 ) => {
-  if (!secret) return true;
+  if (!secret) return false;
   if (!signatureHeader) return false;
   if (!webhookId || !webhookTimestamp) return false;
+
+  const timestampMs = parseWebhookTimestamp(webhookTimestamp);
+  if (!timestampMs) return false;
+  if (Math.abs(Date.now() - timestampMs) > MAX_WEBHOOK_AGE_MS) {
+    return false;
+  }
 
   const signingPayload = buildSignedPayload(
     webhookId,

@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   AlertCircle,
   Calendar,
@@ -13,6 +14,7 @@ import {
   List as ListIcon,
   Loader2,
   MoreHorizontal,
+  Palette,
   Plus,
   Search,
 } from "lucide-react";
@@ -28,7 +30,6 @@ import {
 } from "date-fns";
 import DashboardHeader from "@/components/dashboard/DashboardHeader";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -53,6 +54,16 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import {
   Select,
   SelectContent,
   SelectItem,
@@ -67,26 +78,21 @@ import { cn } from "@/lib/utils";
 import { apiFetch } from "@/lib/api";
 import { normalizePersonNameKey } from "@/lib/transcript-utils";
 import { getAssigneeLabel, isPlaceholderAssignee } from "@/lib/task-assignee";
+import { BOARD_TEMPLATES, DEFAULT_BOARD_TEMPLATE_ID } from "@/lib/board-templates";
 import type { Task } from "@/types/project";
+import type { Board, BoardStatus, BoardStatusCategory } from "@/types/board";
 import type { Person } from "@/types/person";
 
-type TaskStatus = Task["status"];
 type TaskPriority = Task["priority"];
 
 type ViewMode = "board" | "list";
 type DragPosition = "before" | "after" | null;
 
-const taskStatuses: Array<{
-  id: TaskStatus;
-  label: string;
-  color: string;
-  isTerminal: boolean;
-}> = [
-  { id: "todo", label: "To do", color: "#3b82f6", isTerminal: false },
-  { id: "inprogress", label: "In progress", color: "#f59e0b", isTerminal: false },
-  { id: "done", label: "Done", color: "#10b981", isTerminal: true },
-  { id: "recurring", label: "Recurring", color: "#8b5cf6", isTerminal: false },
-];
+type BoardTaskItem = Task & {
+  boardItemId: string;
+  boardStatusId: string;
+  boardRank: number;
+};
 
 const priorityOptions: TaskPriority[] = ["low", "medium", "high"];
 
@@ -118,6 +124,27 @@ const formatDueDate = (value?: string | null) => {
   return format(parsed, "MMM d");
 };
 
+const applyHexAlpha = (hex: string, alpha: number) => {
+  if (!hex) return `rgba(0, 0, 0, ${alpha})`;
+  let value = hex.replace("#", "").trim();
+  if (value.length === 3) {
+    value = value
+      .split("")
+      .map((ch) => ch + ch)
+      .join("");
+  }
+  if (value.length !== 6) {
+    return `rgba(0, 0, 0, ${alpha})`;
+  }
+  const r = Number.parseInt(value.slice(0, 2), 16);
+  const g = Number.parseInt(value.slice(2, 4), 16);
+  const b = Number.parseInt(value.slice(4, 6), 16);
+  if ([r, g, b].some((part) => Number.isNaN(part))) {
+    return `rgba(0, 0, 0, ${alpha})`;
+  }
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+};
+
 const getInitials = (value?: string | null) => {
   if (!value) return "?";
   const cleaned = value.trim();
@@ -135,7 +162,7 @@ interface BoardPageContentProps {
 interface TaskDraft {
   title: string;
   description: string;
-  status: TaskStatus;
+  statusId: string;
   priority: TaskPriority;
   assigneeId: string;
   dueDate: string;
@@ -166,6 +193,13 @@ function AssigneeAvatar({
     "h-7 w-7 rounded-full border-2 border-background flex items-center justify-center text-[10px] font-semibold overflow-hidden";
 
   if (!person) {
+    if (label && label !== "Unassigned") {
+      return (
+        <div className={cn(frameClass, "bg-primary/10 text-primary")} title={name}>
+          {initials}
+        </div>
+      );
+    }
     return (
       <div className={cn(frameClass, "bg-muted")} title="Unassigned">
         <img src="/logo.svg" alt="TaskWiseAI" className="h-4 w-4" />
@@ -197,6 +231,7 @@ function TaskActionsMenu({ onEdit, onDelete }: { onEdit: () => void; onDelete: (
         <button
           className="rounded-md p-1 text-muted-foreground transition hover:bg-muted hover:text-foreground"
           type="button"
+          data-no-drag
         >
           <MoreHorizontal className="h-4 w-4" />
         </button>
@@ -214,12 +249,57 @@ function TaskActionsMenu({ onEdit, onDelete }: { onEdit: () => void; onDelete: (
   );
 }
 
+function AssigneeDropdown({
+  task,
+  assigneeName,
+  assigneePerson,
+  people,
+  onAssign,
+}: {
+  task: Task;
+  assigneeName: string;
+  assigneePerson: Person | null;
+  people: Person[];
+  onAssign: (task: Task, person: Person | null) => void;
+}) {
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button type="button" data-no-drag>
+          <AssigneeAvatar label={assigneeName} person={assigneePerson} />
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-48">
+        <DropdownMenuItem onSelect={() => onAssign(task, null)}>
+          Unassigned
+        </DropdownMenuItem>
+        <DropdownMenuSeparator />
+        {people.length ? (
+          people.map((person) => (
+            <DropdownMenuItem
+              key={person.id}
+              onSelect={() => onAssign(task, person)}
+            >
+              {person.name}
+            </DropdownMenuItem>
+          ))
+        ) : (
+          <DropdownMenuItem disabled>No people yet</DropdownMenuItem>
+        )}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
 function BoardTaskCard({
   task,
   assigneeName,
   assigneePerson,
+  people,
   onEdit,
   onDelete,
+  onOpen,
+  onAssign,
   onDragStart,
   onDragOver,
   onDrop,
@@ -232,8 +312,11 @@ function BoardTaskCard({
   task: Task;
   assigneeName: string;
   assigneePerson: Person | null;
+  people: Person[];
   onEdit: () => void;
   onDelete: () => void;
+  onOpen: () => void;
+  onAssign: (task: Task, person: Person | null) => void;
   onDragStart: (event: React.DragEvent<HTMLDivElement>) => void;
   onDragOver: (event: React.DragEvent<HTMLDivElement>) => void;
   onDrop: (event: React.DragEvent<HTMLDivElement>) => void;
@@ -267,9 +350,14 @@ function BoardTaskCard({
         <TaskActionsMenu onEdit={onEdit} onDelete={onDelete} />
       </div>
 
-      <h4 className="mt-2 text-sm font-semibold text-foreground leading-snug">
+      <button
+        type="button"
+        data-no-drag
+        onClick={onOpen}
+        className="mt-2 text-left text-sm font-semibold text-foreground leading-snug hover:text-primary"
+      >
         {task.title}
-      </h4>
+      </button>
       {task.description ? (
         <p className="mt-1 text-xs text-muted-foreground line-clamp-2">
           {task.description}
@@ -292,7 +380,13 @@ function BoardTaskCard({
           ) : null}
         </div>
         <div className="flex items-center gap-2">
-          <AssigneeAvatar label={assigneeName} person={assigneePerson} />
+          <AssigneeDropdown
+            task={task}
+            assigneeName={assigneeName}
+            assigneePerson={assigneePerson}
+            people={people}
+            onAssign={onAssign}
+          />
           <GripVertical className="h-4 w-4 text-muted-foreground" />
         </div>
       </div>
@@ -303,41 +397,65 @@ export default function BoardPageContent({
   workspaceId: _workspaceId,
 }: BoardPageContentProps) {
   const { toast } = useToast();
-  const [tasks, setTasks] = useState<Task[]>([]);
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const searchParamsString = searchParams.toString();
+  const boardIdParam = searchParams.get("boardId");
+  const [boards, setBoards] = useState<Board[]>([]);
+  const [activeBoardId, setActiveBoardId] = useState<string | null>(null);
+  const [boardStatuses, setBoardStatuses] = useState<BoardStatus[]>([]);
+  const [tasks, setTasks] = useState<BoardTaskItem[]>([]);
   const [people, setPeople] = useState<Person[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [viewMode, setViewMode] = useState<ViewMode>("board");
   const [searchQuery, setSearchQuery] = useState("");
   const [dueFilter, setDueFilter] = useState<DueFilter>("all");
-  const [statusFilters, setStatusFilters] = useState<Set<TaskStatus>>(
-    new Set(taskStatuses.map((status) => status.id))
-  );
+  const [statusFilters, setStatusFilters] = useState<Set<string>>(new Set());
   const [priorityFilters, setPriorityFilters] = useState<Set<TaskPriority>>(
     new Set(priorityOptions)
   );
   const [assigneeFilters, setAssigneeFilters] = useState<Set<string>>(new Set());
   const [includeUnassigned, setIncludeUnassigned] = useState(false);
   const [isTaskDialogOpen, setIsTaskDialogOpen] = useState(false);
+  const [isBoardDialogOpen, setIsBoardDialogOpen] = useState(false);
+  const [isStageDialogOpen, setIsStageDialogOpen] = useState(false);
+  const [isStageColorDialogOpen, setIsStageColorDialogOpen] = useState(false);
+  const [stageToEdit, setStageToEdit] = useState<BoardStatus | null>(null);
+  const [stageColorDraft, setStageColorDraft] = useState("#2563eb");
+  const [stageToDelete, setStageToDelete] = useState<BoardStatus | null>(null);
   const [isAssignDialogOpen, setIsAssignDialogOpen] = useState(false);
   const [isSetDueDateDialogOpen, setIsSetDueDateDialogOpen] = useState(false);
   const [isStatusDialogOpen, setIsStatusDialogOpen] = useState(false);
+  const [newBoardName, setNewBoardName] = useState("");
+  const [newBoardDescription, setNewBoardDescription] = useState("");
+  const [newBoardTemplateId, setNewBoardTemplateId] = useState(
+    DEFAULT_BOARD_TEMPLATE_ID
+  );
+  const [newBoardColor, setNewBoardColor] = useState("#2563eb");
+  const [newStageLabel, setNewStageLabel] = useState("");
+  const [newStageCategory, setNewStageCategory] =
+    useState<BoardStatusCategory>("todo");
+  const [newStageColor, setNewStageColor] = useState("#2563eb");
   const [taskDraft, setTaskDraft] = useState<TaskDraft>({
     title: "",
     description: "",
-    status: "todo",
+    statusId: "",
     priority: "medium",
     assigneeId: "",
     dueDate: "",
   });
-  const [editingTask, setEditingTask] = useState<Task | null>(null);
+  const [editingTask, setEditingTask] = useState<BoardTaskItem | null>(null);
   const [selectedTaskIds, setSelectedTaskIds] = useState<Set<string>>(new Set());
-  const [bulkStatus, setBulkStatus] = useState<TaskStatus>("todo");
+  const [bulkStatusId, setBulkStatusId] = useState<string>("");
   const [draggedTaskId, setDraggedTaskId] = useState<string | null>(null);
-  const [dragOverColumn, setDragOverColumn] = useState<TaskStatus | null>(null);
+  const [dragOverColumn, setDragOverColumn] = useState<string | null>(null);
   const [dragOverTaskId, setDragOverTaskId] = useState<string | null>(null);
   const [dragOverPosition, setDragOverPosition] = useState<DragPosition>(null);
 
-  const orderedStatuses = taskStatuses;
+  const orderedStatuses = useMemo(
+    () => [...boardStatuses].sort((a, b) => a.order - b.order),
+    [boardStatuses]
+  );
 
   const peopleById = useMemo(() => {
     const map = new Map<string, Person>();
@@ -441,28 +559,8 @@ export default function BoardPageContent({
       start: startOfWeek(today, { weekStartsOn: 1 }),
       end: endOfWeek(today, { weekStartsOn: 1 }),
     };
-    const normalizeStatus = (status?: string | null): TaskStatus => {
-      const raw = (status || "todo").toLowerCase().trim();
-      if (raw === "in progress" || raw === "in-progress" || raw === "in_progress") {
-        return "inprogress";
-      }
-      if (raw === "to do" || raw === "to-do") {
-        return "todo";
-      }
-      if (raw === "done" || raw === "completed" || raw === "complete") {
-        return "done";
-      }
-      if (raw === "recurring") {
-        return "recurring";
-      }
-      if (raw === "todo" || raw === "inprogress") {
-        return raw as TaskStatus;
-      }
-      return "todo";
-    };
-
     return tasks.filter((task) => {
-      const statusId = normalizeStatus(task.status);
+      const statusId = task.boardStatusId || orderedStatuses[0]?.id || "";
       if (normalizedQuery) {
         const haystack = `${task.title} ${task.description || ""}`
           .toLowerCase()
@@ -516,44 +614,34 @@ export default function BoardPageContent({
     orderedStatuses.length,
   ]);
 
-  const normalizeTaskStatus = useCallback((status?: string | null): TaskStatus => {
-    const raw = (status || "todo").toLowerCase().trim();
-    if (raw === "in progress" || raw === "in-progress" || raw === "in_progress") {
-      return "inprogress";
-    }
-    if (raw === "to do" || raw === "to-do") {
-      return "todo";
-    }
-    if (raw === "done" || raw === "completed" || raw === "complete") {
-      return "done";
-    }
-    if (raw === "recurring") {
-      return "recurring";
-    }
-    if (raw === "todo" || raw === "inprogress") {
-      return raw as TaskStatus;
-    }
-    return "todo";
-  }, []);
-
   const tasksByStatus = useMemo(() => {
-    const map = new Map<string, Task[]>();
+    const map = new Map<string, BoardTaskItem[]>();
     orderedStatuses.forEach((status) => map.set(status.id, []));
     filteredTasks.forEach((task) => {
-      const statusId = normalizeTaskStatus(task.status);
-      if (!map.has(statusId)) return;
+      const statusId = task.boardStatusId || orderedStatuses[0]?.id;
+      if (!statusId || !map.has(statusId)) return;
       map.get(statusId)?.push(task);
     });
     map.forEach((items) =>
       items.sort((a, b) => {
-        const orderA = typeof a.order === "number" ? a.order : 0;
-        const orderB = typeof b.order === "number" ? b.order : 0;
-        if (orderA !== orderB) return orderA - orderB;
+        const rankA = typeof a.boardRank === "number" ? a.boardRank : 0;
+        const rankB = typeof b.boardRank === "number" ? b.boardRank : 0;
+        if (rankA !== rankB) return rankA - rankB;
         return a.title.localeCompare(b.title);
       })
     );
     return map;
-  }, [filteredTasks, normalizeTaskStatus, orderedStatuses]);
+  }, [filteredTasks, orderedStatuses]);
+
+  const totalTasksByStatus = useMemo(() => {
+    const map = new Map<string, number>();
+    tasks.forEach((task) => {
+      const statusId = task.boardStatusId || orderedStatuses[0]?.id;
+      if (!statusId) return;
+      map.set(statusId, (map.get(statusId) ?? 0) + 1);
+    });
+    return map;
+  }, [orderedStatuses, tasks]);
 
   const getAssigneeName = useCallback(
     (task: Task) => {
@@ -581,13 +669,13 @@ export default function BoardPageContent({
   );
 
   const getStatusMeta = useCallback(
-    (status: TaskStatus) =>
-      orderedStatuses.find((entry) => entry.id === status) || orderedStatuses[0],
+    (statusId?: string | null) =>
+      orderedStatuses.find((entry) => entry.id === statusId) || orderedStatuses[0],
     [orderedStatuses]
   );
 
-  const getStatusIcon = (status: TaskStatus, color: string) => {
-    switch (status) {
+  const getStatusIcon = (category: BoardStatusCategory | null | undefined, color: string) => {
+    switch (category) {
       case "inprogress":
         return <Clock className="h-4 w-4" style={{ color }} />;
       case "done":
@@ -600,60 +688,172 @@ export default function BoardPageContent({
     }
   };
 
-  const loadBoard = useCallback(async () => {
+  const loadBoards = useCallback(async () => {
+    if (!_workspaceId) return;
     setIsLoading(true);
     try {
-      const [taskList, peopleList] = await Promise.all([
-        apiFetch<Task[]>("/api/tasks"),
+      const [boardList, peopleList] = await Promise.all([
+        apiFetch<Board[]>(`/api/workspaces/${_workspaceId}/boards`),
         apiFetch<Person[]>("/api/people"),
       ]);
 
-      setTasks(taskList);
+      setBoards(boardList);
       setPeople(peopleList);
+      if (!boardList.length) {
+        setIsLoading(false);
+      }
     } catch (error) {
-      console.error("Failed to load board:", error);
+      console.error("Failed to load boards:", error);
       toast({
         title: "Board load failed",
         description:
           error instanceof Error ? error.message : "Could not load board data.",
         variant: "destructive",
       });
-    } finally {
       setIsLoading(false);
     }
-  }, [toast]);
+  }, [_workspaceId, toast]);
+
+  const loadBoardData = useCallback(
+    async (boardId: string) => {
+      if (!_workspaceId || !boardId) return;
+      setIsLoading(true);
+      try {
+        const [statusList, boardItems] = await Promise.all([
+          apiFetch<BoardStatus[]>(
+            `/api/workspaces/${_workspaceId}/boards/${boardId}/statuses`
+          ),
+          apiFetch<BoardTaskItem[]>(
+            `/api/workspaces/${_workspaceId}/boards/${boardId}/items`
+          ),
+        ]);
+        setBoardStatuses(statusList);
+        setTasks(boardItems);
+        setSelectedTaskIds(new Set());
+      } catch (error) {
+        console.error("Failed to load board:", error);
+        toast({
+          title: "Board load failed",
+          description:
+            error instanceof Error ? error.message : "Could not load board data.",
+          variant: "destructive",
+        });
+      } finally {
+        setIsLoading(false);
+      }
+    },
+    [_workspaceId, toast]
+  );
 
   useEffect(() => {
-    loadBoard();
-  }, [loadBoard]);
+    loadBoards();
+  }, [loadBoards]);
 
-  const handleTaskReorder = useCallback(async (updates: Task[]) => {
-    const previous = tasks;
-    setTasks(updates);
-    const previousById = new Map(previous.map((task) => [task.id, task]));
-    const changed = updates.filter((task) => {
-      const before = previousById.get(task.id);
-      return !before || before.status !== task.status || before.order !== task.order;
-    });
-    try {
-      await Promise.all(
-        changed.map((task) =>
-          apiFetch(`/api/tasks/${task.id}`, {
-            method: "PATCH",
-            body: JSON.stringify({ status: task.status, order: task.order }),
-          })
-        )
-      );
-    } catch (error) {
-      console.error("Task reorder failed:", error);
-      setTasks(previous);
-      toast({
-        title: "Could not reorder tasks",
-        description: error instanceof Error ? error.message : "Try again in a moment.",
-        variant: "destructive",
-      });
+  useEffect(() => {
+    if (!boards.length) return;
+    const paramMatch = boardIdParam && boards.find((board) => board.id === boardIdParam);
+    const nextBoardId = paramMatch?.id || boards[0]?.id || null;
+    if (nextBoardId && nextBoardId !== activeBoardId) {
+      setActiveBoardId(nextBoardId);
     }
-  }, [tasks, toast]);
+    if (nextBoardId && nextBoardId !== boardIdParam) {
+      const params = new URLSearchParams(searchParamsString);
+      params.set("boardId", nextBoardId);
+      router.replace(`/workspaces/${_workspaceId}/board?${params.toString()}`);
+    }
+  }, [
+    activeBoardId,
+    boardIdParam,
+    boards,
+    router,
+    searchParamsString,
+    _workspaceId,
+  ]);
+
+  useEffect(() => {
+    if (activeBoardId) {
+      loadBoardData(activeBoardId);
+    }
+  }, [activeBoardId, loadBoardData]);
+
+  const resolveBoardStatusId = useCallback(
+    (statusId?: string | null) => {
+      if (statusId && orderedStatuses.some((status) => status.id === statusId)) {
+        return statusId;
+      }
+      return orderedStatuses[0]?.id || "";
+    },
+    [orderedStatuses]
+  );
+
+  const resolveStatusIdByCategory = useCallback(
+    (category?: BoardStatusCategory | null) => {
+      if (!category) return resolveBoardStatusId(null);
+      const match = orderedStatuses.find((status) => status.category === category);
+      return match?.id || resolveBoardStatusId(null);
+    },
+    [orderedStatuses, resolveBoardStatusId]
+  );
+
+  const computeRank = useCallback((before?: number | null, after?: number | null) => {
+    if (before == null && after == null) return 0;
+    if (before == null) return (after as number) - 1000;
+    if (after == null) return before + 1000;
+    if (after - before > 0.0001) return (before + after) / 2;
+    return before + 0.0001;
+  }, []);
+
+  const updateBoardItem = useCallback(
+    async (
+      taskId: string,
+      options: { statusId?: string; rank?: number; taskUpdates?: Record<string, any> }
+    ) => {
+      if (!activeBoardId) return;
+      const current = tasks.find((task) => task.id === taskId);
+      if (!current) return;
+
+      const previous = tasks;
+      const nextTasks = tasks.map((task) =>
+        task.id === taskId
+          ? {
+              ...task,
+              boardStatusId: options.statusId ?? task.boardStatusId,
+              boardRank:
+                typeof options.rank === "number" ? options.rank : task.boardRank,
+              ...(options.taskUpdates || {}),
+            }
+          : task
+      );
+      setTasks(nextTasks);
+
+      try {
+        const payload: Record<string, any> = {};
+        if (options.statusId) payload.statusId = options.statusId;
+        if (typeof options.rank === "number") payload.rank = options.rank;
+        if (options.taskUpdates) payload.taskUpdates = options.taskUpdates;
+        const updated = await apiFetch<BoardTaskItem>(
+          `/api/workspaces/${_workspaceId}/boards/${activeBoardId}/items/${current.boardItemId}`,
+          {
+            method: "PATCH",
+            body: JSON.stringify(payload),
+          }
+        );
+        setTasks((prev) =>
+          prev.map((task) => (task.id === updated.id ? { ...task, ...updated } : task))
+        );
+      } catch (error) {
+        console.error("Board update failed:", error);
+        setTasks(previous);
+        toast({
+          title: "Task update failed",
+          description:
+            error instanceof Error ? error.message : "Try again in a moment.",
+          variant: "destructive",
+        });
+      }
+    },
+    [activeBoardId, _workspaceId, tasks, toast]
+  );
 
   const clearDragState = useCallback(() => {
     setDraggedTaskId(null);
@@ -663,156 +863,121 @@ export default function BoardPageContent({
   }, []);
 
   const applyDrop = useCallback(
-    (targetStatusId: TaskStatus, targetTaskId?: string | null, position?: DragPosition) => {
+    (targetStatusId: string, targetTaskId?: string | null, position?: DragPosition) => {
       if (!draggedTaskId) return;
 
       const activeTask = tasks.find((task) => task.id === draggedTaskId);
       if (!activeTask) return;
 
-      const sourceStatusId = normalizeTaskStatus(activeTask.status);
-      const sourceTasks = tasks
-        .filter((task) => normalizeTaskStatus(task.status) === sourceStatusId)
-        .sort((a, b) => {
-          const orderA = typeof a.order === "number" ? a.order : 0;
-          const orderB = typeof b.order === "number" ? b.order : 0;
-          return orderA - orderB;
-        });
+      const resolvedTargetStatusId = resolveBoardStatusId(targetStatusId);
+      const targetTasks = tasksByStatus.get(resolvedTargetStatusId) || [];
+      const visibleTargets = targetTasks.filter((task) => task.id !== activeTask.id);
 
-      const activeIndex = sourceTasks.findIndex((task) => task.id === activeTask.id);
-      if (activeIndex === -1) return;
-
-      const [moved] = sourceTasks.splice(activeIndex, 1);
-      const movedTask =
-        sourceStatusId === targetStatusId ? moved : { ...moved, status: targetStatusId };
-
-      const targetTasks =
-        sourceStatusId === targetStatusId
-          ? sourceTasks
-          : tasks
-              .filter((task) => normalizeTaskStatus(task.status) === targetStatusId)
-              .sort((a, b) => {
-                const orderA = typeof a.order === "number" ? a.order : 0;
-                const orderB = typeof b.order === "number" ? b.order : 0;
-                return orderA - orderB;
-              });
-
-      const nextTargetTasks = sourceStatusId === targetStatusId ? targetTasks : [...targetTasks];
-
-      let insertIndex = nextTargetTasks.length;
+      let insertIndex = visibleTargets.length;
       if (targetTaskId) {
-        const overIndex = nextTargetTasks.findIndex((task) => task.id === targetTaskId);
+        const overIndex = visibleTargets.findIndex((task) => task.id === targetTaskId);
         if (overIndex >= 0) {
           insertIndex = position === "after" ? overIndex + 1 : overIndex;
         }
       }
 
-      nextTargetTasks.splice(insertIndex, 0, movedTask);
+      const before = insertIndex > 0 ? visibleTargets[insertIndex - 1] : null;
+      const after =
+        insertIndex < visibleTargets.length ? visibleTargets[insertIndex] : null;
+      const newRank = computeRank(before?.boardRank, after?.boardRank);
 
-      const normalizedSource = sourceTasks.map((task, index) => ({
-        ...task,
-        order: index,
-      }));
-      const normalizedTarget = nextTargetTasks.map((task, index) => ({
-        ...task,
-        status: targetStatusId,
-        order: index,
-      }));
-
-      const otherTasks = tasks.filter(
-        (task) =>
-          normalizeTaskStatus(task.status) !== sourceStatusId &&
-          normalizeTaskStatus(task.status) !== targetStatusId
-      );
-
-      const nextTasks =
-        sourceStatusId === targetStatusId
-          ? [...otherTasks, ...normalizedTarget]
-          : [...otherTasks, ...normalizedSource, ...normalizedTarget];
-
-      handleTaskReorder(nextTasks);
+      updateBoardItem(activeTask.id, {
+        statusId: resolvedTargetStatusId,
+        rank: newRank,
+      });
     },
-    [draggedTaskId, handleTaskReorder, normalizeTaskStatus, tasks]
+    [computeRank, draggedTaskId, resolveBoardStatusId, tasks, tasksByStatus, updateBoardItem]
   );
   const handleDragStart = useCallback(
     (event: React.DragEvent<HTMLDivElement>, taskId: string) => {
-      if (isFiltering) return;
+      const target = event.target as HTMLElement | null;
+      if (target?.closest?.("[data-no-drag]")) {
+        event.preventDefault();
+        return;
+      }
       setDraggedTaskId(taskId);
       event.dataTransfer.effectAllowed = "move";
       event.dataTransfer.setData("text/plain", taskId);
     },
-    [isFiltering]
+    []
   );
 
   const handleDragOverColumn = useCallback(
-    (event: React.DragEvent<HTMLDivElement>, statusId: TaskStatus) => {
-      if (isFiltering) return;
+    (event: React.DragEvent<HTMLDivElement>, statusId: string) => {
       event.preventDefault();
       setDragOverColumn(statusId);
       setDragOverTaskId(null);
       setDragOverPosition(null);
     },
-    [isFiltering]
+    []
   );
 
   const handleDragOverTask = useCallback(
-    (event: React.DragEvent<HTMLDivElement>, task: Task) => {
-      if (isFiltering) return;
+    (event: React.DragEvent<HTMLDivElement>, task: BoardTaskItem) => {
       event.preventDefault();
       const rect = event.currentTarget.getBoundingClientRect();
       const offset = event.clientY - rect.top;
       const position: DragPosition = offset < rect.height / 2 ? "before" : "after";
-      setDragOverColumn(normalizeTaskStatus(task.status));
+      setDragOverColumn(task.boardStatusId || resolveBoardStatusId(null));
       setDragOverTaskId(task.id);
       setDragOverPosition(position);
     },
-    [isFiltering, normalizeTaskStatus]
+    [resolveBoardStatusId]
   );
 
   const handleDropOnColumn = useCallback(
-    (event: React.DragEvent<HTMLDivElement>, statusId: TaskStatus) => {
+    (event: React.DragEvent<HTMLDivElement>, statusId: string) => {
       event.preventDefault();
-      if (isFiltering || !draggedTaskId) {
+      if (!draggedTaskId) {
         clearDragState();
         return;
       }
       applyDrop(statusId, null, null);
       clearDragState();
     },
-    [applyDrop, clearDragState, draggedTaskId, isFiltering]
+    [applyDrop, clearDragState, draggedTaskId]
   );
 
   const handleDropOnTask = useCallback(
-    (event: React.DragEvent<HTMLDivElement>, task: Task) => {
+    (event: React.DragEvent<HTMLDivElement>, task: BoardTaskItem) => {
       event.preventDefault();
-      if (isFiltering || !draggedTaskId) {
+      if (!draggedTaskId) {
         clearDragState();
         return;
       }
-      const statusId = normalizeTaskStatus(task.status);
+      const statusId = task.boardStatusId || resolveBoardStatusId(null);
       applyDrop(statusId, task.id, dragOverPosition);
       clearDragState();
     },
-    [applyDrop, clearDragState, draggedTaskId, dragOverPosition, isFiltering, normalizeTaskStatus]
+    [applyDrop, clearDragState, draggedTaskId, dragOverPosition, resolveBoardStatusId]
   );
 
-  const resetTaskDraft = (status: TaskStatus) => {
+  const resetTaskDraft = (statusId: string) => {
     setTaskDraft({
       title: "",
       description: "",
-      status,
+      statusId,
       priority: "medium",
       assigneeId: "",
       dueDate: "",
     });
   };
 
-  const openNewTask = (statusId: TaskStatus) => {
+  const openNewTask = (statusId?: string | null) => {
     setEditingTask(null);
-    resetTaskDraft(statusId);
+    const nextStatusId = statusId
+      ? resolveBoardStatusId(statusId)
+      : resolveStatusIdByCategory("todo");
+    resetTaskDraft(nextStatusId);
     setIsTaskDialogOpen(true);
   };
 
-  const openEditTask = (task: Task) => {
+  const openEditTask = (task: BoardTaskItem) => {
     const rawAssignee = task.assignee as { uid?: string; id?: string } | undefined;
     const assigneeNameKey =
       task.assigneeNameKey ||
@@ -821,7 +986,7 @@ export default function BoardPageContent({
     setTaskDraft({
       title: task.title,
       description: task.description || "",
-      status: normalizeTaskStatus(task.status),
+      statusId: task.boardStatusId || resolveBoardStatusId(null),
       priority: task.priority || "medium",
       assigneeId:
         rawAssignee?.uid ||
@@ -842,7 +1007,7 @@ export default function BoardPageContent({
       });
       return;
     }
-    if (!taskDraft.status) {
+    if (!taskDraft.statusId) {
       toast({
         title: "Select a column",
         description: "Choose a column for this task before saving.",
@@ -851,40 +1016,54 @@ export default function BoardPageContent({
       return;
     }
 
+    if (!activeBoardId) {
+      toast({
+        title: "Board not ready",
+        description: "Select a board before saving tasks.",
+        variant: "destructive",
+      });
+      return;
+    }
+
     const assignee = peopleById.get(taskDraft.assigneeId || "");
-    const nextOrder =
-      tasks
-        .filter((task) => normalizeTaskStatus(task.status) === taskDraft.status)
-        .reduce((maxOrder, task) => {
-          const value = typeof task.order === "number" ? task.order : -1;
-          return Math.max(maxOrder, value);
-        }, -1) + 1;
     const assigneePayload = assignee
       ? { id: assignee.id, name: assignee.name, email: assignee.email || undefined }
       : null;
-    const payload = {
+    const taskUpdates = {
       title: taskDraft.title.trim(),
       description: taskDraft.description.trim(),
-      status: taskDraft.status,
       priority: taskDraft.priority,
       assignee: assigneePayload,
       assigneeName: assignee?.name || null,
       dueAt: normalizeDateInput(taskDraft.dueDate),
-      ...(editingTask ? {} : { order: nextOrder }),
     };
 
     try {
       if (editingTask) {
-        const updated = await apiFetch<Task>(`/api/tasks/${editingTask.id}`, {
-          method: "PATCH",
-          body: JSON.stringify(payload),
-        });
-        setTasks((prev) => prev.map((task) => (task.id === updated.id ? updated : task)));
+        const updated = await apiFetch<BoardTaskItem>(
+          `/api/workspaces/${_workspaceId}/boards/${activeBoardId}/items/${editingTask.boardItemId}`,
+          {
+            method: "PATCH",
+            body: JSON.stringify({
+              statusId: taskDraft.statusId,
+              taskUpdates,
+            }),
+          }
+        );
+        setTasks((prev) =>
+          prev.map((task) => (task.id === updated.id ? { ...task, ...updated } : task))
+        );
       } else {
-        const created = await apiFetch<Task>(`/api/tasks`, {
-          method: "POST",
-          body: JSON.stringify(payload),
-        });
+        const created = await apiFetch<BoardTaskItem>(
+          `/api/workspaces/${_workspaceId}/boards/${activeBoardId}/items`,
+          {
+            method: "POST",
+            body: JSON.stringify({
+              ...taskUpdates,
+              statusId: taskDraft.statusId,
+            }),
+          }
+        );
         setTasks((prev) => [...prev, created]);
       }
       setIsTaskDialogOpen(false);
@@ -898,7 +1077,7 @@ export default function BoardPageContent({
     }
   };
 
-  const handleDeleteTask = async (task: Task) => {
+  const handleDeleteTask = async (task: BoardTaskItem) => {
     try {
       await apiFetch(`/api/tasks/${task.id}`, {
         method: "DELETE",
@@ -913,6 +1092,21 @@ export default function BoardPageContent({
       });
     }
   };
+
+  const handleAssignTask = useCallback(
+    (task: Task, person: Person | null) => {
+      const assigneePayload = person
+        ? { id: person.id, name: person.name, email: person.email || undefined }
+        : null;
+      updateBoardItem(task.id, {
+        taskUpdates: {
+          assignee: assigneePayload,
+          assigneeName: person?.name || null,
+        },
+      });
+    },
+    [updateBoardItem]
+  );
 
   const togglePriority = (priority: TaskPriority) => {
     setPriorityFilters((prev) => {
@@ -929,16 +1123,16 @@ export default function BoardPageContent({
     });
   };
 
-  const toggleStatusFilter = (status: TaskStatus) => {
+  const toggleStatusFilter = (statusId: string) => {
     setStatusFilters((prev) => {
       const next = new Set(prev);
-      if (next.has(status)) {
-        next.delete(status);
+      if (next.has(statusId)) {
+        next.delete(statusId);
       } else {
-        next.add(status);
+        next.add(statusId);
       }
       if (!next.size) {
-        next.add(status);
+        next.add(statusId);
       }
       return next;
     });
@@ -952,6 +1146,238 @@ export default function BoardPageContent({
     setAssigneeFilters(new Set());
     setIncludeUnassigned(false);
   };
+
+  useEffect(() => {
+    if (!orderedStatuses.length) return;
+    const statusIds = orderedStatuses.map((status) => status.id);
+    setStatusFilters(new Set(statusIds));
+    setBulkStatusId((prev) => (prev && statusIds.includes(prev) ? prev : statusIds[0]));
+    setTaskDraft((prev) => ({
+      ...prev,
+      statusId: statusIds.includes(prev.statusId) ? prev.statusId : statusIds[0],
+    }));
+  }, [orderedStatuses]);
+
+  const activeBoard = useMemo(
+    () => boards.find((board) => board.id === activeBoardId) || null,
+    [activeBoardId, boards]
+  );
+
+  const handleBoardChange = useCallback(
+    (boardId: string) => {
+      if (!boardId) return;
+      setActiveBoardId(boardId);
+      const params = new URLSearchParams(searchParamsString);
+      params.set("boardId", boardId);
+      router.replace(`/workspaces/${_workspaceId}/board?${params.toString()}`);
+    },
+    [_workspaceId, router, searchParamsString]
+  );
+
+  const handleBoardColorChange = useCallback(
+    async (nextColor: string) => {
+      if (!activeBoardId) return;
+      const previous = boards;
+      setBoards((prev) =>
+        prev.map((board) =>
+          board.id === activeBoardId ? { ...board, color: nextColor } : board
+        )
+      );
+      try {
+        await apiFetch(
+          `/api/workspaces/${_workspaceId}/boards/${activeBoardId}`,
+          {
+            method: "PATCH",
+            body: JSON.stringify({ color: nextColor }),
+          }
+        );
+      } catch (error) {
+        console.error("Failed to update board color:", error);
+        setBoards(previous);
+        toast({
+          title: "Could not update board color",
+          description: error instanceof Error ? error.message : "Try again in a moment.",
+          variant: "destructive",
+        });
+      }
+    },
+    [_workspaceId, activeBoardId, boards, toast]
+  );
+
+  const openBoardDialog = () => {
+    setNewBoardName("");
+    setNewBoardDescription("");
+    setNewBoardTemplateId(DEFAULT_BOARD_TEMPLATE_ID);
+    setNewBoardColor("#2563eb");
+    setIsBoardDialogOpen(true);
+  };
+
+  const handleCreateBoard = useCallback(async () => {
+    const name = newBoardName.trim();
+    if (!name) {
+      toast({
+        title: "Board name required",
+        description: "Give your board a name before creating it.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    try {
+      const created = await apiFetch<Board>(
+        `/api/workspaces/${_workspaceId}/boards`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            name,
+            description: newBoardDescription.trim() || null,
+            templateId: newBoardTemplateId,
+            color: newBoardColor,
+          }),
+        }
+      );
+      setBoards((prev) => [...prev, created]);
+      handleBoardChange(created.id);
+      setIsBoardDialogOpen(false);
+    } catch (error) {
+      console.error("Failed to create board:", error);
+      toast({
+        title: "Could not create board",
+        description: error instanceof Error ? error.message : "Try again in a moment.",
+        variant: "destructive",
+      });
+    }
+  }, [
+    _workspaceId,
+    handleBoardChange,
+    newBoardDescription,
+    newBoardName,
+    newBoardTemplateId,
+    newBoardColor,
+    toast,
+  ]);
+
+  const selectedTemplate = useMemo(
+    () =>
+      BOARD_TEMPLATES.find((template) => template.id === newBoardTemplateId) ||
+      BOARD_TEMPLATES[0],
+    [newBoardTemplateId]
+  );
+
+  const openStageDialog = useCallback(() => {
+    setNewStageLabel("");
+    setNewStageCategory("todo");
+    setNewStageColor("#2563eb");
+    setIsStageDialogOpen(true);
+  }, []);
+
+  const handleCreateStage = useCallback(async () => {
+    const label = newStageLabel.trim();
+    if (!label) {
+      toast({
+        title: "Stage name required",
+        description: "Add a label before creating the stage.",
+        variant: "destructive",
+      });
+      return;
+    }
+    if (!activeBoardId) {
+      toast({
+        title: "Board not ready",
+        description: "Select a board before adding stages.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    try {
+      const created = await apiFetch<BoardStatus>(
+        `/api/workspaces/${_workspaceId}/boards/${activeBoardId}/statuses`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            label,
+            category: newStageCategory,
+            color: newStageColor,
+          }),
+        }
+      );
+      setBoardStatuses((prev) => [...prev, created]);
+      setIsStageDialogOpen(false);
+    } catch (error) {
+      console.error("Failed to create stage:", error);
+      toast({
+        title: "Could not create stage",
+        description: error instanceof Error ? error.message : "Try again in a moment.",
+        variant: "destructive",
+      });
+    }
+  }, [
+    _workspaceId,
+    activeBoardId,
+    newStageCategory,
+    newStageColor,
+    newStageLabel,
+    toast,
+  ]);
+
+  const openStageColorDialog = useCallback((status: BoardStatus) => {
+    setStageToEdit(status);
+    setStageColorDraft(status.color || "#2563eb");
+    setIsStageColorDialogOpen(true);
+  }, []);
+
+  const handleUpdateStageColor = useCallback(async () => {
+    if (!stageToEdit || !activeBoardId) {
+      setIsStageColorDialogOpen(false);
+      return;
+    }
+    const nextColor = stageColorDraft.trim();
+    if (!nextColor) return;
+    try {
+      const updated = await apiFetch<BoardStatus>(
+        `/api/workspaces/${_workspaceId}/boards/${activeBoardId}/statuses/${stageToEdit.id}`,
+        {
+          method: "PATCH",
+          body: JSON.stringify({ color: nextColor }),
+        }
+      );
+      setBoardStatuses((prev) =>
+        prev.map((status) => (status.id === updated.id ? updated : status))
+      );
+      setIsStageColorDialogOpen(false);
+      setStageToEdit(null);
+    } catch (error) {
+      console.error("Failed to update stage color:", error);
+      toast({
+        title: "Could not update stage",
+        description: error instanceof Error ? error.message : "Try again in a moment.",
+        variant: "destructive",
+      });
+    }
+  }, [_workspaceId, activeBoardId, stageColorDraft, stageToEdit, toast]);
+
+  const handleDeleteStage = useCallback(async () => {
+    if (!stageToDelete || !activeBoardId) {
+      setStageToDelete(null);
+      return;
+    }
+    try {
+      await apiFetch(
+        `/api/workspaces/${_workspaceId}/boards/${activeBoardId}/statuses/${stageToDelete.id}`,
+        { method: "DELETE" }
+      );
+      setBoardStatuses((prev) => prev.filter((status) => status.id !== stageToDelete.id));
+      setStageToDelete(null);
+    } catch (error) {
+      console.error("Failed to delete stage:", error);
+      toast({
+        title: "Could not delete stage",
+        description: error instanceof Error ? error.message : "Stage may still have tasks.",
+        variant: "destructive",
+      });
+    }
+  }, [_workspaceId, activeBoardId, stageToDelete, toast]);
 
   const selectedVisibleCount = useMemo(
     () => filteredTasks.filter((task) => selectedTaskIds.has(task.id)).length,
@@ -1005,18 +1431,20 @@ export default function BoardPageContent({
   );
 
   const applyBulkUpdates = useCallback(
-    async (nextTasks: Task[], updates: Array<{ id: string; patch: Partial<Task> }>) => {
-      if (!updates.length) return;
+    async (
+      nextTasks: BoardTaskItem[],
+      payload: { taskIds: string[]; updates?: Record<string, any>; statusId?: string }
+    ) => {
+      if (!activeBoardId || !payload.taskIds.length) return;
       const previous = tasks;
       setTasks(nextTasks);
       try {
-        await Promise.all(
-          updates.map(({ id, patch }) =>
-            apiFetch(`/api/tasks/${id}`, {
-              method: "PATCH",
-              body: JSON.stringify(patch),
-            })
-          )
+        await apiFetch(
+          `/api/workspaces/${_workspaceId}/boards/${activeBoardId}/items/bulk`,
+          {
+            method: "POST",
+            body: JSON.stringify(payload),
+          }
         );
         clearSelection();
       } catch (error) {
@@ -1029,7 +1457,7 @@ export default function BoardPageContent({
         });
       }
     },
-    [clearSelection, tasks, toast]
+    [activeBoardId, _workspaceId, clearSelection, tasks, toast]
   );
 
   const handleBulkDelete = useCallback(async () => {
@@ -1075,14 +1503,13 @@ export default function BoardPageContent({
             }
           : task
       );
-      const updates = selectedTasks.map((task) => ({
-        id: task.id,
-        patch: {
+      await applyBulkUpdates(nextTasks, {
+        taskIds: selectedTasks.map((task) => task.id),
+        updates: {
           assignee: assigneePayload,
           assigneeName: person.name,
         },
-      }));
-      await applyBulkUpdates(nextTasks, updates);
+      });
       setIsAssignDialogOpen(false);
     },
     [applyBulkUpdates, selectedTaskIds, selectedTasks, tasks]
@@ -1095,11 +1522,10 @@ export default function BoardPageContent({
       const nextTasks = tasks.map((task) =>
         selectedTaskIds.has(task.id) ? { ...task, dueAt } : task
       );
-      const updates = selectedTasks.map((task) => ({
-        id: task.id,
-        patch: { dueAt },
-      }));
-      await applyBulkUpdates(nextTasks, updates);
+      await applyBulkUpdates(nextTasks, {
+        taskIds: selectedTasks.map((task) => task.id),
+        updates: { dueAt },
+      });
       setIsSetDueDateDialogOpen(false);
     },
     [applyBulkUpdates, selectedTaskIds, selectedTasks, tasks]
@@ -1108,13 +1534,13 @@ export default function BoardPageContent({
   const openStatusDialog = useCallback(() => {
     if (!selectedTasks.length) return;
     const uniqueStatuses = new Set(
-      selectedTasks.map((task) => normalizeTaskStatus(task.status))
+      selectedTasks.map((task) => task.boardStatusId || resolveBoardStatusId(null))
     );
     if (uniqueStatuses.size === 1) {
-      setBulkStatus(Array.from(uniqueStatuses)[0]);
+      setBulkStatusId(Array.from(uniqueStatuses)[0]);
     }
     setIsStatusDialogOpen(true);
-  }, [normalizeTaskStatus, selectedTasks]);
+  }, [resolveBoardStatusId, selectedTasks]);
 
   const handleBulkStatusChange = useCallback(async () => {
     if (!selectedTasks.length) {
@@ -1122,43 +1548,59 @@ export default function BoardPageContent({
       return;
     }
 
-    const maxOrderByStatus = new Map<TaskStatus, number>();
+    const targetStatusId = resolveBoardStatusId(bulkStatusId);
+    if (!targetStatusId) {
+      setIsStatusDialogOpen(false);
+      return;
+    }
+    const targetStatusMeta = getStatusMeta(targetStatusId);
+    const targetCategory = targetStatusMeta?.category || "todo";
+
+    const maxRankByStatus = new Map<string, number>();
     tasks.forEach((task) => {
-      const status = normalizeTaskStatus(task.status);
-      const order = typeof task.order === "number" ? task.order : -1;
-      const currentMax = maxOrderByStatus.get(status) ?? -1;
-      if (order > currentMax) {
-        maxOrderByStatus.set(status, order);
+      const statusId = task.boardStatusId || resolveBoardStatusId(null);
+      const rank = typeof task.boardRank === "number" ? task.boardRank : 0;
+      const currentMax = maxRankByStatus.get(statusId) ?? 0;
+      if (rank > currentMax) {
+        maxRankByStatus.set(statusId, rank);
       }
     });
 
-    const updates: Array<{ id: string; patch: Partial<Task> }> = [];
+    let nextRank = maxRankByStatus.get(targetStatusId) ?? 0;
+    const taskIdsToUpdate = new Set(
+      selectedTasks
+        .filter((task) => task.boardStatusId !== targetStatusId)
+        .map((task) => task.id)
+    );
+    if (!taskIdsToUpdate.size) {
+      setIsStatusDialogOpen(false);
+      return;
+    }
     const nextTasks = tasks.map((task) => {
       if (!selectedTaskIds.has(task.id)) return task;
-      const currentStatus = normalizeTaskStatus(task.status);
-      if (currentStatus === bulkStatus) return task;
-      const nextOrder = (maxOrderByStatus.get(bulkStatus) ?? -1) + 1;
-      maxOrderByStatus.set(bulkStatus, nextOrder);
-      updates.push({
-        id: task.id,
-        patch: { status: bulkStatus, order: nextOrder },
-      });
+      if (!taskIdsToUpdate.has(task.id)) return task;
+      nextRank += 1000;
       return {
         ...task,
-        status: bulkStatus,
-        order: nextOrder,
+        boardStatusId: targetStatusId,
+        boardRank: nextRank,
+        status: targetCategory,
       };
     });
 
-    await applyBulkUpdates(nextTasks, updates);
+    await applyBulkUpdates(nextTasks, {
+      taskIds: Array.from(taskIdsToUpdate),
+      statusId: targetStatusId,
+    });
     setIsStatusDialogOpen(false);
   }, [
     applyBulkUpdates,
-    bulkStatus,
-    normalizeTaskStatus,
+    bulkStatusId,
     selectedTaskIds,
     selectedTasks,
     tasks,
+    getStatusMeta,
+    resolveBoardStatusId,
   ]);
 
   const handleCreatePerson = useCallback(
@@ -1195,6 +1637,7 @@ export default function BoardPageContent({
       <div className="flex h-full gap-6 px-6 pb-6 min-w-[1000px]">
         {orderedStatuses.map((status) => {
           const columnTasks = tasksByStatus.get(status.id) || [];
+          const totalTasksForStatus = totalTasksByStatus.get(status.id) || 0;
           return (
             <div
               key={status.id}
@@ -1202,12 +1645,16 @@ export default function BoardPageContent({
               onDrop={(event) => handleDropOnColumn(event, status.id)}
               className={cn(
                 "flex h-full w-80 shrink-0 flex-col rounded-xl border border-border/50 bg-card/60",
-                dragOverColumn === status.id && !isFiltering
-                  ? "ring-2 ring-primary/30 bg-primary/5"
-                  : ""
+                dragOverColumn === status.id ? "ring-2 ring-primary/30 bg-primary/5" : ""
               )}
             >
-              <div className="p-3 flex items-center justify-between sticky top-0 bg-transparent">
+              <div
+                className="p-3 flex items-center justify-between sticky top-0 border-b border-t-2 border-border/40 rounded-t-xl"
+                style={{
+                  backgroundColor: applyHexAlpha(status.color, 0.12),
+                  borderTopColor: status.color,
+                }}
+              >
                 <div className="flex items-center gap-2 min-w-0">
                   <span
                     className="h-2.5 w-2.5 rounded-full"
@@ -1233,12 +1680,28 @@ export default function BoardPageContent({
                   >
                     <Plus className="h-4 w-4" />
                   </button>
-                  <button
-                    className="rounded-md p-1 text-muted-foreground transition hover:bg-muted hover:text-foreground"
-                    type="button"
-                  >
-                    <MoreHorizontal className="h-4 w-4" />
-                  </button>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <button
+                        className="rounded-md p-1 text-muted-foreground transition hover:bg-muted hover:text-foreground"
+                        type="button"
+                      >
+                        <MoreHorizontal className="h-4 w-4" />
+                      </button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end">
+                      <DropdownMenuItem onSelect={() => openStageColorDialog(status)}>
+                        Change color
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        onSelect={() => setStageToDelete(status)}
+                        disabled={totalTasksForStatus > 0 || orderedStatuses.length <= 1}
+                        className="text-destructive focus:text-destructive"
+                      >
+                        Delete stage
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
                 </div>
               </div>
               <div className="flex-1 p-3 flex flex-col gap-3 overflow-y-auto">
@@ -1248,8 +1711,11 @@ export default function BoardPageContent({
                     task={task}
                     assigneeName={getAssigneeName(task)}
                     assigneePerson={getAssigneePerson(task)}
+                    people={people}
                     onEdit={() => openEditTask(task)}
                     onDelete={() => handleDeleteTask(task)}
+                    onOpen={() => openEditTask(task)}
+                    onAssign={handleAssignTask}
                     onDragStart={(event) => handleDragStart(event, task.id)}
                     onDragOver={(event) => handleDragOverTask(event, task)}
                     onDrop={(event) => handleDropOnTask(event, task)}
@@ -1257,7 +1723,7 @@ export default function BoardPageContent({
                     isDragging={draggedTaskId === task.id}
                     isDragOver={dragOverTaskId === task.id}
                     dragPosition={dragOverPosition}
-                    dragDisabled={isFiltering}
+                    dragDisabled={false}
                   />
                 ))}
 
@@ -1280,6 +1746,14 @@ export default function BoardPageContent({
             </div>
           );
         })}
+        <button
+          type="button"
+          onClick={openStageDialog}
+          className="flex h-full w-72 shrink-0 flex-col items-center justify-center rounded-xl border border-dashed border-border/60 bg-muted/20 text-sm font-medium text-muted-foreground transition hover:bg-muted/40"
+        >
+          <Plus className="mb-2 h-4 w-4" />
+          Add stage
+        </button>
       </div>
     </div>
   );
@@ -1306,7 +1780,7 @@ export default function BoardPageContent({
         <div className="overflow-y-auto flex-1">
           {filteredTasks.length > 0 ? (
             filteredTasks.map((task) => {
-              const statusId = normalizeTaskStatus(task.status);
+              const statusId = task.boardStatusId || resolveBoardStatusId(null);
               const statusMeta = getStatusMeta(statusId);
               const assigneeName = getAssigneeName(task);
               const assigneePerson = getAssigneePerson(task);
@@ -1332,9 +1806,14 @@ export default function BoardPageContent({
                       )}
                     />
                     <div className="min-w-0">
-                      <h4 className="text-sm font-medium text-foreground truncate">
+                      <button
+                        type="button"
+                        data-no-drag
+                        onClick={() => openEditTask(task)}
+                        className="text-left text-sm font-medium text-foreground truncate hover:text-primary"
+                      >
                         {task.title}
-                      </h4>
+                      </button>
                       {task.description ? (
                         <p className="text-xs text-muted-foreground truncate max-w-[220px]">
                           {task.description}
@@ -1344,8 +1823,8 @@ export default function BoardPageContent({
                   </div>
 
                   <div className="col-span-2 flex items-center gap-2 text-sm text-muted-foreground">
-                    {getStatusIcon(statusId, statusMeta.color)}
-                    <span className="capitalize">{statusMeta.label}</span>
+                    {getStatusIcon(statusMeta?.category, statusMeta?.color || "currentColor")}
+                    <span className="capitalize">{statusMeta?.label || "Status"}</span>
                   </div>
 
                   <div className="col-span-2">
@@ -1355,7 +1834,13 @@ export default function BoardPageContent({
                   <div className="col-span-2 text-sm text-muted-foreground">{dueLabel}</div>
 
                   <div className="col-span-1 flex justify-end">
-                    <AssigneeAvatar label={assigneeName} person={assigneePerson} />
+                    <AssigneeDropdown
+                      task={task}
+                      assigneeName={assigneeName}
+                      assigneePerson={assigneePerson}
+                      people={people}
+                      onAssign={handleAssignTask}
+                    />
                   </div>
 
                   <div className="col-span-1 flex justify-end">
@@ -1398,6 +1883,45 @@ export default function BoardPageContent({
         }
       >
         <div className="flex flex-wrap items-center gap-3">
+          <div className="flex items-center gap-2">
+            <Select
+              value={activeBoardId || ""}
+              onValueChange={handleBoardChange}
+              disabled={!boards.length}
+            >
+              <SelectTrigger className="w-[180px]">
+                <SelectValue placeholder="Select board" />
+              </SelectTrigger>
+              <SelectContent>
+                {boards.map((board) => (
+                  <SelectItem key={board.id} value={board.id}>
+                    <div className="flex items-center gap-2">
+                      <span
+                        className="h-2 w-2 rounded-full"
+                        style={{ backgroundColor: board.color || "#2563eb" }}
+                      />
+                      <span>{board.name}</span>
+                    </div>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Button variant="outline" size="sm" onClick={openBoardDialog}>
+              <Plus className="mr-2 h-4 w-4" />
+              New board
+            </Button>
+            <div className="flex items-center gap-2">
+              <Palette className="h-4 w-4 text-muted-foreground" />
+              <Input
+                type="color"
+                value={activeBoard?.color || "#2563eb"}
+                onChange={(event) => handleBoardColorChange(event.target.value)}
+                className="h-9 w-12 p-1"
+                disabled={!activeBoard}
+              />
+            </div>
+          </div>
+
           <div className="relative">
             <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
             <Input
@@ -1511,13 +2035,7 @@ export default function BoardPageContent({
             </DropdownMenuContent>
           </DropdownMenu>
 
-          {isFiltering ? (
-            <Badge variant="outline" className="text-[11px]">
-              Clear filters to reorder tasks
-            </Badge>
-          ) : null}
-
-          <Button size="sm" onClick={() => openNewTask("todo")}>
+          <Button size="sm" onClick={() => openNewTask()}>
             <Plus className="mr-2 h-4 w-4" />
             New task
           </Button>
@@ -1536,6 +2054,186 @@ export default function BoardPageContent({
         onSetDueDate={() => setIsSetDueDateDialogOpen(true)}
         onChangeStatus={openStatusDialog}
       />
+
+      <Dialog open={isBoardDialogOpen} onOpenChange={setIsBoardDialogOpen}>
+        <DialogContent className="sm:max-w-[520px]">
+          <DialogHeader>
+            <DialogTitle>Create a new board</DialogTitle>
+            <DialogDescription>
+              Start from a template to get the right columns instantly.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div>
+              <Label htmlFor="board-name">Board name</Label>
+              <Input
+                id="board-name"
+                value={newBoardName}
+                onChange={(event) => setNewBoardName(event.target.value)}
+                placeholder="e.g. Product roadmap"
+              />
+            </div>
+            <div>
+              <Label htmlFor="board-description">Description</Label>
+              <Textarea
+                id="board-description"
+                value={newBoardDescription}
+                onChange={(event) => setNewBoardDescription(event.target.value)}
+                placeholder="Optional context for your team"
+              />
+            </div>
+            <div>
+              <Label>Template</Label>
+              <Select
+                value={newBoardTemplateId}
+                onValueChange={(value) => setNewBoardTemplateId(value)}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Choose a template" />
+                </SelectTrigger>
+                <SelectContent>
+                  {BOARD_TEMPLATES.map((template) => (
+                    <SelectItem key={template.id} value={template.id}>
+                      {template.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {selectedTemplate ? (
+                <p className="mt-2 text-xs text-muted-foreground">
+                  {selectedTemplate.description}
+                </p>
+              ) : null}
+            </div>
+            <div>
+              <Label htmlFor="board-color">Board color</Label>
+              <Input
+                id="board-color"
+                type="color"
+                value={newBoardColor}
+                onChange={(event) => setNewBoardColor(event.target.value)}
+                className="h-10 w-16 p-1"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsBoardDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button onClick={handleCreateBoard}>Create board</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={isStageDialogOpen} onOpenChange={setIsStageDialogOpen}>
+        <DialogContent className="sm:max-w-[420px]">
+          <DialogHeader>
+            <DialogTitle>Add a stage</DialogTitle>
+            <DialogDescription>
+              Create a new column for this board.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div>
+              <Label htmlFor="stage-label">Stage name</Label>
+              <Input
+                id="stage-label"
+                value={newStageLabel}
+                onChange={(event) => setNewStageLabel(event.target.value)}
+                placeholder="e.g. QA Review"
+              />
+            </div>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div>
+                <Label>Category</Label>
+                <Select
+                  value={newStageCategory}
+                  onValueChange={(value) =>
+                    setNewStageCategory(value as BoardStatusCategory)
+                  }
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Pick a category" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="todo">To do</SelectItem>
+                    <SelectItem value="inprogress">In progress</SelectItem>
+                    <SelectItem value="done">Done</SelectItem>
+                    <SelectItem value="recurring">Recurring</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label htmlFor="stage-color">Header color</Label>
+                <Input
+                  id="stage-color"
+                  type="color"
+                  value={newStageColor}
+                  onChange={(event) => setNewStageColor(event.target.value)}
+                  className="h-10 w-16 p-1"
+                />
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsStageDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button onClick={handleCreateStage}>Add stage</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={isStageColorDialogOpen}
+        onOpenChange={(open) => {
+          setIsStageColorDialogOpen(open);
+          if (!open) setStageToEdit(null);
+        }}
+      >
+        <DialogContent className="sm:max-w-[360px]">
+          <DialogHeader>
+            <DialogTitle>Stage color</DialogTitle>
+            <DialogDescription>
+              Update the header color for this stage.
+            </DialogDescription>
+          </DialogHeader>
+          <div>
+            <Label htmlFor="stage-color-update">Color</Label>
+            <Input
+              id="stage-color-update"
+              type="color"
+              value={stageColorDraft}
+              onChange={(event) => setStageColorDraft(event.target.value)}
+              className="h-10 w-16 p-1"
+            />
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setIsStageColorDialogOpen(false)}
+            >
+              Cancel
+            </Button>
+            <Button onClick={handleUpdateStageColor}>Save</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <AlertDialog open={Boolean(stageToDelete)} onOpenChange={() => setStageToDelete(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete stage?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This removes the stage if it has no tasks assigned. You cannot undo this action.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleDeleteStage}>Delete</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <Dialog open={isTaskDialogOpen} onOpenChange={setIsTaskDialogOpen}>
         <DialogContent className="sm:max-w-[480px]">
@@ -1575,9 +2273,9 @@ export default function BoardPageContent({
               <div>
                 <Label>Status</Label>
                 <Select
-                  value={taskDraft.status}
+                  value={taskDraft.statusId}
                   onValueChange={(value) =>
-                    setTaskDraft((prev) => ({ ...prev, status: value as TaskStatus }))
+                    setTaskDraft((prev) => ({ ...prev, statusId: value }))
                   }
                 >
                   <SelectTrigger>
@@ -1695,8 +2393,8 @@ export default function BoardPageContent({
             <div>
               <Label>Status</Label>
               <Select
-                value={bulkStatus}
-                onValueChange={(value) => setBulkStatus(value as TaskStatus)}
+                value={bulkStatusId}
+                onValueChange={(value) => setBulkStatusId(value)}
               >
                 <SelectTrigger>
                   <SelectValue placeholder="Select status" />

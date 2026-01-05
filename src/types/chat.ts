@@ -54,6 +54,8 @@ export interface ExtractedTaskSchema {
   // UI/Client-side state fields
   addedToProjectId?: string | null;
   addedToProjectName?: string | null;
+  addedToBoardId?: string | null;
+  addedToBoardName?: string | null;
   
   // AI-generated content
   researchBrief?: string | null;

@@ -58,11 +58,30 @@ export async function POST(request: Request) {
     },
   });
 
+  const sessionIdList = Array.from(sessionIds);
+  const tasksToRemove = await db
+    .collection<any>("tasks")
+    .find({
+      userId: userIdQuery,
+      sourceSessionType: "meeting",
+      sourceSessionId: { $in: sessionIdList },
+    })
+    .project({ _id: 1 })
+    .toArray();
+  const taskIds = tasksToRemove.map((task) => String(task._id));
+
   const deleteResult = await db.collection<any>("tasks").deleteMany({
     userId: userIdQuery,
     sourceSessionType: "meeting",
-    sourceSessionId: { $in: Array.from(sessionIds) },
+    sourceSessionId: { $in: sessionIdList },
   });
+
+  if (taskIds.length) {
+    await db.collection<any>("boardItems").deleteMany({
+      userId: userIdQuery,
+      taskId: { $in: taskIds },
+    });
+  }
 
   const chatMeetingIds = Array.from(sessionIds);
   const chatIds = Array.from(chatSessionIds);

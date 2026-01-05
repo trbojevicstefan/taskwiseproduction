@@ -1,7 +1,9 @@
 import { NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
 import { getSessionUserId } from "@/lib/server-auth";
+import { buildIdQuery } from "@/lib/mongo-id";
 import { syncTasksForSource } from "@/lib/task-sync";
+import { getWorkspaceIdForUser } from "@/lib/workspace";
 import type { ExtractedTaskSchema } from "@/types/chat";
 
 export async function POST(request: Request) {
@@ -41,15 +43,39 @@ export async function POST(request: Request) {
   }
 
   const db = await getDb();
+  const userIdQuery = buildIdQuery(userId);
+  const workspaceId = await getWorkspaceIdForUser(db, userId);
+  if (sourceSessionType === "chat") {
+    const sessionIdQuery = buildIdQuery(sourceSessionId);
+    const session = await db.collection<any>("chatSessions").findOne({
+      userId: userIdQuery,
+      $or: [{ _id: sessionIdQuery }, { id: sourceSessionId }],
+    });
+    if (session?.sourceMeetingId) {
+      const deleteResult = await db.collection<any>("tasks").deleteMany({
+        userId: userIdQuery,
+        sourceSessionType: "chat",
+        sourceSessionId,
+      });
+      return NextResponse.json({
+        upserted: 0,
+        deleted: deleteResult.deletedCount || 0,
+      });
+    }
+  }
   const result = await syncTasksForSource(
     db,
     tasks as ExtractedTaskSchema[],
     {
       userId,
+      workspaceId,
       sourceSessionId,
       sourceSessionType,
       sourceSessionName,
       origin,
+      taskState:
+        body.taskState ||
+        (sourceSessionType === "chat" ? "suggested" : "active"),
     }
   );
 

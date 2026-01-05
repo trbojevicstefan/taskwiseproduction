@@ -4,6 +4,7 @@ import { getDb } from "@/lib/db";
 import { getSessionUserId } from "@/lib/server-auth";
 import { buildIdQuery } from "@/lib/mongo-id";
 import { normalizePersonNameKey } from "@/lib/transcript-utils";
+import { getWorkspaceIdForUser } from "@/lib/workspace";
 
 const serializeTask = (task: any) => ({
   ...task,
@@ -13,7 +14,7 @@ const serializeTask = (task: any) => ({
   lastUpdated: task.lastUpdated?.toISOString?.() || task.lastUpdated,
 });
 
-export async function GET() {
+export async function GET(request: Request) {
   const userId = await getSessionUserId();
   if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -21,9 +22,19 @@ export async function GET() {
 
   const db = await getDb();
   const userIdQuery = buildIdQuery(userId);
+  const { searchParams } = new URL(request.url);
+  const workspaceId = searchParams.get("workspaceId");
+  const includeSuggested = searchParams.get("includeSuggested") === "true";
+  const filters: Record<string, any> = { userId: userIdQuery };
+  if (workspaceId) {
+    filters.workspaceId = workspaceId;
+  }
+  if (!includeSuggested) {
+    filters.taskState = { $ne: "archived" };
+  }
   const tasks = await db
     .collection<any>("tasks")
-    .find({ userId: userIdQuery })
+    .find(filters)
     .sort({ projectId: 1, parentId: 1, order: 1, createdAt: 1 })
     .toArray();
 
@@ -49,6 +60,12 @@ export async function POST(request: Request) {
     ? normalizePersonNameKey(body.assignee.name)
     : null;
 
+  const db = await getDb();
+  const workspaceId =
+    typeof body.workspaceId === "string" && body.workspaceId
+      ? body.workspaceId
+      : await getWorkspaceIdForUser(db, userId);
+
   const task = {
     _id: randomUUID(),
     title: body.title,
@@ -62,6 +79,7 @@ export async function POST(request: Request) {
     aiSuggested: body.aiSuggested ?? false,
     origin: body.origin || "manual",
     projectId: body.projectId || null,
+    workspaceId,
     userId,
     parentId: body.parentId ?? null,
     order: body.order ?? 0,
@@ -70,11 +88,11 @@ export async function POST(request: Request) {
     sourceSessionName: body.sourceSessionName ?? null,
     sourceSessionType: body.sourceSessionType ?? "task",
     sourceTaskId: body.sourceTaskId ?? null,
+    taskState: body.taskState ?? "active",
     createdAt: now,
     lastUpdated: now,
   };
 
-  const db = await getDb();
   await db.collection<any>("tasks").insertOne(task);
 
   return NextResponse.json(serializeTask(task));

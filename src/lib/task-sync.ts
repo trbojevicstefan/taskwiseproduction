@@ -13,6 +13,8 @@ export interface TaskSyncOptions {
   sourceSessionType: TaskSourceType;
   sourceSessionName?: string | null;
   origin?: TaskOrigin;
+  workspaceId?: string | null;
+  taskState?: "active" | "suggested" | "archived";
 }
 
 export interface TaskSyncResult {
@@ -41,6 +43,7 @@ const buildTaskRecords = (
       records.push({
         _id: task.id,
         userId: options.userId,
+        workspaceId: options.workspaceId ?? null,
         title: task.title,
         description: task.description || "",
         status: task.status || "todo",
@@ -59,6 +62,7 @@ const buildTaskRecords = (
         completionTargets: task.completionTargets ?? null,
         aiSuggested: true,
         origin,
+        taskState: options.taskState ?? "active",
         sourceSessionId: options.sourceSessionId,
         sourceSessionName: options.sourceSessionName ?? null,
         sourceSessionType: options.sourceSessionType,
@@ -90,15 +94,18 @@ export const syncTasksForSource = async (
   const userIdQuery = buildIdQuery(options.userId);
   const sessionIdQuery = buildIdQuery(options.sourceSessionId);
 
-  await Promise.all(
-    records.map(({ _id, ...rest }) =>
-      db.collection("tasks").updateOne(
-        { _id, userId: userIdQuery },
-        { $set: rest, $setOnInsert: { createdAt: now } },
-        { upsert: true }
-      )
-    )
-  );
+  if (records.length) {
+    await db.collection("tasks").bulkWrite(
+      records.map(({ _id, ...rest }) => ({
+        updateOne: {
+          filter: { _id, userId: userIdQuery },
+          update: { $set: rest, $setOnInsert: { createdAt: now } },
+          upsert: true,
+        },
+      })),
+      { ordered: false }
+    );
+  }
 
   const deleteFilter: Record<string, any> = {
     userId: userIdQuery,

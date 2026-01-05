@@ -2,7 +2,12 @@ import { NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
 import { getSessionUserId } from "@/lib/server-auth";
 import { buildIdQuery } from "@/lib/mongo-id";
+import { normalizeTask } from "@/lib/data";
+import { upsertPeopleFromAttendees } from "@/lib/people-sync";
 import { syncTasksForSource } from "@/lib/task-sync";
+import { ensureBoardItemsForTasks } from "@/lib/board-items";
+import { ensureDefaultBoard } from "@/lib/boards";
+import { getWorkspaceIdForUser } from "@/lib/workspace";
 import type { ExtractedTaskSchema } from "@/types/chat";
 
 const serializeMeeting = (meeting: any) => {
@@ -14,6 +19,62 @@ const serializeMeeting = (meeting: any) => {
     createdAt: meeting.createdAt?.toISOString?.() || meeting.createdAt,
     lastActivityAt: meeting.lastActivityAt?.toISOString?.() || meeting.lastActivityAt,
   };
+};
+
+const collectSessionIds = (session: any, fallbackId?: string | null) => {
+  const ids = new Set<string>();
+  if (session?._id) ids.add(String(session._id));
+  if (session?.id) ids.add(String(session.id));
+  if (fallbackId) ids.add(String(fallbackId));
+  return Array.from(ids);
+};
+
+const updateLinkedChatSessions = async (
+  db: any,
+  userId: string,
+  meeting: any,
+  tasks: ExtractedTaskSchema[]
+) => {
+  const meetingIds = collectSessionIds(meeting);
+  const chatFilters: any[] = [];
+  if (meeting?.chatSessionId) {
+    const chatId = String(meeting.chatSessionId);
+    chatFilters.push({ _id: buildIdQuery(chatId) }, { id: chatId });
+  }
+  if (meetingIds.length > 0) {
+    chatFilters.push({ sourceMeetingId: { $in: meetingIds } });
+  }
+  if (!chatFilters.length) return [];
+
+  const userIdQuery = buildIdQuery(userId);
+  const filter = { userId: userIdQuery, $or: chatFilters };
+  const sessions = await db.collection<any>("chatSessions").find(filter).toArray();
+  if (!sessions.length) return [];
+
+  await db.collection<any>("chatSessions").updateMany(filter, {
+    $set: { suggestedTasks: tasks, lastActivityAt: new Date() },
+  });
+  return sessions;
+};
+
+const cleanupChatTasksForSessions = async (
+  db: any,
+  userId: string,
+  sessions: any[]
+) => {
+  if (!sessions.length) return;
+  const sessionIds = new Set<string>();
+  sessions.forEach((session) => {
+    if (session?._id) sessionIds.add(String(session._id));
+    if (session?.id) sessionIds.add(String(session.id));
+  });
+  if (!sessionIds.size) return;
+  const userIdQuery = buildIdQuery(userId);
+  await db.collection<any>("tasks").deleteMany({
+    userId: userIdQuery,
+    sourceSessionType: "chat",
+    sourceSessionId: { $in: Array.from(sessionIds) },
+  });
 };
 
 export async function PATCH(
@@ -29,6 +90,13 @@ export async function PATCH(
   const body = await request.json().catch(() => ({}));
   const { recordingId, recordingIdHash, ...safeBody } = body || {};
   const update = { ...safeBody, lastActivityAt: new Date() };
+  let extractedTasks: ExtractedTaskSchema[] | null = null;
+  if (Array.isArray(safeBody.extractedTasks)) {
+    extractedTasks = safeBody.extractedTasks.map((task: ExtractedTaskSchema) =>
+      normalizeTask(task)
+    );
+    update.extractedTasks = extractedTasks;
+  }
 
   const db = await getDb();
   const idQuery = buildIdQuery(id);
@@ -40,17 +108,52 @@ export async function PATCH(
   await db.collection<any>("meetings").updateOne(filter, { $set: update });
 
   const meeting = await db.collection<any>("meetings").findOne(filter);
-  if (Array.isArray(body.extractedTasks)) {
+  if (extractedTasks) {
     try {
-      await syncTasksForSource(db, body.extractedTasks as ExtractedTaskSchema[], {
+      const workspaceId =
+        meeting?.workspaceId || (await getWorkspaceIdForUser(db, userId));
+      await syncTasksForSource(db, extractedTasks, {
         userId,
+        workspaceId,
         sourceSessionId: String(meeting?._id ?? id),
         sourceSessionType: "meeting",
         sourceSessionName: meeting?.title || body.title || "Meeting",
         origin: "meeting",
+        taskState: "active",
       });
+      if (meeting) {
+        const linkedSessions = await updateLinkedChatSessions(
+          db,
+          userId,
+          meeting,
+          extractedTasks
+        );
+        await cleanupChatTasksForSessions(db, userId, linkedSessions);
+      }
+      if (workspaceId) {
+        const defaultBoard = await ensureDefaultBoard(db, userId, workspaceId);
+        await ensureBoardItemsForTasks(db, {
+          userId,
+          workspaceId,
+          boardId: defaultBoard._id,
+          tasks: extractedTasks,
+        });
+      }
     } catch (error) {
       console.error("Failed to sync meeting tasks after update:", error);
+    }
+  }
+
+  if (meeting && Array.isArray(meeting.attendees) && meeting.attendees.length) {
+    try {
+      await upsertPeopleFromAttendees({
+        db,
+        userId,
+        attendees: meeting.attendees,
+        sourceSessionId: String(meeting._id ?? id),
+      });
+    } catch (error) {
+      console.error("Failed to upsert people from meeting attendees:", error);
     }
   }
   return NextResponse.json(serializeMeeting(meeting));
@@ -123,11 +226,30 @@ export async function DELETE(
   });
 
   if (sessionIds.size > 0) {
+    const sessionIdList = Array.from(sessionIds);
+    const tasksToRemove = await db
+      .collection<any>("tasks")
+      .find({
+        userId: userIdQuery,
+        sourceSessionType: "meeting",
+        sourceSessionId: { $in: sessionIdList },
+      })
+      .project({ _id: 1 })
+      .toArray();
+    const taskIds = tasksToRemove.map((task) => String(task._id));
+
     await db.collection<any>("tasks").deleteMany({
       userId: userIdQuery,
       sourceSessionType: "meeting",
-      sourceSessionId: { $in: Array.from(sessionIds) },
+      sourceSessionId: { $in: sessionIdList },
     });
+
+    if (taskIds.length) {
+      await db.collection<any>("boardItems").deleteMany({
+        userId: userIdQuery,
+        taskId: { $in: taskIds },
+      });
+    }
   }
 
   const chatMeetingIds = Array.from(sessionIds);

@@ -432,54 +432,6 @@ export default function PersonDetailPageContent({ personId }: PersonDetailPageCo
     []
   );
 
-  const removeTaskFromList = useCallback(
-    (tasksToUpdate: ExtractedTaskSchema[], taskId: string): ExtractedTaskSchema[] => {
-      const next: ExtractedTaskSchema[] = [];
-      tasksToUpdate.forEach((taskItem) => {
-        if (taskItem.id === taskId) return;
-        const subtasks = taskItem.subtasks
-          ? removeTaskFromList(taskItem.subtasks, taskId)
-          : taskItem.subtasks;
-        next.push({ ...taskItem, subtasks });
-      });
-      return next;
-    },
-    []
-  );
-
-  const removeTaskByMatcher = useCallback(
-    (
-      tasksToUpdate: ExtractedTaskSchema[],
-      matcher: (task: ExtractedTaskSchema) => boolean
-    ): ExtractedTaskSchema[] => {
-      const next: ExtractedTaskSchema[] = [];
-      tasksToUpdate.forEach((taskItem) => {
-        if (matcher(taskItem)) return;
-        const subtasks = taskItem.subtasks
-          ? removeTaskByMatcher(taskItem.subtasks, matcher)
-          : taskItem.subtasks;
-        next.push({ ...taskItem, subtasks });
-      });
-      return next;
-    },
-    []
-  );
-
-  const removeTasksFromList = useCallback(
-    (tasksToUpdate: ExtractedTaskSchema[], taskIds: Set<string>): ExtractedTaskSchema[] => {
-      const next: ExtractedTaskSchema[] = [];
-      tasksToUpdate.forEach((taskItem) => {
-        if (taskIds.has(taskItem.id)) return;
-        const subtasks = taskItem.subtasks
-          ? removeTasksFromList(taskItem.subtasks, taskIds)
-          : taskItem.subtasks;
-        next.push({ ...taskItem, subtasks });
-      });
-      return next;
-    },
-    []
-  );
-
   const getPersistentTaskId = useCallback((task: Task) => {
     if (task.sourceTaskId) return task.sourceTaskId;
     if (task.id.includes(":")) {
@@ -570,58 +522,23 @@ export default function PersonDetailPageContent({ personId }: PersonDetailPageCo
 
   const handleDeleteTask = async () => {
     if (!taskToDelete) return;
-    const persistentTaskId = getPersistentTaskId(taskToDelete);
-    const matchesExtractedTask = (taskItem: ExtractedTaskSchema) => {
-      if (taskToDelete.sourceTaskId && taskItem.id === taskToDelete.sourceTaskId) return true;
-      if (!taskToDelete.sourceTaskId && taskItem.id === persistentTaskId) return true;
-      if (!taskToDelete.sourceTaskId) {
-        const titleMatch = taskItem.title === taskToDelete.title;
-        const descriptionMatch = (taskItem.description || "") === (taskToDelete.description || "");
-        const dueMatch = (taskItem.dueAt || null) === (taskToDelete.dueAt || null);
-        const assigneeMatch =
-          (taskItem.assigneeName || null) === (taskToDelete.assigneeName || null);
-        return titleMatch && descriptionMatch && dueMatch && assigneeMatch;
-      }
-      return false;
-    };
     try {
-      if (taskToDelete.sourceSessionType === "meeting" && taskToDelete.sourceSessionId) {
-        const meetings = await apiFetch<any[]>("/api/meetings");
-        const meeting = meetings.find((item) => String(item.id) === taskToDelete.sourceSessionId);
-        if (meeting) {
-          const updatedTasks = removeTaskByMatcher(
-            meeting.extractedTasks || [],
-            matchesExtractedTask
-          );
-          await apiFetch(`/api/meetings/${taskToDelete.sourceSessionId}`, {
-            method: "PATCH",
-            body: JSON.stringify({ extractedTasks: updatedTasks }),
-          });
-        }
+      const params = new URLSearchParams();
+      const isSessionTask =
+        taskToDelete.sourceSessionType === "meeting" ||
+        taskToDelete.sourceSessionType === "chat";
+      if (isSessionTask && taskToDelete.sourceSessionId) {
+        params.set("sourceSessionId", taskToDelete.sourceSessionId);
+        params.set("sourceSessionType", taskToDelete.sourceSessionType);
       }
-      if (taskToDelete.sourceSessionType === "chat" && taskToDelete.sourceSessionId) {
-        const sessions = await apiFetch<any[]>("/api/chat-sessions");
-        const session = sessions.find((item) => String(item.id) === taskToDelete.sourceSessionId);
-        if (session) {
-          const updatedTasks = removeTaskByMatcher(
-            session.suggestedTasks || [],
-            matchesExtractedTask
-          );
-          await apiFetch(`/api/chat-sessions/${taskToDelete.sourceSessionId}`, {
-            method: "PATCH",
-            body: JSON.stringify({ suggestedTasks: updatedTasks }),
-          });
-        }
+      if (taskToDelete.sourceTaskId) {
+        params.set("sourceTaskId", taskToDelete.sourceTaskId);
       }
-
-      try {
-        await apiFetch(`/api/tasks/${persistentTaskId}`, { method: "DELETE" });
-      } catch (error: any) {
-        const message = (error as Error)?.message || "";
-        if (!message.toLowerCase().includes("task not found")) {
-          throw error;
-        }
-      }
+      const persistentTaskId = getPersistentTaskId(taskToDelete);
+      const deleteUrl = params.toString()
+        ? `/api/tasks/${persistentTaskId}?${params.toString()}`
+        : `/api/tasks/${persistentTaskId}`;
+      await apiFetch(deleteUrl, { method: "DELETE" });
 
       setTasks((prev) => prev.filter((task) => task.id !== taskToDelete.id));
       toast({ title: "Task Deleted", description: "The task has been removed." });
@@ -649,51 +566,25 @@ export default function PersonDetailPageContent({ personId }: PersonDetailPageCo
   const handleBulkDeleteTasks = async () => {
     if (selectedTasks.length === 0) return;
     try {
-      const meetingTaskGroups = new Map<string, Set<string>>();
-      const chatTaskGroups = new Map<string, Set<string>>();
-      const persistentTaskIds = new Set<string>();
-
-      selectedTasks.forEach((task) => {
-        const persistentId = getPersistentTaskId(task);
-        persistentTaskIds.add(persistentId);
-        const sourceTaskId = task.sourceTaskId || persistentId;
-        if (task.sourceSessionType === "meeting" && task.sourceSessionId) {
-          const set = meetingTaskGroups.get(task.sourceSessionId) || new Set<string>();
-          set.add(sourceTaskId);
-          meetingTaskGroups.set(task.sourceSessionId, set);
-        }
-        if (task.sourceSessionType === "chat" && task.sourceSessionId) {
-          const set = chatTaskGroups.get(task.sourceSessionId) || new Set<string>();
-          set.add(sourceTaskId);
-          chatTaskGroups.set(task.sourceSessionId, set);
-        }
-      });
-
-      for (const [meetingId, taskIds] of meetingTaskGroups.entries()) {
-        const meetings = await apiFetch<any[]>("/api/meetings");
-        const meeting = meetings.find((item) => String(item.id) === meetingId);
-        if (!meeting) continue;
-        const updatedTasks = removeTasksFromList(meeting.extractedTasks || [], taskIds);
-        await apiFetch(`/api/meetings/${meetingId}`, {
-          method: "PATCH",
-          body: JSON.stringify({ extractedTasks: updatedTasks }),
-        });
-      }
-
-      for (const [sessionId, taskIds] of chatTaskGroups.entries()) {
-        const sessions = await apiFetch<any[]>("/api/chat-sessions");
-        const session = sessions.find((item) => String(item.id) === sessionId);
-        if (!session) continue;
-        const updatedTasks = removeTasksFromList(session.suggestedTasks || [], taskIds);
-        await apiFetch(`/api/chat-sessions/${sessionId}`, {
-          method: "PATCH",
-          body: JSON.stringify({ suggestedTasks: updatedTasks }),
-        });
-      }
-
-      for (const taskId of persistentTaskIds) {
-        await apiFetch(`/api/tasks/${taskId}`, { method: "DELETE" }).catch(() => null);
-      }
+      await Promise.all(
+        selectedTasks.map(async (task) => {
+          const params = new URLSearchParams();
+          const isSessionTask =
+            task.sourceSessionType === "meeting" || task.sourceSessionType === "chat";
+          if (isSessionTask && task.sourceSessionId) {
+            params.set("sourceSessionId", task.sourceSessionId);
+            params.set("sourceSessionType", task.sourceSessionType);
+          }
+          if (task.sourceTaskId) {
+            params.set("sourceTaskId", task.sourceTaskId);
+          }
+          const persistentTaskId = getPersistentTaskId(task);
+          const deleteUrl = params.toString()
+            ? `/api/tasks/${persistentTaskId}?${params.toString()}`
+            : `/api/tasks/${persistentTaskId}`;
+          await apiFetch(deleteUrl, { method: "DELETE" });
+        })
+      );
 
       const selectedIdSet = new Set(selectedTasks.map((task) => task.id));
       setTasks((prev) => prev.filter((task) => !selectedIdSet.has(task.id)));

@@ -33,6 +33,7 @@ import {
   DialogHeader,
   DialogTitle,
   DialogDescription,
+  DialogFooter,
   DialogTrigger,
 } from '@/components/ui/dialog';
 import { Textarea } from '@/components/ui/textarea';
@@ -64,10 +65,13 @@ import {
   DropdownMenuSubContent,
 } from "@/components/ui/dropdown-menu";
 import { Logo } from '@/components/ui/logo';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { normalizeTask, addPerson, onPeopleSnapshot, updatePerson } from '@/lib/data';
 import { extractTranscriptAttendees } from '@/lib/transcript-utils';
 import { getBestPersonMatch } from '@/lib/people-matching';
+import { apiFetch } from '@/lib/api';
 import type { Person } from '@/types/person';
+import type { Board } from '@/types/board';
 import { shareTasksNative, formatTasksToText, copyTextToClipboard, exportTasksToCSV, exportTasksToMarkdown, exportTasksToPDF } from '@/lib/exportUtils';
 import AssignPersonDialog from '../planning/AssignPersonDialog';
 import DashboardHeader from '../DashboardHeader';
@@ -372,6 +376,7 @@ export default function ChatPageContent() {
   const { setShowCopyHint } = useUIState();
   const { meetings, createNewMeeting, updateMeeting } = useMeetingHistory();
   const { isSlackConnected, isGoogleTasksConnected, isTrelloConnected } = useIntegrations();
+  const workspaceId = user?.workspace?.id;
 
   const [inputValue, setInputValue] = useState('');
   const [isSendingMessage, setIsSendingMessage] = useState(false);
@@ -401,6 +406,11 @@ export default function ChatPageContent() {
   const [isAssignPersonDialogOpen, setIsAssignPersonDialogOpen] = useState(false);
   const [people, setPeople] = useState<Person[]>([]);
   const [isLoadingPeople, setIsLoadingPeople] = useState(true);
+  const [boards, setBoards] = useState<Board[]>([]);
+  const [isBoardPickerOpen, setIsBoardPickerOpen] = useState(false);
+  const [boardPickerTask, setBoardPickerTask] = useState<ExtractedTaskSchema | null>(null);
+  const [selectedBoardId, setSelectedBoardId] = useState<string>("");
+  const [isAddingToBoard, setIsAddingToBoard] = useState(false);
 
   const [isDiscoveryDialogOpen, setIsDiscoveryDialogOpen] = useState(false);
   const [activeSidePanel, setActiveSidePanel] = useState<'tasks' | 'people' | null>('tasks');
@@ -430,6 +440,28 @@ export default function ChatPageContent() {
   useEffect(() => {
     activeSessionIdRef.current = activeSessionId;
   }, [activeSessionId]);
+
+  useEffect(() => {
+    if (!workspaceId) return;
+    let isActive = true;
+    apiFetch<Board[]>(`/api/workspaces/${workspaceId}/boards`)
+      .then((boardList) => {
+        if (isActive) {
+          setBoards(boardList);
+        }
+      })
+      .catch((error) => {
+        console.error("Failed to load boards:", error);
+        toast({
+          title: "Could not load boards",
+          description: error instanceof Error ? error.message : "Try again in a moment.",
+          variant: "destructive",
+        });
+      });
+    return () => {
+      isActive = false;
+    };
+  }, [toast, workspaceId]);
 
   useEffect(() => {
     if (!chatIdParam) {
@@ -650,6 +682,101 @@ export default function ChatPageContent() {
     [activeSessionId, updateActiveSessionSuggestions, getActiveSession, updateMeeting]
   );
 
+  const markTaskAddedToBoard = useCallback(
+    (
+      tasks: ExtractedTaskSchema[],
+      taskId: string,
+      boardId: string,
+      boardName: string
+    ): ExtractedTaskSchema[] =>
+      tasks.map((task) => {
+        if (task.id === taskId) {
+          return {
+            ...task,
+            addedToBoardId: boardId,
+            addedToBoardName: boardName,
+          };
+        }
+        if (task.subtasks && task.subtasks.length > 0) {
+          return {
+            ...task,
+            subtasks: markTaskAddedToBoard(task.subtasks, taskId, boardId, boardName),
+          };
+        }
+        return task;
+      }),
+    []
+  );
+
+  const handleOpenBoardPicker = useCallback(
+    (task: ExtractedTaskSchema) => {
+      if (!workspaceId) {
+        toast({
+          title: "Workspace not ready",
+          description: "Reconnect and try again.",
+          variant: "destructive",
+        });
+        return;
+      }
+      if (!boards.length) {
+        toast({
+          title: "No boards available",
+          description: "Create a board first, then add tasks.",
+          variant: "destructive",
+        });
+        return;
+      }
+      setBoardPickerTask(task);
+      setSelectedBoardId(task.addedToBoardId || boards[0]?.id || "");
+      setIsBoardPickerOpen(true);
+    },
+    [boards, toast, workspaceId]
+  );
+
+  const handleConfirmAddToBoard = useCallback(async () => {
+    if (!boardPickerTask || !workspaceId || !selectedBoardId) return;
+    setIsAddingToBoard(true);
+    try {
+      await apiFetch(
+        `/api/workspaces/${workspaceId}/boards/${selectedBoardId}/items`,
+        {
+          method: "POST",
+          body: JSON.stringify({ taskId: boardPickerTask.id }),
+        }
+      );
+
+      const boardName =
+        boards.find((board) => board.id === selectedBoardId)?.name || "Board";
+      const updatedTasks = markTaskAddedToBoard(
+        suggestedTasks,
+        boardPickerTask.id,
+        selectedBoardId,
+        boardName
+      );
+      applyTaskUpdate(updatedTasks, { skipHistory: true });
+      setIsBoardPickerOpen(false);
+      setBoardPickerTask(null);
+    } catch (error) {
+      console.error("Failed to add task to board:", error);
+      toast({
+        title: "Could not add task",
+        description: error instanceof Error ? error.message : "Try again in a moment.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsAddingToBoard(false);
+    }
+  }, [
+    applyTaskUpdate,
+    boardPickerTask,
+    boards,
+    markTaskAddedToBoard,
+    selectedBoardId,
+    suggestedTasks,
+    toast,
+    workspaceId,
+  ]);
+
   const resetTaskHistory = useCallback((tasks: ExtractedTaskSchema[]) => {
     setUndoStack([]);
     setRedoStack([]);
@@ -767,7 +894,7 @@ export default function ChatPageContent() {
   const countUnaddedTasksRecursive = (tasks: ExtractedTaskSchema[]): number => {
       let count = 0;
       tasks.forEach(task => {
-          if (!task.addedToProjectId) count++;
+          if (!task.addedToBoardId) count++;
           if (task.subtasks) count += countUnaddedTasksRecursive(task.subtasks);
       });
       return count;
@@ -1975,6 +2102,7 @@ export default function ChatPageContent() {
                             onDeleteTask={() => dismissSuggestion(task.id)}
                             onSimplifyTask={() => setIsSimplifyConfirmOpen(true)}
                             onAssignPerson={() => {}}
+                            onAddToBoard={handleOpenBoardPicker}
                             getCheckboxState={getCheckboxState}
                             isProcessing={isProcessingAiAction}
                             taskBeingProcessedId={null}
@@ -1999,6 +2127,7 @@ export default function ChatPageContent() {
                       onDeleteTask={() => dismissSuggestion(task.id)}
                       onSimplifyTask={() => setIsSimplifyConfirmOpen(true)}
                       onAssignPerson={() => {}}
+                      onAddToBoard={handleOpenBoardPicker}
                       getCheckboxState={getCheckboxState}
                       isProcessing={isProcessingAiAction}
                       taskBeingProcessedId={null}
@@ -2406,6 +2535,63 @@ export default function ChatPageContent() {
         onClose={() => setIsSelectionViewVisible(false)}
         tasks={selectedTasks}
       />
+
+      <Dialog
+        open={isBoardPickerOpen}
+        onOpenChange={(open) => {
+          setIsBoardPickerOpen(open);
+          if (!open) {
+            setBoardPickerTask(null);
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-[420px]">
+          <DialogHeader>
+            <DialogTitle>Add task to a board</DialogTitle>
+            <DialogDescription>
+              Choose where to promote this task.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <p className="text-sm text-muted-foreground">
+              {boardPickerTask?.title || "Task"}
+            </p>
+            <Select
+              value={selectedBoardId}
+              onValueChange={(value) => setSelectedBoardId(value)}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="Select a board" />
+              </SelectTrigger>
+              <SelectContent>
+                {boards.map((board) => (
+                  <SelectItem key={board.id} value={board.id}>
+                    {board.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsBoardPickerOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              onClick={handleConfirmAddToBoard}
+              disabled={isAddingToBoard || !selectedBoardId}
+            >
+              {isAddingToBoard ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Adding
+                </>
+              ) : (
+                "Add to board"
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <TaskDetailDialog
         isOpen={isTaskDetailDialogVisible}
