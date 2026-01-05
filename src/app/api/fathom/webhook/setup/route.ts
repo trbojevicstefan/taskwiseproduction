@@ -9,6 +9,7 @@ import {
   getValidFathomAccessToken,
 } from "@/lib/fathom";
 import { findUserById, updateUserById } from "@/lib/db/users";
+import { logFathomIntegration } from "@/lib/fathom-logs";
 
 export async function POST() {
   const userId = await getSessionUserId();
@@ -36,7 +37,17 @@ export async function POST() {
 
   try {
     const accessToken = await getValidFathomAccessToken(userId);
-    await deleteManagedFathomWebhooks(accessToken);
+    try {
+      await deleteManagedFathomWebhooks(accessToken);
+    } catch (error) {
+      await logFathomIntegration(
+        userId,
+        "warn",
+        "webhook.cleanup",
+        "Failed to delete existing Fathom webhooks before setup.",
+        { error: error instanceof Error ? error.message : String(error) }
+      );
+    }
     const result = await ensureFathomWebhook(userId, accessToken, webhookToken);
     console.log("Fathom webhook setup result", {
       userId,

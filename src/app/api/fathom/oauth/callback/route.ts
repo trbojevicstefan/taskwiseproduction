@@ -119,8 +119,19 @@ export async function GET(request: Request) {
     });
 
     let webhookStatus = "unknown";
+    let webhookErrorMessage: string | null = null;
     try {
-      await deleteManagedFathomWebhooks(payload.access_token);
+      try {
+        await deleteManagedFathomWebhooks(payload.access_token);
+      } catch (cleanupError) {
+        await logFathomIntegration(
+          userId,
+          "warn",
+          "webhook.cleanup",
+          "Failed to delete existing Fathom webhooks before setup.",
+          { error: cleanupError instanceof Error ? cleanupError.message : String(cleanupError) }
+        );
+      }
       const result = await ensureFathomWebhook(
         userId,
         payload.access_token,
@@ -128,8 +139,11 @@ export async function GET(request: Request) {
       );
       webhookStatus = result.status;
     } catch (webhookError) {
+      const message =
+        webhookError instanceof Error ? webhookError.message : String(webhookError);
       console.error("Fathom webhook setup failed:", webhookError);
       webhookStatus = "failed";
+      webhookErrorMessage = message;
     }
 
     await logFathomIntegration(
@@ -143,6 +157,7 @@ export async function GET(request: Request) {
     return redirectToSettings({
       fathom_success: "true",
       fathom_webhook: webhookStatus,
+      ...(webhookErrorMessage ? { fathom_webhook_error: webhookErrorMessage } : {}),
     });
   } catch (err) {
     console.error("Fathom OAuth callback error:", err);

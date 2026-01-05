@@ -188,6 +188,7 @@ export default function SettingsPageContent() {
       const googleSuccess = searchParams.get('google_success');
       const fathomSuccess = searchParams.get('fathom_success');
       const fathomWebhook = searchParams.get('fathom_webhook');
+      const fathomWebhookError = searchParams.get('fathom_webhook_error');
       const error = searchParams.get('error');
       const message = searchParams.get('message');
 
@@ -230,7 +231,9 @@ export default function SettingsPageContent() {
         if (fathomWebhook === 'failed') {
           toast({
             title: "Fathom Webhook Not Created",
-            description: "Please add the webhook URL in Fathom to enable automatic imports.",
+            description:
+              fathomWebhookError ||
+              "Please add the webhook URL in Fathom to enable automatic imports.",
             variant: "destructive",
           });
         }
