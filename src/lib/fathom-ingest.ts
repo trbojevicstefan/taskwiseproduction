@@ -58,6 +58,14 @@ const resolveDetailLevel = (user: DbUser): "light" | "medium" | "detailed" => {
   return "medium";
 };
 
+const resolveCompletionMatchThreshold = (user: DbUser): number => {
+  const value = user.completionMatchThreshold;
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return Math.min(0.95, Math.max(0.4, value));
+  }
+  return 0.6;
+};
+
 const resolveSummaryText = (payload: any, summaryPayload: any) => {
   const payloadSummary =
     payload?.default_summary?.markdown_formatted ||
@@ -418,6 +426,8 @@ export const ingestFathomMeeting = async ({
         userId,
         transcript: transcriptText,
         attendees: uniquePeople,
+        workspaceId,
+        minMatchRatio: resolveCompletionMatchThreshold(user),
       });
 
       const shouldAutoApprove = Boolean(user.autoApproveCompletedTasks);
@@ -698,6 +708,8 @@ export const ingestFathomMeeting = async ({
     userId,
     transcript: transcriptText,
     attendees: uniquePeople,
+    workspaceId,
+    minMatchRatio: resolveCompletionMatchThreshold(user),
   });
 
   const shouldAutoApprove = Boolean(user.autoApproveCompletedTasks);

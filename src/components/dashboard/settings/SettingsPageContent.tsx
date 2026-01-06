@@ -154,6 +154,7 @@ export default function SettingsPageContent() {
   const [isSavingWorkspace, setIsSavingWorkspace] = useState(false);
   const [hasCopied, setHasCopied] = useState(false);
   const [autoApproveCompleted, setAutoApproveCompleted] = useState(false);
+  const [completionMatchThreshold, setCompletionMatchThreshold] = useState(60);
   
   const [isAvatarDialogOpen, setIsAvatarDialogOpen] = useState(false);
   const [selectedAvatarUrl, setSelectedAvatarUrl] = useState('');
@@ -263,6 +264,11 @@ export default function SettingsPageContent() {
       setSelectedAvatarUrl(user.photoURL || '');
       setWorkspaceName(user.workspace?.name || '');
       setAutoApproveCompleted(Boolean(user.autoApproveCompletedTasks));
+      const thresholdValue =
+        typeof user.completionMatchThreshold === "number"
+          ? Math.round(user.completionMatchThreshold * 100)
+          : 60;
+      setCompletionMatchThreshold(thresholdValue);
     }
   }, [user]);
 
@@ -317,6 +323,31 @@ export default function SettingsPageContent() {
       toast({
         title: "Update Failed",
         description: "Could not update completion review preference.",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleCompletionThresholdCommit = async (values: number[]) => {
+    const nextValue = values[0];
+    if (typeof nextValue !== "number") return;
+    setCompletionMatchThreshold(nextValue);
+    try {
+      await updateUserProfile({ completionMatchThreshold: nextValue / 100 }, true);
+      toast({
+        title: "Completion Threshold Updated",
+        description: `Minimum match set to ${nextValue}%.`,
+      });
+    } catch (error) {
+      console.error("Failed to update completion threshold:", error);
+      const fallback =
+        typeof user?.completionMatchThreshold === "number"
+          ? Math.round(user.completionMatchThreshold * 100)
+          : 60;
+      setCompletionMatchThreshold(fallback);
+      toast({
+        title: "Update Failed",
+        description: "Could not update completion threshold.",
         variant: "destructive",
       });
     }
@@ -622,6 +653,32 @@ export default function SettingsPageContent() {
                         onCheckedChange={handleAutoApproveToggle}
                         aria-label="Auto-approve completed tasks"
                       />
+                    </div>
+                    <div className="mt-6 space-y-3">
+                      <div className="flex items-center justify-between gap-4">
+                        <div className="space-y-1">
+                          <Label className="text-sm font-medium">Completion match threshold</Label>
+                          <p className="text-xs text-muted-foreground">
+                            Minimum wording overlap required to suggest a completion.
+                          </p>
+                        </div>
+                        <span className="text-sm font-semibold text-foreground">
+                          {completionMatchThreshold}%
+                        </span>
+                      </div>
+                      <Slider
+                        min={40}
+                        max={95}
+                        step={5}
+                        value={[completionMatchThreshold]}
+                        onValueChange={([value]) => setCompletionMatchThreshold(value)}
+                        onValueCommit={handleCompletionThresholdCommit}
+                        aria-label="Completion match threshold"
+                      />
+                      <div className="flex items-center justify-between text-xs text-muted-foreground">
+                        <span>40%</span>
+                        <span>95%</span>
+                      </div>
                     </div>
                   </CardContent>
                 </Card>

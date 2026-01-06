@@ -27,6 +27,7 @@ export interface AppUser extends Person {
   photoURL?: string | null;
   taskGranularityPreference?: 'light' | 'medium' | 'detailed';
   autoApproveCompletedTasks?: boolean;
+  completionMatchThreshold?: number;
   googleConnected?: boolean;
   googleEmail?: string | null;
 }

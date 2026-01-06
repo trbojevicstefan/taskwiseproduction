@@ -40,6 +40,14 @@ type CalendarEvent = {
 };
 
 const priorityRank: Record<string, number> = { high: 0, medium: 1, low: 2 };
+const priorityIcons: Record<string, string> = {
+  high: "🔴",
+  medium: "🟠",
+  low: "🟡",
+};
+const MEETING_GUIDE_TEXT =
+  "Meeting Guide: We'll review Taskwise open items and go around the room for status updates.";
+const MEETING_GUIDE_TRIGGER = 'Say "Taskwise open items" to trigger the live check.';
 
 const getAttendeeKey = (attendee: { email?: string | null; name?: string | null }) =>
   attendee.email || attendee.name || "";
@@ -56,6 +64,26 @@ const getEmailOptionsForPerson = (person: Person) => {
     });
   }
   return Array.from(options);
+};
+
+const dedupePeopleById = (items: Person[]) => {
+  const map = new Map<string, Person>();
+  items.forEach((person) => {
+    if (!map.has(person.id)) {
+      map.set(person.id, person);
+    }
+  });
+  return Array.from(map.values());
+};
+
+const getPriorityIcon = (priority?: string | null) =>
+  priorityIcons[priority || ""] || priorityIcons.medium;
+
+const formatDueDate = (value?: string | Date | null) => {
+  if (!value) return null;
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return format(date, "MMM d");
 };
 
 const sortTasks = (tasks: Task[]) => {
@@ -189,12 +217,14 @@ export default function MeetingPlannerPageContent() {
     const loadTasks = async () => {
       const selected = isSchedulingNew
         ? people.filter((person) => scheduleSelectedPeople.has(person.id))
-        : attendeeMatches
-            .filter(({ attendee, match }) => {
-              const key = getAttendeeKey(attendee);
-              return key && selectedAttendees.has(key) && match?.person?.id;
-            })
-            .map(({ match }) => match!.person);
+        : dedupePeopleById(
+            attendeeMatches
+              .filter(({ attendee, match }) => {
+                const key = getAttendeeKey(attendee);
+                return key && selectedAttendees.has(key) && match?.person?.id;
+              })
+              .map(({ match }) => match!.person)
+          );
 
       if (selected.length === 0) {
         setPersonTasks({});
@@ -220,6 +250,13 @@ export default function MeetingPlannerPageContent() {
     loadTasks();
   }, [attendeeMatches, selectedAttendees, isSchedulingNew, people, scheduleSelectedPeople]);
 
+  const agendaMeetingTitle = useMemo(() => {
+    if (!selectedEvent && !isSchedulingNew) return "";
+    return isSchedulingNew
+      ? scheduleTitle || "New Meeting"
+      : selectedEvent?.title || "Meeting";
+  }, [selectedEvent, isSchedulingNew, scheduleTitle]);
+
   const scheduleSelectedPeopleList = useMemo(
     () => people.filter((person) => scheduleSelectedPeople.has(person.id)),
     [people, scheduleSelectedPeople]
@@ -244,34 +281,29 @@ export default function MeetingPlannerPageContent() {
       }));
       return [...peopleSections, ...manualSections];
     }
-    return attendeeMatches
-      .filter(({ attendee, match }) => {
-        const key = getAttendeeKey(attendee);
-        return key && selectedAttendees.has(key) && match?.person;
-      })
-      .map(({ attendee, match }) => {
-        const person = match!.person;
-        const tasks = sortTasks(personTasks[person.id] || []);
-        return {
+    const sections = new Map<string, { label: string; person: Person; tasks: Task[] }>();
+    attendeeMatches.forEach(({ attendee, match }) => {
+      const key = getAttendeeKey(attendee);
+      if (!key || !selectedAttendees.has(key) || !match?.person) return;
+      const person = match.person;
+      if (!sections.has(person.id)) {
+        sections.set(person.id, {
           label: person.name || attendee.name || attendee.email || "Attendee",
           person,
-          tasks,
-        };
-      });
+          tasks: sortTasks(personTasks[person.id] || []),
+        });
+      }
+    });
+    return Array.from(sections.values());
   }, [attendeeMatches, selectedAttendees, personTasks, isSchedulingNew, scheduleSelectedPeopleList, scheduleManualAttendees]);
 
   const agendaText = useMemo(() => {
-    if (!selectedEvent && !isSchedulingNew) return "";
-    const meetingTitle = isSchedulingNew
-      ? scheduleTitle || "New Meeting"
-      : selectedEvent?.title || "Meeting";
+    if (!agendaMeetingTitle) return "";
     const lines: string[] = [];
-    lines.push(`Taskwise Agenda: ${meetingTitle}`);
+    lines.push(`Taskwise Agenda: ${agendaMeetingTitle}`);
     lines.push("");
-    lines.push(
-      `Meeting Guide: We'll review Taskwise open items and go around the room for status updates.`
-    );
-    lines.push(`Say "Taskwise open items" to trigger the live check.`);
+    lines.push(MEETING_GUIDE_TEXT);
+    lines.push(MEETING_GUIDE_TRIGGER);
     lines.push("");
     agendaSections.forEach((section) => {
       lines.push(section.label);
@@ -279,14 +311,17 @@ export default function MeetingPlannerPageContent() {
         lines.push("- No open tasks found.");
       } else {
         section.tasks.forEach((task) => {
-          const due = task.dueAt ? format(new Date(task.dueAt as string), "MMM d") : "No due date";
-          lines.push(`- ${task.title} - ${task.priority} - ${due}`);
+          const due = formatDueDate(task.dueAt);
+          const priorityIcon = getPriorityIcon(task.priority);
+          const parts = [`${task.title} ${priorityIcon}`];
+          if (due) parts.push(due);
+          lines.push(`- ${parts.join(" - ")}`);
         });
       }
       lines.push("");
     });
     return lines.join("\n");
-  }, [selectedEvent, agendaSections, isSchedulingNew, scheduleTitle]);
+  }, [agendaMeetingTitle, agendaSections]);
 
   const recentMeetings = useMemo(() => {
     if (!selectedEvent && !isSchedulingNew) return [];
@@ -604,7 +639,7 @@ export default function MeetingPlannerPageContent() {
                     return (
                       <button
                         key={event.id}
-                        className={`w-full rounded-lg border p-3 text-left transition ${
+                        className={`w-full rounded-lg border p-3 text-left transition overflow-hidden ${
                           isSelected ? "border-primary bg-primary/10" : "border-border"
                         }`}
                         onClick={() => {
@@ -614,9 +649,13 @@ export default function MeetingPlannerPageContent() {
                       >
                         <div className="flex items-center justify-between gap-2">
                           <div className="min-w-0">
-                            <p className="text-sm font-semibold truncate">{event.title}</p>
-                            <p className="text-xs text-muted-foreground truncate">
-                              {event.startTime ? format(new Date(event.startTime), "MMM d, h:mm a") : "No time"}
+                            <p className="text-sm font-semibold leading-snug break-words">
+                              {event.title}
+                            </p>
+                            <p className="text-xs text-muted-foreground break-words">
+                              {event.startTime
+                                ? format(new Date(event.startTime), "MMM d, h:mm a")
+                                : "No time"}
                             </p>
                           </div>
                           <Video className="h-4 w-4 text-muted-foreground" />
@@ -818,6 +857,26 @@ export default function MeetingPlannerPageContent() {
               )}
               {selectedEvent && !isSchedulingNew && (
                 <>
+                  <div className="flex items-center justify-between gap-3 rounded-lg border bg-muted/20 p-3">
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold leading-snug break-words">
+                        {selectedEvent.title}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        {selectedEvent.startTime
+                          ? format(new Date(selectedEvent.startTime), "MMM d, h:mm a")
+                          : "No time"}
+                      </p>
+                    </div>
+                    {selectedEvent.hangoutLink && (
+                      <Button asChild size="sm" className="shrink-0">
+                        <a href={selectedEvent.hangoutLink} target="_blank" rel="noreferrer">
+                          <Video className="mr-2 h-4 w-4" />
+                          Join
+                        </a>
+                      </Button>
+                    )}
+                  </div>
                   <div className="space-y-3">
                     <h4 className="text-sm font-semibold">Attendees</h4>
                     {(selectedEvent.attendees || []).map((attendee) => {
@@ -876,12 +935,15 @@ export default function MeetingPlannerPageContent() {
                         </div>
                         <ul className="mt-2 space-y-1 text-xs text-muted-foreground">
                           {section.tasks.length === 0 && <li>No open tasks.</li>}
-                          {section.tasks.map((task) => (
-                            <li key={task.id}>
-                              {task.title} - {task.priority} - 
-                              {task.dueAt ? format(new Date(task.dueAt as string), "MMM d") : "No due date"}
-                            </li>
-                          ))}
+                          {section.tasks.map((task) => {
+                            const due = formatDueDate(task.dueAt);
+                            return (
+                              <li key={task.id}>
+                                {task.title} {getPriorityIcon(task.priority)}
+                                {due ? ` - ${due}` : ""}
+                              </li>
+                            );
+                          })}
                         </ul>
                       </div>
                     ))}
@@ -900,7 +962,50 @@ export default function MeetingPlannerPageContent() {
               <CardDescription>Share this with the organizer or update the meeting description.</CardDescription>
             </CardHeader>
             <CardContent className="flex-1 flex flex-col gap-4">
-              <Textarea value={agendaText} readOnly rows={14} className="flex-1 resize-none" />
+              <ScrollArea className="flex-1 rounded-lg border bg-muted/20">
+                <div className="p-4 text-sm">
+                  {!agendaMeetingTitle ? (
+                    <p className="text-sm text-muted-foreground">
+                      Select a meeting to preview the agenda.
+                    </p>
+                  ) : (
+                    <div className="space-y-4">
+                      <div className="space-y-2">
+                        <p className="text-lg font-semibold break-words">{`Taskwise Agenda: ${agendaMeetingTitle}`}</p>
+                        <p className="text-sm italic text-muted-foreground">{MEETING_GUIDE_TEXT}</p>
+                        <p className="text-sm italic text-muted-foreground">{MEETING_GUIDE_TRIGGER}</p>
+                      </div>
+                      <div className="space-y-4">
+                        {agendaSections.map((section) => (
+                          <div key={section.person.id} className="space-y-2">
+                            <p className="text-sm font-semibold">{section.label}</p>
+                            {section.tasks.length === 0 ? (
+                              <p className="text-xs text-muted-foreground">No open tasks found.</p>
+                            ) : (
+                              <ul className="space-y-2">
+                                {section.tasks.map((task) => {
+                                  const due = formatDueDate(task.dueAt);
+                                  return (
+                                    <li key={task.id} className="flex items-start gap-2">
+                                      <span className="mt-0.5 text-sm">{getPriorityIcon(task.priority)}</span>
+                                      <div className="flex-1">
+                                        <p className="text-sm leading-snug">{task.title}</p>
+                                      </div>
+                                      {due && (
+                                        <span className="text-xs text-muted-foreground">{due}</span>
+                                      )}
+                                    </li>
+                                  );
+                                })}
+                              </ul>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </ScrollArea>
               <div className="flex flex-wrap gap-2">
                 <Button variant="outline" onClick={handleCopyAgenda} disabled={!agendaText}>
                   <Clipboard className="mr-2 h-4 w-4" />

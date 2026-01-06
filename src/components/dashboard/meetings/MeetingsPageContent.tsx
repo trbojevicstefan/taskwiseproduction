@@ -719,6 +719,7 @@ export function MeetingDetailSheet({
     const [filterByPerson, setFilterByPerson] = useState<string>('all');
     const [isDeleteConfirmOpen, setIsDeleteConfirmOpen] = useState(false);
     const [isResetConfirmOpen, setIsResetConfirmOpen] = useState(false);
+    const [isRescanLoading, setIsRescanLoading] = useState(false);
     const [isEditingTitle, setIsEditingTitle] = useState(false);
     const [editableTitle, setEditableTitle] = useState("");
     const [selectedTaskIds, setSelectedTaskIds] = useState<Set<string>>(new Set());
@@ -1313,6 +1314,41 @@ export function MeetingDetailSheet({
         setIsResetConfirmOpen(false);
     };
 
+    const handleRescanTasks = async () => {
+        if (!meeting || isRescanLoading) return;
+        setIsRescanLoading(true);
+        try {
+            const result = await apiFetch<{
+              stats?: {
+                newTasksAdded?: number;
+                completionUpdates?: number;
+                autoApproved?: boolean;
+              };
+            }>(`/api/meetings/${meeting.id}/rescan`, {
+              method: "POST",
+              body: JSON.stringify({ mode: "both" }),
+            });
+            await refreshMeetings();
+            const newTasksAdded = result?.stats?.newTasksAdded ?? 0;
+            const completionUpdates = result?.stats?.completionUpdates ?? 0;
+            const autoApproved = Boolean(result?.stats?.autoApproved);
+            const completionLabel =
+              completionUpdates > 0
+                ? `${completionUpdates} ${autoApproved ? "completed" : "flagged"}`
+                : "No completions found";
+            toast({
+              title: "Rescan Complete",
+              description: `Added ${newTasksAdded} task(s). ${completionLabel}.`,
+            });
+        } catch (error) {
+            const message =
+              error instanceof Error ? error.message : "Could not rescan meeting.";
+            toast({ title: "Rescan Failed", description: message, variant: "destructive" });
+        } finally {
+            setIsRescanLoading(false);
+        }
+    };
+
     const handleSaveTitle = async () => {
       if (!meeting || !editableTitle.trim()) {
         toast({title: "Title cannot be empty", variant: "destructive"});
@@ -1794,6 +1830,20 @@ export function MeetingDetailSheet({
                             <Button variant="ghost" size="icon" className="h-8 w-8 ml-auto"><MoreHorizontal className="h-4 w-4"/></Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
+                            <DropdownMenuItem
+                              onSelect={(e) => {
+                                e.preventDefault();
+                                void handleRescanTasks();
+                              }}
+                              disabled={isRescanLoading}
+                            >
+                                {isRescanLoading ? (
+                                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                ) : (
+                                  <Sparkles className="mr-2 h-4 w-4" />
+                                )}
+                                <span>{isRescanLoading ? "Rescanning Tasks" : "Rescan Tasks"}</span>
+                            </DropdownMenuItem>
                             <DropdownMenuItem onSelect={() => setIsResetConfirmOpen(true)}>
                                 <RefreshCw className="mr-2 h-4 w-4" />
                                 <span>Reset to Initial State</span>

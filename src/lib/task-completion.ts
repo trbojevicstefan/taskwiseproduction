@@ -125,25 +125,44 @@ const candidateKeyForTask = (title: string, assigneeKey: string) => {
   return `${normalizedTitle}|${assigneeKey}`;
 };
 
-const extractCandidateTokens = (candidate: CompletionCandidate) => {
-  const base = `${candidate.title || ""} ${candidate.description || ""}`;
-  const normalized = normalizeTitleKey(base);
-  return normalized
+const toTokens = (value: string) =>
+  normalizeTitleKey(value)
     .split(" ")
     .map((token) => token.trim())
     .filter((token) => token.length > 2 && !STOP_WORDS.has(token));
+
+const extractCandidateTokens = (candidate: CompletionCandidate) => {
+  const titleTokens = toTokens(candidate.title || "");
+  if (titleTokens.length >= 3) return titleTokens;
+  const base = `${candidate.title || ""} ${candidate.description || ""}`;
+  return toTokens(base);
+};
+
+const buildTranscriptTokenSet = (transcript: string) =>
+  new Set(toTokens(transcript));
+
+const matchRatio = (tokens: string[], transcriptTokens: Set<string>) => {
+  if (!tokens.length) return 0;
+  const matched = tokens.filter((token) => transcriptTokens.has(token)).length;
+  return matched / tokens.length;
 };
 
 const filterCandidatesByTranscript = (
   candidates: CompletionCandidate[],
-  transcript: string,
-  openItemsTrigger: boolean
+  transcriptTokens: Set<string>,
+  minMatchRatio = 0.6
 ) => {
-  if (openItemsTrigger) return candidates;
-  const transcriptLower = transcript.toLowerCase();
-  return candidates.filter((candidate) =>
-    extractCandidateTokens(candidate).some((token) => transcriptLower.includes(token))
-  );
+  return candidates
+    .map((candidate) => {
+      const tokens = extractCandidateTokens(candidate);
+      return {
+        candidate,
+        score: matchRatio(tokens, transcriptTokens),
+      };
+    })
+    .filter((item) => item.score >= minMatchRatio)
+    .sort((a, b) => b.score - a.score)
+    .map((item) => item.candidate);
 };
 
 const upsertCandidate = (
@@ -217,11 +236,17 @@ export const buildCompletionSuggestions = async ({
   transcript,
   attendees,
   excludeMeetingId,
+  requireAttendeeMatch = true,
+  minMatchRatio = 0.6,
+  workspaceId,
 }: {
   userId: string;
   transcript: string;
   attendees: Array<{ name: string; email?: string | null }>;
   excludeMeetingId?: string;
+  requireAttendeeMatch?: boolean;
+  minMatchRatio?: number;
+  workspaceId?: string | null;
 }): Promise<ExtractedTaskSchema[]> => {
   if (!userId || !transcript) return [];
 
@@ -231,10 +256,12 @@ export const buildCompletionSuggestions = async ({
   const attendeeEmails = new Set(
     attendees.map((person) => normalizeEmail(person.email)).filter(Boolean)
   );
-  const hasAttendees = attendeeNames.size > 0 || attendeeEmails.size > 0;
+  const hasAttendees =
+    requireAttendeeMatch && (attendeeNames.size > 0 || attendeeEmails.size > 0);
 
   const openItemsTrigger = OPEN_ITEMS_TRIGGER.test(transcript);
-  let allowUnassigned = openItemsTrigger || !hasAttendees;
+  let allowUnassigned = openItemsTrigger || !hasAttendees || !requireAttendeeMatch;
+  const ratioThreshold = Math.min(0.95, Math.max(0.4, minMatchRatio));
   const db = await getDb();
   const userIdQuery = buildIdQuery(userId);
   const shouldIncludeAssignee = (
@@ -253,20 +280,46 @@ export const buildCompletionSuggestions = async ({
     );
   };
 
+  const workspaceFilter =
+    workspaceId && workspaceId.trim()
+      ? {
+          $or: [
+            { workspaceId },
+            { workspaceId: null },
+            { workspaceId: { $exists: false } },
+          ],
+        }
+      : null;
+
+  const taskFilters: Record<string, any> = {
+    userId: userIdQuery,
+    status: { $ne: "done" },
+  };
+  if (workspaceFilter) {
+    taskFilters.$and = [workspaceFilter];
+  }
   const tasks = await db
     .collection<any>("tasks")
-    .find({ userId: userIdQuery, status: { $ne: "done" } })
+    .find(taskFilters)
     .toArray();
 
+  const meetingFilters: Record<string, any> = { userId: userIdQuery };
+  if (workspaceFilter) {
+    meetingFilters.$and = [workspaceFilter];
+  }
   const meetings = await db
     .collection<any>("meetings")
-    .find({ userId: userIdQuery })
+    .find(meetingFilters)
     .project({ _id: 1, title: 1, extractedTasks: 1 })
     .toArray();
 
+  const chatFilters: Record<string, any> = { userId: userIdQuery };
+  if (workspaceFilter) {
+    chatFilters.$and = [workspaceFilter];
+  }
   const chatSessions = await db
     .collection<any>("chatSessions")
-    .find({ userId: userIdQuery })
+    .find(chatFilters)
     .project({ _id: 1, title: 1, suggestedTasks: 1 })
     .toArray();
 
@@ -390,25 +443,25 @@ export const buildCompletionSuggestions = async ({
     return candidates;
   };
 
-  let candidates = buildCandidates(allowUnassigned);
+  let candidates = buildCandidates(allowUnassigned, requireAttendeeMatch);
   if (!candidates.size && hasAttendees) {
     allowUnassigned = true;
     candidates = buildCandidates(true, false);
   }
 
   const allCandidates = Array.from(candidates.values());
-  const filteredCandidates = filterCandidatesByTranscript(
+  const transcriptTokens = buildTranscriptTokenSet(transcript);
+  const candidateList = filterCandidatesByTranscript(
     allCandidates,
-    transcript,
-    openItemsTrigger
+    transcriptTokens,
+    ratioThreshold
   );
-  const candidateList = filteredCandidates.length ? filteredCandidates : allCandidates;
 
   if (!candidateList.length) {
     return [];
   }
 
-  const limitedCandidates = candidateList.slice(0, 40);
+  const limitedCandidates = candidateList.slice(0, 80);
 
   const completionResponse = await detectCompletedTasks({
     transcript,
