@@ -25,7 +25,6 @@ const getInitials = (name: string | null | undefined) => {
 
 const getProviderLabel = (provider: DisplayTask['aiProvider']) => {
   if (provider === 'openai') return 'OpenAI';
-  if (provider === 'gemini') return 'Gemini';
   return null;
 };
 

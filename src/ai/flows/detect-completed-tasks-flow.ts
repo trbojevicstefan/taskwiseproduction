@@ -20,7 +20,6 @@ const CompletionCandidateSchema = z.object({
 
 export const DetectCompletedTasksInputSchema = z.object({
   transcript: z.string(),
-  openItemsTrigger: z.boolean().optional(),
   candidates: z.array(CompletionCandidateSchema),
 });
 
@@ -48,24 +47,23 @@ const completionPrompt = ai.definePrompt({
   input: { schema: DetectCompletedTasksInputSchema },
   output: { format: "json" },
   prompt: `
-You are a Completion Auditor. Your job is to identify which open tasks were explicitly confirmed as DONE in the transcript.
+You are a Completion Auditor. Your job is to identify which open tasks were confirmed as DONE in the transcript.
 
 Rules:
 - Only select tasks from the provided candidate list. Do NOT invent tasks.
-- Mark a task as completed ONLY if the transcript explicitly confirms completion (e.g. "done", "finished", "completed", "wrapped up", "shipped", "resolved").
-- If a task is only in progress or planned, DO NOT include it.
-- If the transcript does not mention a candidate, DO NOT include it.
+- Match tasks by meaning even if the transcript uses slightly different wording, abbreviations, or minor misspellings (e.g., "Cvilio" vs "Sevilio").
+- Mark a task as completed ONLY if the transcript clearly indicates it is finished (explicit or implicit). This can be:
+  - explicit completion words (done, finished, completed, wrapped up, shipped, resolved, closed, finalized)
+  - clear completion statements (we bought/purchased it, it's live, it's ready, it's in place, we already did it, it's handled/taken care of, signed off, approved, deployed, published, submitted)
+- If a task is only in progress, planned, or merely discussed, DO NOT include it.
 - Provide a short supporting snippet and (if available) the speaker name and timestamp.
-- If "open items review" happened, you may expect multiple completions, but still require explicit confirmation.
 
-Open items review detected: {{openItemsTrigger}}
-
-Candidate tasks (JSON):
+Open tasks (JSON):
 \`\`\`
 {{{candidates}}}
 \`\`\`
 
-Transcript:
+Transcript (may be shortened to completion-related lines):
 \`\`\`
 {{{transcript}}}
 \`\`\`

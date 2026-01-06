@@ -48,7 +48,7 @@ export interface ExtractedTaskSchema {
   assignee?: Partial<AppUser> | null;
   assigneeName?: string | null; // Name from AI, used for matching
   sourceEvidence?: TaskEvidence[] | null;
-  aiProvider?: 'gemini' | 'openai' | null;
+  aiProvider?: "openai" | null;
   comments?: TaskComment[] | null;
   
   // UI/Client-side state fields

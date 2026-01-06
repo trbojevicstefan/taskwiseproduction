@@ -1,31 +1,14 @@
 import type { ExecutablePrompt, PromptGenerateOptions } from "@genkit-ai/ai";
 import { extractJsonValue } from "@/ai/flows/parse-json-output";
 
-const FALLBACK_MODEL = process.env.OPENAI_FALLBACK_MODEL || "gpt-4.1-nano";
+const OPENAI_MODEL =
+  process.env.OPENAI_MODEL || process.env.OPENAI_FALLBACK_MODEL || "gpt-4.1-mini";
 const OPENAI_CHAT_URL =
   process.env.OPENAI_API_URL || "https://api.openai.com/v1/chat/completions";
 const OPENAI_RESPONSES_URL =
   process.env.OPENAI_RESPONSES_URL || "https://api.openai.com/v1/responses";
 
-type LlmProvider = "gemini" | "openai";
-
-const shouldFallbackToOpenAI = (error: unknown): boolean => {
-  if (!error) return false;
-  const message = String((error as { message?: string }).message || error);
-  const lowered = message.toLowerCase();
-  if (
-    lowered.includes("quota exceeded") ||
-    lowered.includes("too many requests") ||
-    lowered.includes("rate limit") ||
-    lowered.includes("429") ||
-    lowered.includes("generativelanguage.googleapis.com") ||
-    (lowered.includes("gemini") && lowered.includes("quota")) ||
-    lowered.includes("googlegenerativeai")
-  ) {
-    return true;
-  }
-  return true;
-};
+type LlmProvider = "openai";
 
 const partToText = (part: unknown): string => {
   if (!part) return "";
@@ -157,7 +140,7 @@ const runOpenAiResponses = async (
       Authorization: `Bearer ${apiKey}`,
     },
     body: JSON.stringify({
-      model: FALLBACK_MODEL,
+      model: OPENAI_MODEL,
       input: messages,
       temperature: 0.2,
       max_output_tokens: maxTokens,
@@ -206,7 +189,7 @@ const runOpenAiCompletion = async (
       Authorization: `Bearer ${apiKey}`,
     },
     body: JSON.stringify({
-      model: FALLBACK_MODEL,
+      model: OPENAI_MODEL,
       messages,
       temperature: 0.2,
       max_tokens: maxTokens,
@@ -230,30 +213,22 @@ export async function runPromptWithFallback<I, O, C>(
   input?: I,
   options?: PromptGenerateOptions<O, C>
 ): Promise<{ output?: unknown; text?: string; provider?: LlmProvider }> {
+  const rendered = await prompt.render(input, options);
+  let lastFallbackError = "";
+  const toMessage = (err: unknown) =>
+    String((err as { message?: string }).message || err || "Unknown error");
   try {
-    const result = await prompt(input, options);
-    return { ...result, provider: "gemini" };
-  } catch (error) {
-    if (!shouldFallbackToOpenAI(error)) {
-      throw error;
-    }
-    let lastFallbackError = "";
-    const toMessage = (err: unknown) =>
-      String((err as { message?: string }).message || err || "Unknown error");
+    return await runOpenAiResponses(rendered, options);
+  } catch (responsesError) {
+    lastFallbackError = `OpenAI responses failed: ${toMessage(responsesError)}`;
+    console.warn(lastFallbackError);
     try {
-      const rendered = await prompt.render(input, options);
-      try {
-        return await runOpenAiCompletion(rendered, options);
-      } catch (completionError) {
-        lastFallbackError = `OpenAI chat fallback failed: ${toMessage(completionError)}`;
-        console.warn(lastFallbackError);
-        return await runOpenAiResponses(rendered, options);
-      }
-    } catch (fallbackError) {
-      lastFallbackError = lastFallbackError || toMessage(fallbackError);
-      console.error("OpenAI fallback failed:", fallbackError);
+      return await runOpenAiCompletion(rendered, options);
+    } catch (completionError) {
+      lastFallbackError = `OpenAI chat fallback failed: ${toMessage(completionError)}`;
+      console.error(lastFallbackError);
       throw new Error(
-        `AI fallback failed. ${lastFallbackError || "Please try again."}`
+        `OpenAI request failed. ${lastFallbackError || "Please try again."}`
       );
     }
   }

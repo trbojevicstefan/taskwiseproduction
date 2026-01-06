@@ -9,6 +9,50 @@ import { ensureDefaultBoard } from "@/lib/boards";
 import { ensureBoardItemsForTasks } from "@/lib/board-items";
 import { getWorkspaceIdForUser } from "@/lib/workspace";
 import type { ExtractedTaskSchema } from "@/types/chat";
+import {
+  applyCompletionTargets,
+  buildCompletionSuggestions,
+  filterTasksForSessionSync,
+  mergeCompletionSuggestions,
+} from "@/lib/task-completion";
+
+const resolveCompletionMatchThreshold = (user: any) => {
+  const value = user?.completionMatchThreshold;
+  if (typeof value !== "number" || !Number.isFinite(value)) return 0.6;
+  return Math.min(0.95, Math.max(0.4, value));
+};
+
+const shouldAutoApproveSuggestion = (
+  task: ExtractedTaskSchema,
+  minMatchRatio: number
+) => {
+  if (!task.completionSuggested) return false;
+  const confidence =
+    typeof task.completionConfidence === "number" &&
+    Number.isFinite(task.completionConfidence)
+      ? task.completionConfidence
+      : null;
+  if (confidence === null) return false;
+  return confidence >= minMatchRatio;
+};
+
+const applyAutoApprovalFlags = (
+  tasks: ExtractedTaskSchema[],
+  minMatchRatio: number
+) => {
+  const walk = (items: ExtractedTaskSchema[]): ExtractedTaskSchema[] =>
+    items.map((task) => {
+      const nextTask = {
+        ...task,
+        subtasks: task.subtasks ? walk(task.subtasks) : task.subtasks,
+      };
+      if (shouldAutoApproveSuggestion(nextTask, minMatchRatio)) {
+        return { ...nextTask, status: "done", completionSuggested: false };
+      }
+      return nextTask;
+    });
+  return walk(tasks);
+};
 
 const serializeMeeting = (meeting: any) => {
   const { recordingId, recordingIdHash, ...rest } = meeting;
@@ -48,7 +92,10 @@ export async function POST(request: Request) {
   const { recordingId, recordingIdHash, ...safeBody } = body || {};
   const now = new Date();
   const db = await getDb();
+  const userIdQuery = buildIdQuery(userId);
+  const user = await db.collection<any>("users").findOne({ _id: userIdQuery });
   const workspaceId = await getWorkspaceIdForUser(db, userId);
+  const originalAiTasks = safeBody.originalAiTasks || safeBody.extractedTasks || [];
   const meeting = {
     _id: randomUUID(),
     userId,
@@ -58,7 +105,7 @@ export async function POST(request: Request) {
     summary: safeBody.summary || "",
     attendees: safeBody.attendees || [],
     extractedTasks: safeBody.extractedTasks || [],
-    originalAiTasks: safeBody.originalAiTasks || safeBody.extractedTasks || [],
+    originalAiTasks,
     originalAllTaskLevels: safeBody.originalAllTaskLevels || safeBody.allTaskLevels || null,
     taskRevisions: safeBody.taskRevisions || [],
     chatSessionId: safeBody.chatSessionId ?? null,
@@ -67,6 +114,41 @@ export async function POST(request: Request) {
     createdAt: now,
     lastActivityAt: now,
   };
+
+  const transcript =
+    typeof meeting.originalTranscript === "string"
+      ? meeting.originalTranscript.trim()
+      : "";
+  if (user && transcript) {
+    const completionMatchThreshold = resolveCompletionMatchThreshold(user);
+    const completionSuggestions = await buildCompletionSuggestions({
+      userId,
+      transcript,
+      summary: meeting.summary,
+      attendees: Array.isArray(meeting.attendees) ? meeting.attendees : [],
+      workspaceId,
+      requireAttendeeMatch: false,
+      minMatchRatio: completionMatchThreshold,
+    });
+    if (completionSuggestions.length) {
+      const mergedTasks = mergeCompletionSuggestions(
+        meeting.extractedTasks as ExtractedTaskSchema[],
+        completionSuggestions
+      );
+      const shouldAutoApprove = Boolean(user.autoApproveCompletedTasks);
+      meeting.extractedTasks = shouldAutoApprove
+        ? applyAutoApprovalFlags(mergedTasks, completionMatchThreshold)
+        : mergedTasks;
+      if (shouldAutoApprove) {
+        const autoApproveSuggestions = completionSuggestions.filter((task) =>
+          shouldAutoApproveSuggestion(task, completionMatchThreshold)
+        );
+        if (autoApproveSuggestions.length) {
+          await applyCompletionTargets(db, userId, autoApproveSuggestions);
+        }
+      }
+    }
+  }
 
   await db.collection<any>("meetings").insertOne(meeting);
 
@@ -85,7 +167,12 @@ export async function POST(request: Request) {
 
   if (Array.isArray(meeting.extractedTasks)) {
     try {
-      await syncTasksForSource(db, meeting.extractedTasks as ExtractedTaskSchema[], {
+      const syncTasks = filterTasksForSessionSync(
+        meeting.extractedTasks as ExtractedTaskSchema[],
+        "meeting",
+        meeting._id
+      );
+      await syncTasksForSource(db, syncTasks, {
         userId,
         workspaceId,
         sourceSessionId: meeting._id,
@@ -100,7 +187,7 @@ export async function POST(request: Request) {
           userId,
           workspaceId,
           boardId: defaultBoard._id,
-          tasks: meeting.extractedTasks as ExtractedTaskSchema[],
+          tasks: syncTasks,
         });
       }
     } catch (error) {

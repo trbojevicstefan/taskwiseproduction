@@ -5,7 +5,7 @@ import React, { useState, useCallback, useEffect, useMemo } from 'react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Input } from '@/components/ui/input'; // Added for title editing
-import { Loader2, Sparkles, Brain, ListTree, Share2, PlusCircle, Settings, Edit2, AlertTriangle, X, CalendarDays, Zap as SimplifyIcon, Copy, Info, Folder as FolderIcon, FolderOpen, Eye, ClipboardPaste, Trash2 as ClearIcon, FileDown, Users, Code, Bot, UserPlus, ListFilter, Slack } from 'lucide-react';
+import { Loader2, Sparkles, Brain, ListTree, Share2, PlusCircle, Settings, Edit2, AlertTriangle, X, CalendarDays, Zap as SimplifyIcon, Copy, Info, Folder as FolderIcon, FolderOpen, Eye, ClipboardPaste, Trash2 as ClearIcon, FileDown, Users, Code, UserPlus, ListFilter, Slack } from 'lucide-react';
 import { useToast } from "@/hooks/use-toast";
 import { extractTasksFromChat } from '@/ai/flows/extract-tasks';
 import type { OrchestratorInput, OrchestratorOutput } from '@/ai/flows/schemas';
@@ -185,7 +185,6 @@ const styleOptions: { id: StyleOption, label: string, icon: React.ElementType }[
     { id: 'meeting_transcript', label: 'Meeting', icon: Users },
     { id: 'general', label: 'General', icon: Sparkles },
     { id: 'vibe_coding', label: 'Developer', icon: Code },
-    { id: 'ai_gemini', label: 'Gemini', icon: Bot },
 ];
 
 

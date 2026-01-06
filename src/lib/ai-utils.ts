@@ -191,7 +191,7 @@ export function hasMeaningfulTasks(tasks: TaskType[]): boolean {
   return tasks.some((task) => !isPlaceholderTitle(task.title));
 }
 
-export type TaskAiProvider = 'gemini' | 'openai';
+export type TaskAiProvider = "openai";
 
 export function annotateTasksWithProvider(
   tasks: TaskType[],

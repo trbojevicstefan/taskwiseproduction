@@ -16,7 +16,7 @@ export const BaseTaskSchema = z.object({
   dueAt: z.string().optional().describe('The due date and time in ISO 8601 format.'),
   status: z.enum(['todo', 'inprogress', 'done', 'recurring']).optional().describe('The status of the task.'),
   assigneeName: z.string().optional().describe("The name of the person this task is assigned to."),
-  aiProvider: z.enum(['gemini', 'openai']).optional().describe('The AI provider used to generate this task, if applicable.'),
+  aiProvider: z.enum(["openai"]).optional().describe("The AI provider used to generate this task, if applicable."),
   sourceEvidence: z.array(z.object({
     snippet: z.string().describe('The transcript or input snippet that supports this task.'),
     speaker: z.string().optional().describe('The speaker tied to the snippet, if known.'),

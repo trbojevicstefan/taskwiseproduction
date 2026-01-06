@@ -6,7 +6,12 @@ import { buildIdQuery } from "@/lib/mongo-id";
 import { normalizeTask } from "@/lib/data";
 import { normalizeTitleKey } from "@/lib/ai-utils";
 import { normalizePersonNameKey } from "@/lib/transcript-utils";
-import { buildCompletionSuggestions } from "@/lib/task-completion";
+import {
+  buildCompletionSuggestions,
+  filterTasksForSessionSync,
+  mergeCompletionSuggestions,
+  type CompletionDebugInfo,
+} from "@/lib/task-completion";
 import { syncTasksForSource } from "@/lib/task-sync";
 import { ensureDefaultBoard } from "@/lib/boards";
 import { ensureBoardItemsForTasks } from "@/lib/board-items";
@@ -185,7 +190,8 @@ const mergeNewTasks = (
 
 const buildCompletionUpdateMap = (
   suggestions: ExtractedTaskSchema[],
-  autoApprove: boolean
+  autoApprove: boolean,
+  minMatchRatio: number
 ) => {
   const updates = new Map<string, CompletionUpdate>();
 
@@ -193,12 +199,21 @@ const buildCompletionUpdateMap = (
     const targets = suggestion.completionTargets || [];
     if (!targets.length) return;
 
+    const confidence =
+      typeof suggestion.completionConfidence === "number" &&
+      Number.isFinite(suggestion.completionConfidence)
+        ? suggestion.completionConfidence
+        : null;
+    const shouldAutoApprove =
+      confidence !== null && confidence >= minMatchRatio;
+    const completionSuggested = autoApprove ? !shouldAutoApprove : true;
+
     targets.forEach((target) => {
       if (!target?.taskId) return;
       const existing = updates.get(target.taskId);
       const nextUpdate: CompletionUpdate = {
-        completionSuggested: !autoApprove,
-        completionConfidence: suggestion.completionConfidence ?? null,
+        completionSuggested,
+        completionConfidence: confidence ?? null,
         completionEvidence: suggestion.completionEvidence ?? null,
         completionTargets: suggestion.completionTargets ?? null,
       };
@@ -211,6 +226,21 @@ const buildCompletionUpdateMap = (
   });
 
   return updates;
+};
+
+const shouldRequireReview = (
+  suggestion: ExtractedTaskSchema,
+  autoApprove: boolean,
+  minMatchRatio: number
+) => {
+  if (!autoApprove) return true;
+  const confidence =
+    typeof suggestion.completionConfidence === "number" &&
+    Number.isFinite(suggestion.completionConfidence)
+      ? suggestion.completionConfidence
+      : null;
+  if (confidence === null) return true;
+  return confidence < minMatchRatio;
 };
 
 const applyCompletionUpdates = (
@@ -237,9 +267,12 @@ const applyCompletionUpdates = (
       if (update) {
         const alreadyDone = (task.status || "todo") === "done";
         if (!alreadyDone || task.completionSuggested) {
+          const nextStatus = update.completionSuggested
+            ? task.status || "todo"
+            : "done";
           nextTask = {
             ...nextTask,
-            status: "done",
+            status: nextStatus,
             completionSuggested: update.completionSuggested,
             completionConfidence: update.completionConfidence ?? null,
             completionEvidence: update.completionEvidence ?? null,
@@ -438,7 +471,8 @@ export async function POST(
     Number.isFinite(user.completionMatchThreshold)
       ? Math.min(0.95, Math.max(0.4, user.completionMatchThreshold))
       : 0.6;
-
+  const completionDebugEnabled = process.env.TASK_COMPLETION_DEBUG === "1";
+  let completionDebug: CompletionDebugInfo | null = null;
   const [analysisResult, completionSuggestions] = await Promise.all([
     shouldScanNew
       ? analyzeMeeting({ transcript, requestedDetailLevel: detailLevel })
@@ -447,9 +481,15 @@ export async function POST(
       ? buildCompletionSuggestions({
           userId,
           transcript,
+          summary: meeting.summary,
           attendees: [],
           requireAttendeeMatch: false,
           minMatchRatio: completionMatchThreshold,
+          debug: completionDebugEnabled
+            ? (info) => {
+                completionDebug = info;
+              }
+            : undefined,
         })
       : Promise.resolve([] as ExtractedTaskSchema[]),
   ]);
@@ -472,9 +512,11 @@ export async function POST(
 
   const completionUpdates = buildCompletionUpdateMap(
     completionSuggestions,
-    shouldAutoApprove
+    shouldAutoApprove,
+    completionMatchThreshold
   );
   const appliedCompletionIds = new Set<string>();
+  let reviewSuggestionsMerged = false;
   if (completionUpdates.size && shouldScanCompleted) {
     const completionApplied = applyCompletionUpdates(
       updatedTasks,
@@ -483,13 +525,24 @@ export async function POST(
     );
     updatedTasks = completionApplied.tasks;
   }
+  if (shouldScanCompleted && completionSuggestions.length) {
+    const reviewSuggestions = completionSuggestions.filter((suggestion) =>
+      shouldRequireReview(suggestion, shouldAutoApprove, completionMatchThreshold)
+    );
+    if (reviewSuggestions.length) {
+      updatedTasks = mergeCompletionSuggestions(updatedTasks, reviewSuggestions);
+      reviewSuggestionsMerged = true;
+    }
+  }
 
   const now = new Date();
   const update: Record<string, any> = {
     lastActivityAt: now,
   };
   const tasksChanged =
-    newTasksAdded > 0 || (completionUpdates.size > 0 && appliedCompletionIds.size > 0);
+    newTasksAdded > 0 ||
+    reviewSuggestionsMerged ||
+    (completionUpdates.size > 0 && appliedCompletionIds.size > 0);
   if (tasksChanged) {
     update.extractedTasks = updatedTasks;
   }
@@ -507,10 +560,12 @@ export async function POST(
     updatedMeeting?.workspaceId || (await getWorkspaceIdForUser(db, userId));
 
   if (tasksChanged && updatedMeeting) {
-    await syncTasksForSource(db, updatedTasks, {
+    const sessionId = String(updatedMeeting._id ?? id);
+    const syncTasks = filterTasksForSessionSync(updatedTasks, "meeting", sessionId);
+    await syncTasksForSource(db, syncTasks, {
       userId,
       workspaceId,
-      sourceSessionId: String(updatedMeeting._id ?? id),
+      sourceSessionId: sessionId,
       sourceSessionType: "meeting",
       sourceSessionName: updatedMeeting.title || "Meeting",
       origin: "meeting",
@@ -529,7 +584,7 @@ export async function POST(
         userId,
         workspaceId,
         boardId: defaultBoard._id,
-        tasks: updatedTasks,
+        tasks: syncTasks,
       });
     }
   }
@@ -607,7 +662,12 @@ export async function POST(
             await db.collection<any>("meetings").updateOne(meetingFilter, {
               $set: { extractedTasks: linkedTasks, lastActivityAt: now },
             });
-            await syncTasksForSource(db, linkedTasks, {
+            const syncTasks = filterTasksForSessionSync(
+              linkedTasks,
+              "meeting",
+              linkedMeetingId
+            );
+            await syncTasksForSource(db, syncTasks, {
               userId,
               workspaceId: linkedWorkspaceId,
               sourceSessionId: String(linkedMeeting._id ?? linkedMeetingId),
@@ -633,7 +693,7 @@ export async function POST(
                 userId,
                 workspaceId: linkedWorkspaceId,
                 boardId: defaultBoard._id,
-                tasks: linkedTasks,
+                tasks: syncTasks,
               });
             }
           }
@@ -674,7 +734,12 @@ export async function POST(
           await db.collection<any>("meetings").updateOne(meetingFilter, {
             $set: { extractedTasks: otherTasks, lastActivityAt: now },
           });
-          await syncTasksForSource(db, otherTasks, {
+          const syncTasks = filterTasksForSessionSync(
+            otherTasks,
+            "meeting",
+            session.id
+          );
+          await syncTasksForSource(db, syncTasks, {
             userId,
             workspaceId: otherWorkspaceId,
             sourceSessionId: String(otherMeeting._id ?? session.id),
@@ -700,7 +765,7 @@ export async function POST(
               userId,
               workspaceId: otherWorkspaceId,
               boardId: defaultBoard._id,
-              tasks: otherTasks,
+              tasks: syncTasks,
             });
           }
         }
@@ -773,7 +838,19 @@ export async function POST(
       if (!updateFields) return null;
       if (skipIds.has(taskId)) return null;
       appliedCompletionIds.add(taskId);
-      boardUpdateIds.add(taskId);
+      if (!updateFields.completionSuggested) {
+        boardUpdateIds.add(taskId);
+      }
+      const setFields: Record<string, any> = {
+        completionSuggested: updateFields.completionSuggested,
+        completionConfidence: updateFields.completionConfidence ?? null,
+        completionEvidence: updateFields.completionEvidence ?? null,
+        completionTargets: updateFields.completionTargets ?? null,
+        lastUpdated: now,
+      };
+      if (!updateFields.completionSuggested) {
+        setFields.status = "done";
+      }
       return {
         updateOne: {
           filter: {
@@ -784,16 +861,7 @@ export async function POST(
               { sourceTaskId: taskId },
             ],
           },
-          update: {
-            $set: {
-              status: "done",
-              completionSuggested: updateFields.completionSuggested,
-              completionConfidence: updateFields.completionConfidence ?? null,
-              completionEvidence: updateFields.completionEvidence ?? null,
-              completionTargets: updateFields.completionTargets ?? null,
-              lastUpdated: now,
-            },
-          },
+          update: { $set: setFields },
         },
       };
     });
@@ -818,5 +886,6 @@ export async function POST(
       completionUpdates: appliedCompletionIds.size || completionUpdates.size,
       autoApproved: shouldAutoApprove,
     },
+    debug: completionDebugEnabled ? completionDebug : null,
   });
 }

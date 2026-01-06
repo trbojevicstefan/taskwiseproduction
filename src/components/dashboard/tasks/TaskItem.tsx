@@ -7,7 +7,7 @@ import type { ExtractedTaskSchema as DisplayTask } from '@/types/chat';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
-import { Bot, ChevronDown, ChevronRight, MoreVertical, Loader2, Brain, Zap as SimplifyIcon, Edit3, Trash2, UserPlus, Sparkles, LayoutGrid } from 'lucide-react';
+import { Bot, ChevronDown, ChevronRight, MoreVertical, Loader2, Brain, Zap as SimplifyIcon, Edit3, Trash2, UserPlus, LayoutGrid } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import {
   DropdownMenu,
@@ -26,7 +26,6 @@ const getInitials = (name: string | null | undefined) => {
 
 const getProviderMeta = (provider: DisplayTask['aiProvider']) => {
   if (provider === 'openai') return { label: 'OpenAI', icon: Bot };
-  if (provider === 'gemini') return { label: 'Gemini', icon: Sparkles };
   return null;
 };
 

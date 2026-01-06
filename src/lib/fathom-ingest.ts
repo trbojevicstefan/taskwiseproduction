@@ -11,9 +11,10 @@ import { normalizeTask } from "@/lib/data";
 import type { ExtractedTaskSchema } from "@/types/chat";
 import type { DbUser } from "@/lib/db/users";
 import {
+  applyCompletionTargets,
   buildCompletionSuggestions,
+  filterTasksForSessionSync,
   mergeCompletionSuggestions,
-  type CompletionTarget,
 } from "@/lib/task-completion";
 import { buildIdQuery } from "@/lib/mongo-id";
 import { upsertPeopleFromAttendees } from "@/lib/people-sync";
@@ -105,154 +106,36 @@ const selectTasksForLevel = (
   );
 };
 
-const updateTaskStatusInList = (
-  tasks: ExtractedTaskSchema[],
-  taskId: string,
-  status: ExtractedTaskSchema["status"]
+const shouldAutoApproveSuggestion = (
+  task: ExtractedTaskSchema,
+  minMatchRatio: number
 ) => {
-  let updated = false;
-  const walk = (items: ExtractedTaskSchema[]): ExtractedTaskSchema[] =>
-    items.map((task) => {
-      let nextTask = task;
-      let childUpdated = false;
-
-      if (task.subtasks && task.subtasks.length) {
-        const updatedSubtasks = walk(task.subtasks);
-        if (updatedSubtasks !== task.subtasks) {
-          childUpdated = true;
-          nextTask = { ...nextTask, subtasks: updatedSubtasks };
-        }
-      }
-
-      if (task.id === taskId) {
-        updated = true;
-        return { ...nextTask, status, completionSuggested: false };
-      }
-
-      if (childUpdated) {
-        updated = true;
-        return nextTask;
-      }
-
-      return task;
-    });
-
-  const nextTasks = walk(tasks);
-  return { tasks: nextTasks, updated };
+  if (!task.completionSuggested) return false;
+  const confidence =
+    typeof task.completionConfidence === "number" &&
+    Number.isFinite(task.completionConfidence)
+      ? task.completionConfidence
+      : null;
+  if (confidence === null) return false;
+  return confidence >= minMatchRatio;
 };
 
-const applyAutoApprovalFlags = (tasks: ExtractedTaskSchema[]) => {
+const applyAutoApprovalFlags = (
+  tasks: ExtractedTaskSchema[],
+  minMatchRatio: number
+) => {
   const walk = (items: ExtractedTaskSchema[]): ExtractedTaskSchema[] =>
     items.map((task) => {
       const nextTask = {
         ...task,
         subtasks: task.subtasks ? walk(task.subtasks) : task.subtasks,
       };
-      if (nextTask.completionSuggested) {
+      if (shouldAutoApproveSuggestion(nextTask, minMatchRatio)) {
         return { ...nextTask, status: "done", completionSuggested: false };
       }
       return nextTask;
     });
   return walk(tasks);
-};
-
-const applyCompletionTargets = async (
-  db: Awaited<ReturnType<typeof getDb>>,
-  userId: string,
-  suggestions: ExtractedTaskSchema[]
-) => {
-  const allTargets: CompletionTarget[] = [];
-  suggestions.forEach((suggestion) => {
-    if (suggestion.completionTargets?.length) {
-      allTargets.push(...suggestion.completionTargets);
-    }
-  });
-  if (!allTargets.length) return;
-
-  const uniqueTargets = Array.from(
-    new Map(
-      allTargets.map((target) => [
-        `${target.sourceType}:${target.sourceSessionId}:${target.taskId}`,
-        target,
-      ])
-    ).values()
-  );
-
-  const userIdQuery = buildIdQuery(userId);
-  const taskTargets = uniqueTargets.filter((target) => target.sourceType === "task");
-  if (taskTargets.length) {
-    const taskIds = Array.from(
-      new Set(taskTargets.map((target) => target.taskId))
-    );
-    await db.collection("tasks").updateMany(
-      {
-        userId: userIdQuery,
-        $or: [{ _id: { $in: taskIds } }, { id: { $in: taskIds } }],
-      },
-      { $set: { status: "done" } }
-    );
-  }
-
-  const updateSessionTasks = async (
-    collectionName: "meetings" | "chatSessions",
-    taskField: "extractedTasks" | "suggestedTasks",
-    target: CompletionTarget
-  ) => {
-    const sessionIdQuery = buildIdQuery(target.sourceSessionId);
-    const filter = {
-      userId: userIdQuery,
-      $or: [{ _id: sessionIdQuery }, { id: target.sourceSessionId }],
-    };
-    const session = await db.collection<any>(collectionName).findOne(filter);
-    if (!session) return;
-    const currentTasks = session[taskField] || [];
-    const { tasks, updated } = updateTaskStatusInList(
-      currentTasks,
-      target.taskId,
-      "done"
-    );
-    if (!updated) return;
-    await db.collection<any>(collectionName).updateOne(filter, {
-      $set: { [taskField]: tasks, lastActivityAt: new Date() },
-    });
-  };
-
-  const updateTaskCollectionForSessionTarget = async (target: CompletionTarget) => {
-    const sessionIdQuery = buildIdQuery(target.sourceSessionId);
-    const taskIdQuery = buildIdQuery(target.taskId);
-    await db.collection("tasks").updateMany(
-      {
-        userId: userIdQuery,
-        sourceSessionType: target.sourceType,
-        $and: [
-          {
-            $or: [
-              { sourceSessionId: sessionIdQuery },
-              { sourceSessionId: target.sourceSessionId },
-            ],
-          },
-          {
-            $or: [
-              { _id: taskIdQuery },
-              { sourceTaskId: target.taskId },
-              { sourceTaskId: taskIdQuery },
-            ],
-          },
-        ],
-      },
-      { $set: { status: "done", completionSuggested: false, lastUpdated: new Date() } }
-    );
-  };
-
-  for (const target of uniqueTargets) {
-    if (target.sourceType === "meeting") {
-      await updateSessionTasks("meetings", "extractedTasks", target);
-      await updateTaskCollectionForSessionTarget(target);
-    } else if (target.sourceType === "chat") {
-      await updateSessionTasks("chatSessions", "suggestedTasks", target);
-      await updateTaskCollectionForSessionTarget(target);
-    }
-  }
 };
 
 export const ingestFathomMeeting = async ({
@@ -422,17 +305,29 @@ export const ingestFathomMeeting = async ({
         ).values()
       );
 
+      const completionMatchThreshold = resolveCompletionMatchThreshold(user);
+      const completionSummary =
+        typeof update.summary === "string" && update.summary.trim()
+          ? update.summary.trim()
+          : existingSummary;
       const completionSuggestions = await buildCompletionSuggestions({
         userId,
         transcript: transcriptText,
+        summary: completionSummary,
         attendees: uniquePeople,
         workspaceId,
-        minMatchRatio: resolveCompletionMatchThreshold(user),
+        requireAttendeeMatch: false,
+        minMatchRatio: completionMatchThreshold,
       });
 
       const shouldAutoApprove = Boolean(user.autoApproveCompletedTasks);
       if (shouldAutoApprove && completionSuggestions.length) {
-        await applyCompletionTargets(db, userId, completionSuggestions);
+        const autoApproveSuggestions = completionSuggestions.filter((task) =>
+          shouldAutoApproveSuggestion(task, completionMatchThreshold)
+        );
+        if (autoApproveSuggestions.length) {
+          await applyCompletionTargets(db, userId, autoApproveSuggestions);
+        }
       }
 
       const mergedTasks = mergeCompletionSuggestions(
@@ -440,7 +335,7 @@ export const ingestFathomMeeting = async ({
         completionSuggestions
       );
       const finalizedTasks = shouldAutoApprove
-        ? applyAutoApprovalFlags(mergedTasks)
+        ? applyAutoApprovalFlags(mergedTasks, completionMatchThreshold)
         : mergedTasks;
 
       if (sanitizedTaskLevels) {
@@ -460,9 +355,18 @@ export const ingestFathomMeeting = async ({
         };
         if (shouldAutoApprove) {
           sanitizedTaskLevels = {
-            light: applyAutoApprovalFlags(sanitizedTaskLevels.light || []),
-            medium: applyAutoApprovalFlags(sanitizedTaskLevels.medium || []),
-            detailed: applyAutoApprovalFlags(sanitizedTaskLevels.detailed || []),
+            light: applyAutoApprovalFlags(
+              sanitizedTaskLevels.light || [],
+              completionMatchThreshold
+            ),
+            medium: applyAutoApprovalFlags(
+              sanitizedTaskLevels.medium || [],
+              completionMatchThreshold
+            ),
+            detailed: applyAutoApprovalFlags(
+              sanitizedTaskLevels.detailed || [],
+              completionMatchThreshold
+            ),
           };
         }
       }
@@ -612,7 +516,12 @@ export const ingestFathomMeeting = async ({
         }
       }
 
-      await syncTasksForSource(db, finalizedTasks, {
+      const syncTasks = filterTasksForSessionSync(
+        finalizedTasks,
+        "meeting",
+        existing._id.toString()
+      );
+      await syncTasksForSource(db, syncTasks, {
         userId,
         workspaceId,
         sourceSessionId: existing._id.toString(),
@@ -628,11 +537,16 @@ export const ingestFathomMeeting = async ({
           userId,
           workspaceId,
           boardId: defaultBoard._id,
-          tasks: finalizedTasks,
+          tasks: syncTasks,
         });
       }
     } else if (Array.isArray(existing.extractedTasks) && existing.extractedTasks.length) {
-      await syncTasksForSource(db, existing.extractedTasks as ExtractedTaskSchema[], {
+      const syncTasks = filterTasksForSessionSync(
+        existing.extractedTasks as ExtractedTaskSchema[],
+        "meeting",
+        existing._id.toString()
+      );
+      await syncTasksForSource(db, syncTasks, {
         userId,
         workspaceId,
         sourceSessionId: existing._id.toString(),
@@ -647,7 +561,7 @@ export const ingestFathomMeeting = async ({
           userId,
           workspaceId,
           boardId: defaultBoard._id,
-          tasks: existing.extractedTasks as ExtractedTaskSchema[],
+          tasks: syncTasks,
         });
       }
     }
@@ -705,17 +619,31 @@ export const ingestFathomMeeting = async ({
     ).values()
   );
 
+  const completionMatchThreshold = resolveCompletionMatchThreshold(user);
+  const completionSummary =
+    pickFirst(
+      analysisResult.meetingSummary,
+      analysisResult.chatResponseText,
+      summaryText
+    ) || "";
   const completionSuggestions = await buildCompletionSuggestions({
     userId,
     transcript: transcriptText,
+    summary: completionSummary,
     attendees: uniquePeople,
     workspaceId,
-    minMatchRatio: resolveCompletionMatchThreshold(user),
+    requireAttendeeMatch: false,
+    minMatchRatio: completionMatchThreshold,
   });
 
   const shouldAutoApprove = Boolean(user.autoApproveCompletedTasks);
   if (shouldAutoApprove && completionSuggestions.length) {
-    await applyCompletionTargets(db, userId, completionSuggestions);
+    const autoApproveSuggestions = completionSuggestions.filter((task) =>
+      shouldAutoApproveSuggestion(task, completionMatchThreshold)
+    );
+    if (autoApproveSuggestions.length) {
+      await applyCompletionTargets(db, userId, autoApproveSuggestions);
+    }
   }
 
   const mergedTasks = mergeCompletionSuggestions(
@@ -723,7 +651,7 @@ export const ingestFathomMeeting = async ({
     completionSuggestions
   );
   const finalizedTasks = shouldAutoApprove
-    ? applyAutoApprovalFlags(mergedTasks)
+    ? applyAutoApprovalFlags(mergedTasks, completionMatchThreshold)
     : mergedTasks;
 
   if (sanitizedTaskLevels) {
@@ -743,9 +671,18 @@ export const ingestFathomMeeting = async ({
     };
     if (shouldAutoApprove) {
       sanitizedTaskLevels = {
-        light: applyAutoApprovalFlags(sanitizedTaskLevels.light || []),
-        medium: applyAutoApprovalFlags(sanitizedTaskLevels.medium || []),
-        detailed: applyAutoApprovalFlags(sanitizedTaskLevels.detailed || []),
+        light: applyAutoApprovalFlags(
+          sanitizedTaskLevels.light || [],
+          completionMatchThreshold
+        ),
+        medium: applyAutoApprovalFlags(
+          sanitizedTaskLevels.medium || [],
+          completionMatchThreshold
+        ),
+        detailed: applyAutoApprovalFlags(
+          sanitizedTaskLevels.detailed || [],
+          completionMatchThreshold
+        ),
       };
     }
   }
@@ -886,7 +823,12 @@ export const ingestFathomMeeting = async ({
       console.error("Failed to upsert people from Fathom attendees:", error);
     }
   }
-  await syncTasksForSource(db, finalizedTasks, {
+  const syncTasks = filterTasksForSessionSync(
+    finalizedTasks,
+    "meeting",
+    meetingId
+  );
+  await syncTasksForSource(db, syncTasks, {
     userId,
     workspaceId,
     sourceSessionId: meetingId,
@@ -902,7 +844,7 @@ export const ingestFathomMeeting = async ({
       userId,
       workspaceId,
       boardId: defaultBoard._id,
-      tasks: finalizedTasks,
+      tasks: syncTasks,
     });
   }
 
