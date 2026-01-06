@@ -31,11 +31,13 @@ export interface Meeting extends BaseSession {
   // Artifacts (references to raw files)
   artifacts?: {
     artifactId: string;
-    type: 'transcript' | 'recording' | 'attendance' | 'chat';
+    type: 'transcript' | 'recording' | 'attendance' | 'chat' | 'transcript_translation';
     driveFileId: string;
     storagePath: string; // GCS path
     processedText?: string;
     status: 'available' | 'exported';
+    language?: string | null;
+    createdAt?: string | null;
   }[];
 
   // AI-Generated Content (remains the same)

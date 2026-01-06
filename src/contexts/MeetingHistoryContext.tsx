@@ -2,12 +2,13 @@
 // src/contexts/MeetingHistoryContext.tsx
 "use client";
 
-import React, { createContext, useContext, useState, useEffect, ReactNode, useCallback } from 'react';
+import React, { createContext, useContext, useState, useEffect, ReactNode, useCallback, useRef } from 'react';
 import { v4 as uuidv4 } from 'uuid';
 import type { ExtractedTaskSchema } from '@/types/chat';
 import type { Meeting } from '@/types/meeting';
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from "@/hooks/use-toast";
+import { ToastAction } from "@/components/ui/toast";
 import { apiFetch } from '@/lib/api';
 import { normalizeTask } from '@/lib/data';
 
@@ -32,6 +33,172 @@ export const MeetingHistoryProvider = ({ children }: { children: ReactNode }) =>
   const [meetings, setMeetings] = useState<Meeting[]>([]);
   const [activeMeetingId, setActiveMeetingIdState] = useState<string | null>(null);
   const [isLoadingMeetingHistory, setIsLoadingMeetingHistory] = useState(true);
+  const lastNotificationUserIdRef = useRef<string | null>(null);
+  const notificationStateRef = useRef<{
+    hasLoaded: boolean;
+    knownIds: Set<string>;
+    notifiedIds: Set<string>;
+    permissionPrompted: boolean;
+    pendingMeetings: Meeting[];
+  }>({
+    hasLoaded: false,
+    knownIds: new Set(),
+    notifiedIds: new Set(),
+    permissionPrompted: false,
+    pendingMeetings: [],
+  });
+
+  useEffect(() => {
+    if (lastNotificationUserIdRef.current === user?.uid) return;
+    lastNotificationUserIdRef.current = user?.uid ?? null;
+    notificationStateRef.current = {
+      hasLoaded: false,
+      knownIds: new Set(),
+      notifiedIds: new Set(),
+      permissionPrompted: false,
+      pendingMeetings: [],
+    };
+  }, [user?.uid]);
+
+  const canUseNotifications = useCallback(
+    () => typeof window !== "undefined" && "Notification" in window,
+    []
+  );
+
+  const playNotificationSound = useCallback(() => {
+    if (typeof window === "undefined") return;
+    try {
+      const AudioContextConstructor =
+        window.AudioContext || (window as any).webkitAudioContext;
+      if (!AudioContextConstructor) return;
+      const audioContext = new AudioContextConstructor();
+      const oscillator = audioContext.createOscillator();
+      const gain = audioContext.createGain();
+      oscillator.type = "sine";
+      oscillator.frequency.value = 880;
+      gain.gain.value = 0.08;
+      oscillator.connect(gain);
+      gain.connect(audioContext.destination);
+      oscillator.start();
+      oscillator.stop(audioContext.currentTime + 0.18);
+      oscillator.onended = () => {
+        audioContext.close().catch(() => undefined);
+      };
+    } catch (error) {
+      console.error("Failed to play notification sound:", error);
+    }
+  }, []);
+
+  const notifyMeetings = useCallback(
+    (meetingsToNotify: Meeting[]) => {
+      if (!canUseNotifications()) return;
+      if (Notification.permission !== "granted") return;
+
+      const state = notificationStateRef.current;
+      meetingsToNotify.forEach((meeting) => {
+        if (state.notifiedIds.has(meeting.id)) return;
+        const title = "New Fathom meeting";
+        const body = meeting.title?.trim()
+          ? meeting.title
+          : "A new meeting is ready.";
+        const notification = new Notification(title, {
+          body,
+          tag: meeting.id,
+          data: { meetingId: meeting.id },
+          silent: false,
+        });
+        notification.onclick = () => {
+          window.focus();
+          window.location.href = `/meetings/${meeting.id}`;
+        };
+        playNotificationSound();
+        state.notifiedIds.add(meeting.id);
+      });
+    },
+    [canUseNotifications, playNotificationSound]
+  );
+
+  const requestNotificationPermission = useCallback(async () => {
+    if (!canUseNotifications()) return "unsupported";
+    if (Notification.permission === "granted") return "granted";
+    if (Notification.permission === "denied") return "denied";
+
+    try {
+      const permission = await Notification.requestPermission();
+      if (permission === "granted") {
+        toast({
+          title: "Notifications enabled",
+          description: "You'll hear about new Fathom meetings instantly.",
+        });
+        const pending = notificationStateRef.current.pendingMeetings;
+        notificationStateRef.current.pendingMeetings = [];
+        notifyMeetings(pending);
+      } else if (permission === "denied") {
+        toast({
+          title: "Notifications blocked",
+          description: "Enable notifications in your browser settings if you change your mind.",
+        });
+      }
+      return permission;
+    } catch (error) {
+      console.error("Failed to request notification permission:", error);
+      return "error";
+    }
+  }, [canUseNotifications, notifyMeetings, toast]);
+
+  const promptForNotificationPermission = useCallback(() => {
+    if (!canUseNotifications()) return;
+    const state = notificationStateRef.current;
+    if (state.permissionPrompted) return;
+    if (Notification.permission !== "default") return;
+
+    state.permissionPrompted = true;
+    toast({
+      title: "Enable desktop notifications?",
+      description: "Get alerts when new Fathom meetings arrive.",
+      action: (
+        <ToastAction
+          altText="Enable notifications"
+          onClick={requestNotificationPermission}
+        >
+          Enable
+        </ToastAction>
+      ),
+    });
+  }, [canUseNotifications, requestNotificationPermission, toast]);
+
+  const maybeNotifyNewFathomMeetings = useCallback(
+    (nextMeetings: Meeting[]) => {
+      const state = notificationStateRef.current;
+      const previousIds = state.knownIds;
+      const newlyAdded = state.hasLoaded
+        ? nextMeetings.filter(
+            (meeting) =>
+              meeting.ingestSource === "fathom" &&
+              !meeting.fathomNotificationReadAt &&
+              !previousIds.has(meeting.id)
+          )
+        : [];
+
+      if (newlyAdded.length > 0 && canUseNotifications()) {
+        if (Notification.permission === "granted") {
+          notifyMeetings(newlyAdded);
+        } else if (Notification.permission === "default") {
+          const pending = state.pendingMeetings;
+          const pendingIds = new Set(pending.map((meeting) => meeting.id));
+          state.pendingMeetings = [
+            ...pending,
+            ...newlyAdded.filter((meeting) => !pendingIds.has(meeting.id)),
+          ];
+          promptForNotificationPermission();
+        }
+      }
+
+      state.knownIds = new Set(nextMeetings.map((meeting) => meeting.id));
+      state.hasLoaded = true;
+    },
+    [canUseNotifications, notifyMeetings, promptForNotificationPermission]
+  );
 
   const loadMeetings = useCallback(async (options?: { silent?: boolean }) => {
     if (!user?.uid) {
@@ -69,6 +236,7 @@ export const MeetingHistoryProvider = ({ children }: { children: ReactNode }) =>
           taskRevisions: m.taskRevisions || [],
           attendees: m.attendees || [],
       }));
+      maybeNotifyNewFathomMeetings(sanitizedMeetings);
       setMeetings(sanitizedMeetings);
 
       const timeValue = (value: any) =>
@@ -89,7 +257,7 @@ export const MeetingHistoryProvider = ({ children }: { children: ReactNode }) =>
         setIsLoadingMeetingHistory(false);
       }
     }
-  }, [user]);
+  }, [maybeNotifyNewFathomMeetings, user]);
 
   useEffect(() => {
     loadMeetings();

@@ -8,6 +8,11 @@ const OPENAI_CHAT_URL =
 const OPENAI_RESPONSES_URL =
   process.env.OPENAI_RESPONSES_URL || "https://api.openai.com/v1/responses";
 
+const getOpenAiModel = (options?: PromptGenerateOptions<any, any>) => {
+  const overrideModel = (options as { config?: { model?: string } })?.config?.model;
+  return overrideModel || OPENAI_MODEL;
+};
+
 type LlmProvider = "openai";
 
 const partToText = (part: unknown): string => {
@@ -126,6 +131,7 @@ const runOpenAiResponses = async (
     rendered.output?.schema || rendered.output?.format === "json"
   );
   const messages = toOpenAIResponsesInput(rendered, expectsJson);
+  const model = getOpenAiModel(options);
   const maxTokens =
     typeof (options as { config?: { maxOutputTokens?: number } })?.config
       ?.maxOutputTokens === "number"
@@ -140,7 +146,7 @@ const runOpenAiResponses = async (
       Authorization: `Bearer ${apiKey}`,
     },
     body: JSON.stringify({
-      model: OPENAI_MODEL,
+      model,
       input: messages,
       temperature: 0.2,
       max_output_tokens: maxTokens,
@@ -177,6 +183,7 @@ const runOpenAiCompletion = async (
 
   const expectsJson = Boolean(rendered.output?.schema || rendered.output?.format === "json");
   const messages = toOpenAIMessages(rendered, expectsJson);
+  const model = getOpenAiModel(options);
   const maxTokens =
     typeof (options as { config?: { maxOutputTokens?: number } })?.config?.maxOutputTokens === "number"
       ? (options as { config?: { maxOutputTokens?: number } }).config!.maxOutputTokens!
@@ -189,7 +196,7 @@ const runOpenAiCompletion = async (
       Authorization: `Bearer ${apiKey}`,
     },
     body: JSON.stringify({
-      model: OPENAI_MODEL,
+      model,
       messages,
       temperature: 0.2,
       max_tokens: maxTokens,

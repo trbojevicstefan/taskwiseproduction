@@ -3,6 +3,7 @@
 "use client";
 
 import React, { useMemo, useState, useCallback, useEffect, useRef } from "react";
+import { v4 as uuidv4 } from "uuid";
 import { motion } from "framer-motion";
 import {
   Card,
@@ -13,6 +14,7 @@ import {
 } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -91,6 +93,7 @@ import {
   Megaphone,
   Eye,
   ArrowUpRight,
+  Languages,
 } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import {
@@ -623,8 +626,21 @@ function MomentRow({ m }: { m: { timestamp: string; description: string } }) {
 
 function ArtifactsSection({ meeting }: { meeting: Meeting }) {
     const { artifacts, originalTranscript } = meeting;
-    const hasArtifacts = artifacts && artifacts.length > 0;
     const { toast } = useToast();
+    const { updateMeeting } = useMeetingHistory();
+    const [isTranslateOpen, setIsTranslateOpen] = useState(false);
+    const [targetLanguage, setTargetLanguage] = useState("English");
+    const [isTranslating, setIsTranslating] = useState(false);
+
+    const allArtifacts = artifacts || [];
+    const translationArtifacts = allArtifacts.filter(
+        (artifact) => artifact.type === "transcript_translation"
+    );
+    const fileArtifacts = allArtifacts.filter(
+        (artifact) => artifact.type !== "transcript_translation"
+    );
+    const hasFileArtifacts = fileArtifacts.length > 0;
+    const hasTranslations = translationArtifacts.length > 0;
 
     const handleCopyTranscript = async () => {
         if (!originalTranscript) return;
@@ -636,64 +652,271 @@ function ArtifactsSection({ meeting }: { meeting: Meeting }) {
         }
     };
 
-    const getIconForType = (type: string) => {
-        switch (type) {
-            case 'transcript': return <FileText className="h-5 w-5 text-blue-500" />;
-            case 'recording': return <Mic className="h-5 w-5 text-red-500" />;
-            case 'chat': return <MessageSquareText className="h-5 w-5 text-green-500" />;
-            default: return <Paperclip className="h-5 w-5 text-muted-foreground" />;
+    const handleCopyTranslation = async (text: string, languageLabel: string) => {
+        const result = await copyTextToClipboard(text);
+        if (result.success) {
+            toast({
+                title: "Translation copied",
+                description: `The ${languageLabel} transcript is on your clipboard.`,
+            });
+        } else {
+            toast({
+                title: "Copy failed",
+                description: "Could not copy the translated transcript.",
+                variant: "destructive",
+            });
         }
     };
-    
+
+    const handleTranslateTranscript = async () => {
+        if (!originalTranscript) {
+            toast({
+                title: "Transcript missing",
+                description: "This meeting does not have a transcript to translate.",
+                variant: "destructive",
+            });
+            return;
+        }
+        const language = targetLanguage.trim();
+        if (!language) {
+            toast({ title: "Language required", variant: "destructive" });
+            return;
+        }
+        const normalizedLanguage = language.toLowerCase();
+        const existingTranslation = translationArtifacts.find(
+            (artifact) => (artifact.language || "").toLowerCase() === normalizedLanguage
+        );
+        if (existingTranslation) {
+            toast({
+                title: "Already translated",
+                description: `A ${language} translation already exists.`,
+            });
+            return;
+        }
+
+        setIsTranslating(true);
+        try {
+            const response = await fetch(`/api/meetings/${meeting.id}/translate`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ targetLanguage: language }),
+            });
+            const responseText = await response.text();
+            let payload: Record<string, unknown> = {};
+            if (responseText) {
+                try {
+                    payload = JSON.parse(responseText) as Record<string, unknown>;
+                } catch {
+                    payload = {};
+                }
+            }
+            if (!response.ok) {
+                const baseMessage =
+                    (payload?.error as string | undefined) ||
+                    `Translation failed (HTTP ${response.status}).`;
+                const details = payload?.details ? ` ${payload.details}` : "";
+                const model = payload?.model ? ` Model: ${payload.model}.` : "";
+                const reference = payload?.reference ? ` Ref: ${payload.reference}.` : "";
+                const fallbackDetails = !details && responseText
+                    ? ` Response: ${responseText.slice(0, 300).replace(/\s+/g, " ")}` 
+                    : "";
+                throw new Error(
+                    `${baseMessage}${details}${fallbackDetails}${model}${reference}`.trim()
+                );
+            }
+            const translatedTranscript = payload?.translatedTranscript;
+            if (typeof translatedTranscript !== "string" || !translatedTranscript.trim()) {
+                throw new Error("Translation returned empty output.");
+            }
+
+            const newArtifact = {
+                artifactId: uuidv4(),
+                type: "transcript_translation" as const,
+                driveFileId: language,
+                storagePath: "",
+                processedText: translatedTranscript,
+                status: "available" as const,
+                language,
+                createdAt: new Date().toISOString(),
+            };
+            const updatedArtifacts = [...allArtifacts, newArtifact];
+            await updateMeeting(meeting.id, { artifacts: updatedArtifacts });
+            toast({
+                title: "Translation saved",
+                description: `Transcript translated to ${language}.`,
+            });
+            setIsTranslateOpen(false);
+        } catch (error) {
+            console.error("Transcript translation failed:", error);
+            toast({
+                title: "Translation failed",
+                description:
+                    error instanceof Error
+                        ? error.message
+                        : "Could not translate the transcript.",
+                variant: "destructive",
+            });
+        } finally {
+            setIsTranslating(false);
+        }
+    };
+
+    const getIconForType = (type: string) => {
+        switch (type) {
+            case "transcript":
+                return <FileText className="h-5 w-5 text-blue-500" />;
+            case "recording":
+                return <Mic className="h-5 w-5 text-red-500" />;
+            case "chat":
+                return <MessageSquareText className="h-5 w-5 text-green-500" />;
+            case "transcript_translation":
+                return <Languages className="h-5 w-5 text-purple-500" />;
+            default:
+                return <Paperclip className="h-5 w-5 text-muted-foreground" />;
+        }
+    };
+
     return (
-        <div className="space-y-4">
-            {originalTranscript && (
-                 <Card>
-                    <CardHeader className="flex flex-row items-center justify-between">
-                        <CardTitle className="text-sm flex items-center gap-2">
-                           <FileText className="h-4 w-4" />
-                           Full Transcript
-                        </CardTitle>
-                        <Button variant="ghost" size="sm" className="h-7 gap-1" onClick={handleCopyTranscript}>
-                            <Copy className="h-3.5 w-3.5" />
-                            Copy
-                        </Button>
-                    </CardHeader>
-                    <CardContent>
-                        <ScrollArea className="h-48">
-                             <pre className="text-xs whitespace-pre-wrap font-mono text-muted-foreground">
-                                {originalTranscript}
-                             </pre>
-                        </ScrollArea>
-                    </CardContent>
-                </Card>
-            )}
+        <>
+            <div className="space-y-4">
+                {originalTranscript && (
+                    <Card>
+                        <CardHeader className="flex flex-row items-center justify-between">
+                            <CardTitle className="text-sm flex items-center gap-2">
+                                <FileText className="h-4 w-4" />
+                                Full Transcript
+                            </CardTitle>
+                            <div className="flex items-center gap-2">
+                                <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-7 gap-1"
+                                    onClick={handleCopyTranscript}
+                                >
+                                    <Copy className="h-3.5 w-3.5" />
+                                    Copy
+                                </Button>
+                                <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-7 gap-1"
+                                    onClick={() => setIsTranslateOpen(true)}
+                                    disabled={isTranslating}
+                                >
+                                    <Languages className="h-3.5 w-3.5" />
+                                    Translate
+                                </Button>
+                            </div>
+                        </CardHeader>
+                        <CardContent>
+                            <ScrollArea className="h-48">
+                                <pre className="text-xs whitespace-pre-wrap font-mono text-muted-foreground">
+                                    {originalTranscript}
+                                </pre>
+                            </ScrollArea>
+                        </CardContent>
+                    </Card>
+                )}
 
-            {hasArtifacts && artifacts.map((artifact, index) => (
-                <a 
-                    key={index}
-                    href={artifact.storagePath}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="flex items-center justify-between p-3 rounded-lg border bg-muted/30 hover:bg-muted/50 transition-colors"
-                >
-                    <div className="flex items-center gap-3">
-                        {getIconForType(artifact.type)}
-                        <div className="flex flex-col">
-                            <span className="font-semibold text-sm capitalize">{artifact.type}</span>
-                            <span className="text-xs text-muted-foreground">{artifact.driveFileId}</span>
-                        </div>
+                {translationArtifacts.map((artifact, index) => {
+                    const translatedText = artifact.processedText;
+                    if (!translatedText) return null;
+                    const languageLabel = artifact.language || artifact.driveFileId || "Translation";
+                    return (
+                        <Card key={artifact.artifactId || `${languageLabel}-${index}`}>
+                            <CardHeader className="flex flex-row items-center justify-between">
+                                <CardTitle className="text-sm flex items-center gap-2">
+                                    <Languages className="h-4 w-4" />
+                                    Translated Transcript ({languageLabel})
+                                </CardTitle>
+                                <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-7 gap-1"
+                                    onClick={() => handleCopyTranslation(translatedText, languageLabel)}
+                                >
+                                    <Copy className="h-3.5 w-3.5" />
+                                    Copy
+                                </Button>
+                            </CardHeader>
+                            <CardContent>
+                                <ScrollArea className="h-48">
+                                    <pre className="text-xs whitespace-pre-wrap font-mono text-muted-foreground">
+                                        {translatedText}
+                                    </pre>
+                                </ScrollArea>
+                            </CardContent>
+                        </Card>
+                    );
+                })}
+
+                {hasFileArtifacts &&
+                    fileArtifacts.map((artifact, index) => (
+                        <a
+                            key={artifact.artifactId || index}
+                            href={artifact.storagePath}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="flex items-center justify-between p-3 rounded-lg border bg-muted/30 hover:bg-muted/50 transition-colors"
+                        >
+                            <div className="flex items-center gap-3">
+                                {getIconForType(artifact.type)}
+                                <div className="flex flex-col">
+                                    <span className="font-semibold text-sm capitalize">{artifact.type}</span>
+                                    <span className="text-xs text-muted-foreground">{artifact.driveFileId}</span>
+                                </div>
+                            </div>
+                            <Download className="h-4 w-4 text-muted-foreground" />
+                        </a>
+                    ))}
+
+                {!hasFileArtifacts && !originalTranscript && !hasTranslations && (
+                    <div className="text-center py-8">
+                        <p className="text-muted-foreground">No artifacts or transcript found for this meeting.</p>
                     </div>
-                    <Download className="h-4 w-4 text-muted-foreground" />
-                </a>
-            ))}
+                )}
+            </div>
 
-            {!hasArtifacts && !originalTranscript && (
-                <div className="text-center py-8">
-                    <p className="text-muted-foreground">No artifacts or transcript found for this meeting.</p>
-                </div>
-            )}
-        </div>
+            <Dialog open={isTranslateOpen} onOpenChange={setIsTranslateOpen}>
+                <DialogContent>
+                    <DialogHeader>
+                        <DialogTitle>Translate Transcript</DialogTitle>
+                        <DialogDescription>
+                            The translation keeps timestamps and formatting intact.
+                        </DialogDescription>
+                    </DialogHeader>
+                    <div className="space-y-2">
+                        <Label htmlFor="translation-language">Target language</Label>
+                        <Input
+                            id="translation-language"
+                            placeholder="e.g. English, Spanish, French"
+                            value={targetLanguage}
+                            onChange={(event) => setTargetLanguage(event.target.value)}
+                        />
+                        <p className="text-xs text-muted-foreground">
+                            We will preserve the original timestamps and layout.
+                        </p>
+                    </div>
+                    <DialogFooter>
+                        <Button
+                            variant="outline"
+                            onClick={() => setIsTranslateOpen(false)}
+                            disabled={isTranslating}
+                        >
+                            Cancel
+                        </Button>
+                        <Button onClick={handleTranslateTranscript} disabled={isTranslating}>
+                            {isTranslating ? (
+                                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                            ) : (
+                                <Languages className="mr-2 h-4 w-4" />
+                            )}
+                            Translate
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+        </>
     );
 }
   
