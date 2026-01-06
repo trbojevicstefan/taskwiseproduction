@@ -676,6 +676,7 @@ export const ingestFathomMeeting = async ({
   const summaryText = resolveSummaryText(payload, summaryPayload);
 
   const detailLevel = resolveDetailLevel(user);
+  const workspaceId = user.workspace?.id || null;
   const analysisResult = await analyzeMeeting({
     transcript: transcriptText,
     requestedDetailLevel: detailLevel,
@@ -770,7 +771,6 @@ export const ingestFathomMeeting = async ({
   const chatId = randomUUID();
   const planId = randomUUID();
 
-  const workspaceId = user.workspace?.id || null;
   const meeting = {
     _id: meetingId,
     userId,

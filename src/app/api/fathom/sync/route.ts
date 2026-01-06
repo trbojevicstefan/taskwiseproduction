@@ -38,12 +38,36 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "User not found." }, { status: 404 });
   }
 
+  const toErrorPayload = (error: unknown) => ({
+    message: error instanceof Error ? error.message : String(error),
+    stack: error instanceof Error ? error.stack : null,
+  });
+
   try {
     await logFathomIntegration(userId, "info", "sync.start", "Fathom sync started.", {
       range,
     });
-    const accessToken = await getValidFathomAccessToken(userId);
-    const meetings = await fetchFathomMeetings(accessToken);
+    let accessToken: string;
+    try {
+      accessToken = await getValidFathomAccessToken(userId);
+    } catch (error) {
+      await logFathomIntegration(userId, "error", "sync.token.failed", "Failed to get access token.", {
+        ...toErrorPayload(error),
+        range,
+      });
+      throw error;
+    }
+
+    let meetings: any[] = [];
+    try {
+      meetings = await fetchFathomMeetings(accessToken);
+    } catch (error) {
+      await logFathomIntegration(userId, "error", "sync.fetch.failed", "Failed to fetch meetings.", {
+        ...toErrorPayload(error),
+        range,
+      });
+      throw error;
+    }
 
     const toDate = (value: any) => {
       if (!value) return null;
@@ -161,15 +185,31 @@ export async function POST(request: Request) {
         continue;
       }
 
-      const result = await ingestFathomMeeting({
-        user,
-        recordingId: String(recordingId),
-        data: meeting,
-        accessToken,
-      });
+      let result: Awaited<ReturnType<typeof ingestFathomMeeting>> | null = null;
+      try {
+        result = await ingestFathomMeeting({
+          user,
+          recordingId: String(recordingId),
+          data: meeting,
+          accessToken,
+        });
+      } catch (error) {
+        skipped += 1;
+        await logFathomIntegration(
+          userId,
+          "error",
+          "sync.ingest.failed",
+          "Failed to ingest Fathom meeting.",
+          {
+            recordingId: String(recordingId),
+            ...toErrorPayload(error),
+          }
+        );
+        continue;
+      }
 
-      if (result.status === "created") created += 1;
-      else if (result.status === "duplicate") duplicate += 1;
+      if (result?.status === "created") created += 1;
+      else if (result?.status === "duplicate") duplicate += 1;
       else skipped += 1;
     }
 
@@ -184,7 +224,7 @@ export async function POST(request: Request) {
     const message = error instanceof Error ? error.message : String(error);
     console.error("Fathom sync failed:", error);
     await logFathomIntegration(userId, "error", "sync.failed", "Fathom sync failed.", {
-      error: message,
+      ...toErrorPayload(error),
       range,
     });
     return NextResponse.json(

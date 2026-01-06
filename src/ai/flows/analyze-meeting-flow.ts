@@ -470,7 +470,22 @@ const finalizeTasks = (tasks: TaskType[]) => {
     filtered.push(task);
     if (filtered.length >= maxTasks) break;
   }
-  return filtered;
+  if (filtered.length) return filtered;
+
+  const loose: TaskType[] = [];
+  for (const task of tasks) {
+    const title = task.title?.trim();
+    if (!title || isPlaceholderTitle(title)) continue;
+    const key = normalizeTitleKey(title);
+    if (!key || seen.has(key)) continue;
+    const words = title.split(/\s+/).filter(Boolean);
+    const hasSignal = Boolean(task.dueAt) || (task.status && task.status !== "todo");
+    if (!hasSignal && words.length < 3) continue;
+    seen.add(key);
+    loose.push(task);
+    if (loose.length >= maxTasks) break;
+  }
+  return loose;
 };
 
 const applyCompletionReviewFlags = (tasks: TaskType[]): TaskType[] => {
@@ -627,13 +642,6 @@ const analyzeMeetingFlow = ai.defineFlow(
     };
 
     const rewrittenLight = await rewriteTasksSafely(lightWithEvidence);
-    const defaultTasks = transcriptText
-      ? normalizeAiTasks(
-          [{ title: "Review meeting transcript and confirm action items" }],
-          "Meeting action"
-        )
-      : [];
-
     const transcriptAttendees = extractTranscriptAttendees(transcriptText);
     const transcriptEmails = new Set(extractTranscriptEmails(transcriptText));
     const transcriptMentionNames = extractTranscriptMentionNames(
@@ -713,9 +721,11 @@ const analyzeMeetingFlow = ai.defineFlow(
       annotateTasksWithProvider(tasks, taskProvider as any);
     const taggedLight = tagProvider(finalLight);
     const taggedExpanded = tagProvider(finalExpanded);
-    const taggedDefaultTasks = tagProvider(defaultTasks);
-    const fallbackTasks = taggedLight.length ? taggedLight : finalizeTasks(taggedDefaultTasks);
-    const resolvedLight = taggedLight.length ? taggedLight : fallbackTasks;
+    const resolvedLight = taggedLight.length
+      ? taggedLight
+      : taggedExpanded.length
+        ? taggedExpanded
+        : [];
     const resolvedExpanded = taggedExpanded.length ? taggedExpanded : resolvedLight;
 
     const mergePeople = (

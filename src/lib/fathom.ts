@@ -504,6 +504,26 @@ export const ensureFathomWebhook = async (
         triggered_for: created.triggered_for ?? null,
       }
     );
+    try {
+      const existingWebhooks = await listFathomWebhooks(accessToken);
+      const matches = existingWebhooks.filter(
+        (webhook: any) => getWebhookUrl(webhook) === createdUrl
+      );
+      if (matches.length > 1) {
+        const duplicates = matches.filter(
+          (webhook: any) => getWebhookId(webhook) !== webhookId
+        );
+        if (duplicates.length) {
+          await Promise.allSettled(
+            duplicates.map((webhook: any) =>
+              deleteFathomWebhook(accessToken, webhook)
+            )
+          );
+        }
+      }
+    } catch (error) {
+      console.warn("Failed to cleanup duplicate Fathom webhooks:", error);
+    }
     return { status: "created", webhookId, webhookUrl: createdUrl };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -555,6 +575,29 @@ export const ensureFathomWebhook = async (
             triggered_for: created.triggered_for ?? null,
           }
         );
+        try {
+          const existingWebhooks = await listFathomWebhooks(accessToken);
+          const matches = existingWebhooks.filter(
+            (webhook: any) => getWebhookUrl(webhook) === createdUrl
+          );
+          if (matches.length > 1) {
+            const duplicates = matches.filter(
+              (webhook: any) => getWebhookId(webhook) !== webhookId
+            );
+            if (duplicates.length) {
+              await Promise.allSettled(
+                duplicates.map((webhook: any) =>
+                  deleteFathomWebhook(accessToken, webhook)
+                )
+              );
+            }
+          }
+        } catch (cleanupError) {
+          console.warn(
+            "Failed to cleanup duplicate Fathom webhooks after fallback:",
+            cleanupError
+          );
+        }
         return { status: "created", webhookId, webhookUrl: createdUrl };
       } catch (fallbackError) {
         const fallbackMessage =

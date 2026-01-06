@@ -32,6 +32,35 @@ const UNASSIGNED_LABELS = new Set([
   "un assigned",
 ]);
 
+const TASK_TOKEN_STOPWORDS = new Set([
+  "a",
+  "an",
+  "and",
+  "are",
+  "as",
+  "at",
+  "be",
+  "by",
+  "for",
+  "from",
+  "in",
+  "is",
+  "it",
+  "of",
+  "on",
+  "or",
+  "our",
+  "the",
+  "their",
+  "they",
+  "this",
+  "to",
+  "we",
+  "with",
+  "you",
+  "your",
+]);
+
 const serializeMeeting = (meeting: any) => {
   const { recordingId, recordingIdHash, ...rest } = meeting;
   return {
@@ -94,6 +123,30 @@ const collectTaskKeys = (tasks: ExtractedTaskSchema[], keys: Set<string>) => {
   });
 };
 
+const tokenizeTaskText = (task: ExtractedTaskSchema): Set<string> => {
+  const parts = [task.title, task.description]
+    .map((value) => (typeof value === "string" ? value : ""))
+    .filter(Boolean)
+    .join(" ");
+  const normalized = normalizeTitleKey(parts);
+  if (!normalized) return new Set();
+  return new Set(
+    normalized
+      .split(" ")
+      .map((token) => token.trim())
+      .filter((token) => token && !TASK_TOKEN_STOPWORDS.has(token))
+  );
+};
+
+const tokenOverlapRatio = (a: Set<string>, b: Set<string>) => {
+  if (!a.size || !b.size) return 0;
+  let shared = 0;
+  for (const token of a) {
+    if (b.has(token)) shared += 1;
+  }
+  return shared / Math.min(a.size, b.size);
+};
+
 const mergeNewTasks = (
   existing: ExtractedTaskSchema[],
   incoming: ExtractedTaskSchema[]
@@ -101,6 +154,7 @@ const mergeNewTasks = (
   const merged = [...existing];
   const keys = new Set<string>();
   collectTaskKeys(existing, keys);
+  const tokenSets = existing.map((task) => tokenizeTaskText(task));
 
   let added = 0;
   incoming.forEach((task) => {
@@ -113,8 +167,16 @@ const mergeNewTasks = (
     if (!key || keys.has(key)) {
       return;
     }
+    const incomingTokens = tokenizeTaskText(normalized);
+    const overlapsExisting = tokenSets.some(
+      (tokens) => tokenOverlapRatio(tokens, incomingTokens) >= 0.65
+    );
+    if (overlapsExisting) {
+      return;
+    }
     keys.add(key);
     merged.push(normalized);
+    tokenSets.push(incomingTokens);
     added += 1;
   });
 
