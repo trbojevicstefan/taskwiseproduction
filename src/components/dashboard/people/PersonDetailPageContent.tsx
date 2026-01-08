@@ -16,6 +16,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useToast } from '@/hooks/use-toast';
 import { useIntegrations } from '@/contexts/IntegrationsContext';
+import { useMeetingHistory } from '@/contexts/MeetingHistoryContext';
 import ShareToSlackDialog from '@/components/dashboard/common/ShareToSlackDialog';
 import { Badge } from '@/components/ui/badge';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
@@ -29,6 +30,9 @@ import { useRouter } from 'next/navigation';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { apiFetch } from '@/lib/api';
+import { useWorkspaceBoards } from "@/hooks/use-workspace-boards";
+import { moveTaskToBoard } from "@/lib/board-actions";
+import { buildBriefContext } from "@/lib/brief-context";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -89,6 +93,9 @@ const DetailField = ({
 
 export default function PersonDetailPageContent({ personId }: PersonDetailPageContentProps) {
   const { user, loading: authLoading } = useAuth();
+  const workspaceId = user?.workspace?.id;
+  const { boards } = useWorkspaceBoards(workspaceId);
+  const { meetings } = useMeetingHistory();
   const { isSlackConnected } = useIntegrations();
   const router = useRouter();
   const { toast } = useToast();
@@ -131,6 +138,10 @@ export default function PersonDetailPageContent({ personId }: PersonDetailPageCo
       subtasks: null,
       status: task.status,
       comments: task.comments ?? null,
+      researchBrief: task.researchBrief ?? null,
+      aiAssistanceText: task.aiAssistanceText ?? null,
+      sourceSessionId: task.sourceSessionId ?? undefined,
+      sourceSessionName: task.sourceSessionName ?? null,
     }),
     []
   );
@@ -441,7 +452,10 @@ export default function PersonDetailPageContent({ personId }: PersonDetailPageCo
     return task.id;
   }, []);
 
-  const handleSaveTaskDetails = async (updatedTask: ExtractedTaskSchema) => {
+  const handleSaveTaskDetails = async (
+    updatedTask: ExtractedTaskSchema,
+    options?: { close?: boolean }
+  ) => {
     if (!taskDetailContext) return;
     const { sourceType, sourceSessionId, sourceTaskId, derivedTaskId } =
       taskDetailContext;
@@ -452,6 +466,8 @@ export default function PersonDetailPageContent({ personId }: PersonDetailPageCo
       dueAt: updatedTask.dueAt ?? null,
       status: updatedTask.status || "todo",
       comments: updatedTask.comments ?? null,
+      researchBrief: updatedTask.researchBrief ?? null,
+      aiAssistanceText: updatedTask.aiAssistanceText ?? null,
     };
 
     try {
@@ -507,9 +523,11 @@ export default function PersonDetailPageContent({ personId }: PersonDetailPageCo
         )
       );
       toast({ title: "Task Updated", description: "Task details were saved." });
-      setIsTaskDetailDialogOpen(false);
-      setTaskForDetailView(null);
-      setTaskDetailContext(null);
+      if (options?.close !== false) {
+        setIsTaskDetailDialogOpen(false);
+        setTaskForDetailView(null);
+        setTaskDetailContext(null);
+      }
     } catch (error) {
       console.error("Failed to save task details:", error);
       toast({
@@ -519,6 +537,22 @@ export default function PersonDetailPageContent({ personId }: PersonDetailPageCo
       });
     }
   };
+
+  const handleMoveTaskToBoard = useCallback(
+    async (boardId: string) => {
+      if (!workspaceId || !taskForDetailView) {
+        throw new Error("Workspace not ready.");
+      }
+      await moveTaskToBoard(workspaceId, taskForDetailView.id, boardId);
+    },
+    [taskForDetailView, workspaceId]
+  );
+
+  const getBriefContext = useCallback(
+    (task: ExtractedTaskSchema) =>
+      buildBriefContext(task, meetings, person ? [person] : []),
+    [meetings, person]
+  );
 
   const handleDeleteTask = async () => {
     if (!taskToDelete) return;
@@ -1014,16 +1048,24 @@ export default function PersonDetailPageContent({ personId }: PersonDetailPageCo
           defaultUserId={person.slackId || null}
         />
       )}
-      <TaskDetailDialog
-        isOpen={isTaskDetailDialogOpen}
-        onClose={() => {
-          setIsTaskDetailDialogOpen(false);
-          setTaskForDetailView(null);
-          setTaskDetailContext(null);
-        }}
-        task={taskForDetailView}
-        onSave={handleSaveTaskDetails}
-      />
+        <TaskDetailDialog
+          isOpen={isTaskDetailDialogOpen}
+          onClose={() => {
+            setIsTaskDetailDialogOpen(false);
+            setTaskForDetailView(null);
+            setTaskDetailContext(null);
+          }}
+          task={taskForDetailView}
+          onSave={handleSaveTaskDetails}
+          people={currentPersonData ? [currentPersonData] : []}
+          workspaceId={workspaceId}
+          boards={boards}
+          currentBoardId={taskForDetailView?.addedToBoardId ?? null}
+          onMoveToBoard={handleMoveTaskToBoard}
+          getBriefContext={getBriefContext}
+          shareTitle={currentPersonData.name || "Person"}
+          supportsSubtasks={false}
+        />
       <AlertDialog open={isDeleteTaskConfirmOpen} onOpenChange={setIsDeleteTaskConfirmOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>

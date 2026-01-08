@@ -55,6 +55,8 @@ const buildTaskRecords = (
         sourceEvidence: task.sourceEvidence ?? null,
         aiProvider: task.aiProvider ?? null,
         comments: task.comments ?? null,
+        researchBrief: task.researchBrief ?? null,
+        aiAssistanceText: task.aiAssistanceText ?? null,
         taskType: task.taskType ?? null,
         completionSuggested: task.completionSuggested ?? null,
         completionConfidence: task.completionConfidence ?? null,

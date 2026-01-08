@@ -71,6 +71,10 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import SelectionToolbar from "@/components/dashboard/common/SelectionToolbar";
+import TaskDetailDialog from "@/components/dashboard/planning/TaskDetailDialog";
+import ShareToSlackDialog from "@/components/dashboard/common/ShareToSlackDialog";
+import PushToGoogleTasksDialog from "@/components/dashboard/common/PushToGoogleTasksDialog";
+import PushToTrelloDialog from "@/components/dashboard/common/PushToTrelloDialog";
 import AssignPersonDialog from "@/components/dashboard/planning/AssignPersonDialog";
 import SetDueDateDialog from "@/components/dashboard/planning/SetDueDateDialog";
 import { useToast } from "@/hooks/use-toast";
@@ -79,9 +83,14 @@ import { apiFetch } from "@/lib/api";
 import { normalizePersonNameKey } from "@/lib/transcript-utils";
 import { getAssigneeLabel, isPlaceholderAssignee } from "@/lib/task-assignee";
 import { BOARD_TEMPLATES, DEFAULT_BOARD_TEMPLATE_ID } from "@/lib/board-templates";
+import { copyTextToClipboard, exportTasksToCSV, exportTasksToMarkdown, exportTasksToPDF, formatTasksToText } from "@/lib/exportUtils";
+import { useIntegrations } from "@/contexts/IntegrationsContext";
+import { useMeetingHistory } from "@/contexts/MeetingHistoryContext";
 import type { Task } from "@/types/project";
 import type { Board, BoardStatus, BoardStatusCategory } from "@/types/board";
 import type { Person } from "@/types/person";
+import type { ExtractedTaskSchema } from "@/types/chat";
+import { buildBriefContext } from "@/lib/brief-context";
 
 type TaskPriority = Task["priority"];
 
@@ -291,15 +300,17 @@ function AssigneeDropdown({
   );
 }
 
-function BoardTaskCard({
-  task,
-  assigneeName,
-  assigneePerson,
-  people,
-  onEdit,
-  onDelete,
-  onOpen,
-  onAssign,
+  function BoardTaskCard({
+    task,
+    assigneeName,
+    assigneePerson,
+    people,
+    isSelected,
+    onToggleSelect,
+    onEdit,
+    onDelete,
+    onOpen,
+    onAssign,
   onDragStart,
   onDragOver,
   onDrop,
@@ -308,15 +319,17 @@ function BoardTaskCard({
   isDragOver,
   dragPosition,
   dragDisabled,
-}: {
-  task: Task;
-  assigneeName: string;
-  assigneePerson: Person | null;
-  people: Person[];
-  onEdit: () => void;
-  onDelete: () => void;
-  onOpen: () => void;
-  onAssign: (task: Task, person: Person | null) => void;
+  }: {
+    task: Task;
+    assigneeName: string;
+    assigneePerson: Person | null;
+    people: Person[];
+    isSelected: boolean;
+    onToggleSelect: (taskId: string, selected: boolean) => void;
+    onEdit: () => void;
+    onDelete: () => void;
+    onOpen: () => void;
+    onAssign: (task: Task, person: Person | null) => void;
   onDragStart: (event: React.DragEvent<HTMLDivElement>) => void;
   onDragOver: (event: React.DragEvent<HTMLDivElement>) => void;
   onDrop: (event: React.DragEvent<HTMLDivElement>) => void;
@@ -345,10 +358,18 @@ function BoardTaskCard({
         isDragOver && dragPosition === "after" && "border-b-2 border-b-primary/60"
       )}
     >
-      <div className="flex items-start justify-between gap-2">
-        <PriorityBadge priority={priority} />
-        <TaskActionsMenu onEdit={onEdit} onDelete={onDelete} />
-      </div>
+        <div className="flex items-start justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <Checkbox
+              checked={isSelected}
+              onCheckedChange={(checked) => onToggleSelect(task.id, Boolean(checked))}
+              aria-label={`Select ${task.title}`}
+              className="h-4 w-4"
+            />
+            <PriorityBadge priority={priority} />
+          </div>
+          <TaskActionsMenu onEdit={onEdit} onDelete={onDelete} />
+        </div>
 
       <button
         type="button"
@@ -393,10 +414,12 @@ function BoardTaskCard({
     </div>
   );
 }
-export default function BoardPageContent({
-  workspaceId: _workspaceId,
-}: BoardPageContentProps) {
+  export default function BoardPageContent({
+    workspaceId: _workspaceId,
+  }: BoardPageContentProps) {
   const { toast } = useToast();
+  const { isSlackConnected, isGoogleTasksConnected, isTrelloConnected } = useIntegrations();
+  const { meetings } = useMeetingHistory();
   const router = useRouter();
   const searchParams = useSearchParams();
   const searchParamsString = searchParams.toString();
@@ -416,16 +439,22 @@ export default function BoardPageContent({
   );
   const [assigneeFilters, setAssigneeFilters] = useState<Set<string>>(new Set());
   const [includeUnassigned, setIncludeUnassigned] = useState(false);
-  const [isTaskDialogOpen, setIsTaskDialogOpen] = useState(false);
-  const [isBoardDialogOpen, setIsBoardDialogOpen] = useState(false);
+    const [isTaskDialogOpen, setIsTaskDialogOpen] = useState(false);
+    const [isTaskDetailDialogOpen, setIsTaskDetailDialogOpen] = useState(false);
+    const [taskForDetailView, setTaskForDetailView] = useState<ExtractedTaskSchema | null>(null);
+    const [detailTaskBoardItem, setDetailTaskBoardItem] = useState<BoardTaskItem | null>(null);
+    const [isBoardDialogOpen, setIsBoardDialogOpen] = useState(false);
   const [isStageDialogOpen, setIsStageDialogOpen] = useState(false);
   const [isStageColorDialogOpen, setIsStageColorDialogOpen] = useState(false);
   const [stageToEdit, setStageToEdit] = useState<BoardStatus | null>(null);
   const [stageColorDraft, setStageColorDraft] = useState("#2563eb");
   const [stageToDelete, setStageToDelete] = useState<BoardStatus | null>(null);
-  const [isAssignDialogOpen, setIsAssignDialogOpen] = useState(false);
-  const [isSetDueDateDialogOpen, setIsSetDueDateDialogOpen] = useState(false);
-  const [isStatusDialogOpen, setIsStatusDialogOpen] = useState(false);
+    const [isAssignDialogOpen, setIsAssignDialogOpen] = useState(false);
+    const [isSetDueDateDialogOpen, setIsSetDueDateDialogOpen] = useState(false);
+    const [isStatusDialogOpen, setIsStatusDialogOpen] = useState(false);
+    const [isShareToSlackOpen, setIsShareToSlackOpen] = useState(false);
+    const [isPushToGoogleOpen, setIsPushToGoogleOpen] = useState(false);
+    const [isPushToTrelloOpen, setIsPushToTrelloOpen] = useState(false);
   const [newBoardName, setNewBoardName] = useState("");
   const [newBoardDescription, setNewBoardDescription] = useState("");
   const [newBoardTemplateId, setNewBoardTemplateId] = useState(
@@ -452,10 +481,30 @@ export default function BoardPageContent({
   const [dragOverTaskId, setDragOverTaskId] = useState<string | null>(null);
   const [dragOverPosition, setDragOverPosition] = useState<DragPosition>(null);
 
-  const orderedStatuses = useMemo(
-    () => [...boardStatuses].sort((a, b) => a.order - b.order),
-    [boardStatuses]
-  );
+    const orderedStatuses = useMemo(
+      () => [...boardStatuses].sort((a, b) => a.order - b.order),
+      [boardStatuses]
+    );
+
+    const mapTaskToExtracted = useCallback(
+      (task: Task): ExtractedTaskSchema => ({
+        id: task.id,
+        title: task.title,
+        description: task.description ?? null,
+        priority: task.priority,
+        status: task.status,
+        dueAt: task.dueAt ?? null,
+        assignee: task.assignee ?? null,
+        assigneeName: task.assigneeName ?? null,
+        subtasks: null,
+        comments: task.comments ?? null,
+        researchBrief: task.researchBrief ?? null,
+        aiAssistanceText: task.aiAssistanceText ?? null,
+        sourceSessionId: task.sourceSessionId ?? undefined,
+        sourceSessionName: task.sourceSessionName ?? null,
+      }),
+      []
+    );
 
   const peopleById = useMemo(() => {
     const map = new Map<string, Person>();
@@ -977,32 +1026,17 @@ export default function BoardPageContent({
     setIsTaskDialogOpen(true);
   };
 
-  const openEditTask = (task: BoardTaskItem) => {
-    const rawAssignee = task.assignee as { uid?: string; id?: string } | undefined;
-    const assigneeNameKey =
-      task.assigneeNameKey ||
-      (task.assigneeName ? normalizePersonNameKey(task.assigneeName) : "");
-    setEditingTask(task);
-    setTaskDraft({
-      title: task.title,
-      description: task.description || "",
-      statusId: task.boardStatusId || resolveBoardStatusId(null),
-      priority: task.priority || "medium",
-      assigneeId:
-        rawAssignee?.uid ||
-        rawAssignee?.id ||
-        (assigneeNameKey ? personNameKeyToId.get(assigneeNameKey) : "") ||
-        "",
-      dueDate: typeof task.dueAt === "string" ? task.dueAt.slice(0, 10) : "",
-    });
-    setIsTaskDialogOpen(true);
-  };
+    const openEditTask = (task: BoardTaskItem) => {
+      setDetailTaskBoardItem(task);
+      setTaskForDetailView(mapTaskToExtracted(task));
+      setIsTaskDetailDialogOpen(true);
+    };
 
-  const handleSaveTask = async () => {
-    if (!taskDraft.title.trim()) {
-      toast({
-        title: "Title required",
-        description: "Add a title before saving the task.",
+    const handleSaveTask = async () => {
+      if (!taskDraft.title.trim()) {
+        toast({
+          title: "Title required",
+          description: "Add a title before saving the task.",
         variant: "destructive",
       });
       return;
@@ -1074,8 +1108,81 @@ export default function BoardPageContent({
         description: error instanceof Error ? error.message : "Try again in a moment.",
         variant: "destructive",
       });
-    }
-  };
+      }
+    };
+
+    const handleSaveTaskDetails = async (
+      updatedTask: ExtractedTaskSchema,
+      options?: { close?: boolean }
+    ) => {
+      if (!detailTaskBoardItem) return;
+      try {
+        await apiFetch(`/api/tasks/${detailTaskBoardItem.id}`, {
+          method: "PATCH",
+          body: JSON.stringify({
+            title: updatedTask.title,
+            description: updatedTask.description ?? null,
+            priority: updatedTask.priority,
+            dueAt: updatedTask.dueAt ?? null,
+            status: updatedTask.status || "todo",
+            comments: updatedTask.comments ?? null,
+            researchBrief: updatedTask.researchBrief ?? null,
+            aiAssistanceText: updatedTask.aiAssistanceText ?? null,
+          }),
+        });
+        if (activeBoardId) {
+          await loadBoardData(activeBoardId);
+        }
+        setTaskForDetailView((prev) =>
+          prev ? { ...prev, ...updatedTask } : prev
+        );
+        if (options?.close !== false) {
+          setIsTaskDetailDialogOpen(false);
+          setTaskForDetailView(null);
+          setDetailTaskBoardItem(null);
+        }
+        toast({ title: "Task updated" });
+      } catch (error) {
+        console.error("Failed to save task details:", error);
+        toast({
+          title: "Could not update task",
+          description: error instanceof Error ? error.message : "Try again in a moment.",
+          variant: "destructive",
+        });
+      }
+    };
+
+    const handleMoveTaskToBoard = async (targetBoardId: string) => {
+      if (!detailTaskBoardItem || !activeBoardId || !_workspaceId) return;
+      if (targetBoardId === activeBoardId) return;
+      try {
+        await apiFetch(`/api/workspaces/${_workspaceId}/boards/${targetBoardId}/items`, {
+          method: "POST",
+          body: JSON.stringify({ taskId: detailTaskBoardItem.id }),
+        });
+        await apiFetch(
+          `/api/workspaces/${_workspaceId}/boards/${activeBoardId}/items/${detailTaskBoardItem.boardItemId}`,
+          { method: "DELETE" }
+        );
+        setTasks((prev) => prev.filter((task) => task.id !== detailTaskBoardItem.id));
+        setSelectedTaskIds((prev) => {
+          const next = new Set(prev);
+          next.delete(detailTaskBoardItem.id);
+          return next;
+        });
+        setIsTaskDetailDialogOpen(false);
+        setTaskForDetailView(null);
+        setDetailTaskBoardItem(null);
+      } catch (error) {
+        console.error("Failed to move task to board:", error);
+        throw error;
+      }
+    };
+
+    const getBriefContext = useCallback(
+      (task: ExtractedTaskSchema) => buildBriefContext(task, meetings, people),
+      [meetings, people]
+    );
 
   const handleDeleteTask = async (task: BoardTaskItem) => {
     try {
@@ -1379,15 +1486,25 @@ export default function BoardPageContent({
     }
   }, [_workspaceId, activeBoardId, stageToDelete, toast]);
 
-  const selectedVisibleCount = useMemo(
-    () => filteredTasks.filter((task) => selectedTaskIds.has(task.id)).length,
-    [filteredTasks, selectedTaskIds]
-  );
+    const selectedVisibleCount = useMemo(
+      () => filteredTasks.filter((task) => selectedTaskIds.has(task.id)).length,
+      [filteredTasks, selectedTaskIds]
+    );
 
-  const allVisibleSelected =
-    filteredTasks.length > 0 && selectedVisibleCount === filteredTasks.length;
-  const someVisibleSelected =
-    selectedVisibleCount > 0 && selectedVisibleCount < filteredTasks.length;
+    const allVisibleSelected =
+      filteredTasks.length > 0 && selectedVisibleCount === filteredTasks.length;
+    const someVisibleSelected =
+      selectedVisibleCount > 0 && selectedVisibleCount < filteredTasks.length;
+
+    const selectedTasks = useMemo(
+      () => tasks.filter((task) => selectedTaskIds.has(task.id)),
+      [tasks, selectedTaskIds]
+    );
+
+    const selectedShareTasks = useMemo(
+      () => selectedTasks.map(mapTaskToExtracted),
+      [selectedTasks, mapTaskToExtracted]
+    );
 
   const toggleTaskSelection = useCallback((taskId: string, checked: boolean) => {
     setSelectedTaskIds((prev) => {
@@ -1401,21 +1518,106 @@ export default function BoardPageContent({
     });
   }, []);
 
-  const toggleSelectAllVisible = useCallback(() => {
-    setSelectedTaskIds((prev) => {
-      const next = new Set(prev);
-      if (allVisibleSelected) {
-        filteredTasks.forEach((task) => next.delete(task.id));
+    const toggleSelectAllVisible = useCallback(() => {
+      setSelectedTaskIds((prev) => {
+        const next = new Set(prev);
+        if (allVisibleSelected) {
+          filteredTasks.forEach((task) => next.delete(task.id));
       } else {
         filteredTasks.forEach((task) => next.add(task.id));
       }
       return next;
-    });
-  }, [allVisibleSelected, filteredTasks]);
+      });
+    }, [allVisibleSelected, filteredTasks]);
 
-  const clearSelection = useCallback(() => {
-    setSelectedTaskIds(new Set());
-  }, []);
+    const selectColumnTasks = useCallback(
+      (statusId: string) => {
+        const columnTasks = tasksByStatus.get(statusId) || [];
+        setSelectedTaskIds((prev) => {
+          const next = new Set(prev);
+          columnTasks.forEach((task) => next.add(task.id));
+          return next;
+        });
+      },
+      [tasksByStatus]
+    );
+
+    const clearColumnSelection = useCallback(
+      (statusId: string) => {
+        const columnTasks = tasksByStatus.get(statusId) || [];
+        setSelectedTaskIds((prev) => {
+          const next = new Set(prev);
+          columnTasks.forEach((task) => next.delete(task.id));
+          return next;
+        });
+      },
+      [tasksByStatus]
+    );
+
+    const clearSelection = useCallback(() => {
+      setSelectedTaskIds(new Set());
+    }, []);
+
+    const handleCopySelected = useCallback(async () => {
+      if (!selectedShareTasks.length) return;
+      const text = formatTasksToText(selectedShareTasks);
+      const { success } = await copyTextToClipboard(text);
+      toast({
+        title: success ? "Copied to clipboard" : "Copy failed",
+        variant: success ? "default" : "destructive",
+      });
+    }, [selectedShareTasks, toast]);
+
+    const handleExport = useCallback(
+      (format: "csv" | "md" | "pdf") => {
+        if (!selectedShareTasks.length) return;
+        const baseName = activeBoard?.name || "Board tasks";
+        if (format === "csv") {
+          exportTasksToCSV(selectedShareTasks, `${baseName}.csv`);
+        } else if (format === "md") {
+          exportTasksToMarkdown(selectedShareTasks, `${baseName}.md`);
+        } else {
+          exportTasksToPDF(selectedShareTasks, baseName);
+        }
+      },
+      [activeBoard?.name, selectedShareTasks]
+    );
+
+    const handleShareToSlack = useCallback(() => {
+      if (!selectedShareTasks.length) {
+        toast({
+          title: "No tasks selected",
+          description: "Select tasks to share.",
+          variant: "destructive",
+        });
+        return;
+      }
+      setIsShareToSlackOpen(true);
+    }, [selectedShareTasks.length, toast]);
+
+    const handlePushToGoogleTasks = useCallback(() => {
+      if (!selectedShareTasks.length) {
+        toast({
+          title: "No tasks selected",
+          description: "Select tasks to push.",
+          variant: "destructive",
+        });
+        return;
+      }
+      setIsPushToGoogleOpen(true);
+    }, [selectedShareTasks.length, toast]);
+
+    const handlePushToTrello = useCallback(() => {
+      if (!selectedShareTasks.length) {
+        toast({
+          title: "No tasks selected",
+          description: "Select tasks to push.",
+          variant: "destructive",
+        });
+        return;
+      }
+      setIsPushToTrelloOpen(true);
+    }, [selectedShareTasks.length, toast]);
 
   useEffect(() => {
     setSelectedTaskIds((prev) => {
@@ -1425,15 +1627,10 @@ export default function BoardPageContent({
     });
   }, [tasks]);
 
-  const selectedTasks = useMemo(
-    () => tasks.filter((task) => selectedTaskIds.has(task.id)),
-    [selectedTaskIds, tasks]
-  );
-
-  const applyBulkUpdates = useCallback(
-    async (
-      nextTasks: BoardTaskItem[],
-      payload: { taskIds: string[]; updates?: Record<string, any>; statusId?: string }
+    const applyBulkUpdates = useCallback(
+      async (
+        nextTasks: BoardTaskItem[],
+        payload: { taskIds: string[]; updates?: Record<string, any>; statusId?: string }
     ) => {
       if (!activeBoardId || !payload.taskIds.length) return;
       const previous = tasks;
@@ -1688,11 +1885,18 @@ export default function BoardPageContent({
                       >
                         <MoreHorizontal className="h-4 w-4" />
                       </button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end">
-                      <DropdownMenuItem onSelect={() => openStageColorDialog(status)}>
-                        Change color
-                      </DropdownMenuItem>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        <DropdownMenuItem onSelect={() => selectColumnTasks(status.id)}>
+                          Select all tasks
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onSelect={() => clearColumnSelection(status.id)}>
+                          Clear selection
+                        </DropdownMenuItem>
+                        <DropdownMenuSeparator />
+                        <DropdownMenuItem onSelect={() => openStageColorDialog(status)}>
+                          Change color
+                        </DropdownMenuItem>
                       <DropdownMenuItem
                         onSelect={() => setStageToDelete(status)}
                         disabled={totalTasksForStatus > 0 || orderedStatuses.length <= 1}
@@ -1705,17 +1909,19 @@ export default function BoardPageContent({
                 </div>
               </div>
               <div className="flex-1 p-3 flex flex-col gap-3 overflow-y-auto">
-                {columnTasks.map((task) => (
-                  <BoardTaskCard
-                    key={task.id}
-                    task={task}
-                    assigneeName={getAssigneeName(task)}
-                    assigneePerson={getAssigneePerson(task)}
-                    people={people}
-                    onEdit={() => openEditTask(task)}
-                    onDelete={() => handleDeleteTask(task)}
-                    onOpen={() => openEditTask(task)}
-                    onAssign={handleAssignTask}
+                  {columnTasks.map((task) => (
+                    <BoardTaskCard
+                      key={task.id}
+                      task={task}
+                      assigneeName={getAssigneeName(task)}
+                      assigneePerson={getAssigneePerson(task)}
+                      people={people}
+                      isSelected={selectedTaskIds.has(task.id)}
+                      onToggleSelect={toggleTaskSelection}
+                      onEdit={() => openEditTask(task)}
+                      onDelete={() => handleDeleteTask(task)}
+                      onOpen={() => openEditTask(task)}
+                      onAssign={handleAssignTask}
                     onDragStart={(event) => handleDragStart(event, task.id)}
                     onDragOver={(event) => handleDragOverTask(event, task)}
                     onDrop={(event) => handleDropOnTask(event, task)}
@@ -2046,14 +2252,22 @@ export default function BoardPageContent({
         {viewMode === "board" ? renderBoardView() : renderListView()}
       </main>
 
-      <SelectionToolbar
-        selectedCount={viewMode === "list" ? selectedTaskIds.size : 0}
-        onClear={clearSelection}
-        onDelete={handleBulkDelete}
-        onAssign={() => setIsAssignDialogOpen(true)}
-        onSetDueDate={() => setIsSetDueDateDialogOpen(true)}
-        onChangeStatus={openStatusDialog}
-      />
+        <SelectionToolbar
+          selectedCount={selectedTaskIds.size}
+          onClear={clearSelection}
+          onDelete={handleBulkDelete}
+          onAssign={() => setIsAssignDialogOpen(true)}
+          onSetDueDate={() => setIsSetDueDateDialogOpen(true)}
+          onChangeStatus={openStatusDialog}
+          onSend={(format) => handleExport(format)}
+          onCopy={handleCopySelected}
+          onShareToSlack={handleShareToSlack}
+          isSlackConnected={isSlackConnected}
+          onPushToGoogleTasks={handlePushToGoogleTasks}
+          isGoogleTasksConnected={isGoogleTasksConnected}
+          onPushToTrello={handlePushToTrello}
+          isTrelloConnected={isTrelloConnected}
+        />
 
       <Dialog open={isBoardDialogOpen} onOpenChange={setIsBoardDialogOpen}>
         <DialogContent className="sm:max-w-[520px]">
@@ -2364,11 +2578,47 @@ export default function BoardPageContent({
         </DialogContent>
       </Dialog>
 
-      <AssignPersonDialog
-        isOpen={isAssignDialogOpen}
-        onClose={() => setIsAssignDialogOpen(false)}
-        people={people}
-        isLoadingPeople={isLoading}
+        <TaskDetailDialog
+          isOpen={isTaskDetailDialogOpen}
+          onClose={() => {
+            setIsTaskDetailDialogOpen(false);
+            setTaskForDetailView(null);
+            setDetailTaskBoardItem(null);
+          }}
+          task={taskForDetailView}
+          onSave={handleSaveTaskDetails}
+          people={people}
+          workspaceId={_workspaceId}
+          boards={boards}
+          currentBoardId={activeBoardId}
+          onMoveToBoard={handleMoveTaskToBoard}
+          getBriefContext={getBriefContext}
+          shareTitle={activeBoard?.name || "Board"}
+          supportsSubtasks={false}
+        />
+
+        <ShareToSlackDialog
+          isOpen={isShareToSlackOpen}
+          onClose={() => setIsShareToSlackOpen(false)}
+          tasks={selectedShareTasks}
+          sessionTitle={activeBoard?.name || "Board"}
+        />
+        <PushToGoogleTasksDialog
+          isOpen={isPushToGoogleOpen}
+          onClose={() => setIsPushToGoogleOpen(false)}
+          tasks={selectedShareTasks}
+        />
+        <PushToTrelloDialog
+          isOpen={isPushToTrelloOpen}
+          onClose={() => setIsPushToTrelloOpen(false)}
+          tasks={selectedShareTasks}
+        />
+
+        <AssignPersonDialog
+          isOpen={isAssignDialogOpen}
+          onClose={() => setIsAssignDialogOpen(false)}
+          people={people}
+          isLoadingPeople={isLoading}
         onAssign={handleBulkAssign}
         onCreatePerson={handleCreatePerson}
         task={null}

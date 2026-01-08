@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Calendar, Clipboard, Loader2, Users, Video, Wand2, Plus } from "lucide-react";
 import DashboardHeader from "@/components/dashboard/DashboardHeader";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -19,9 +19,14 @@ import { format } from "date-fns";
 import { copyTextToClipboard } from "@/lib/exportUtils";
 import type { Person } from "@/types/person";
 import type { Task } from "@/types/project";
+import type { ExtractedTaskSchema } from "@/types/chat";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import TaskDetailDialog from "@/components/dashboard/planning/TaskDetailDialog";
+import { useWorkspaceBoards } from "@/hooks/use-workspace-boards";
+import { moveTaskToBoard } from "@/lib/board-actions";
+import { buildBriefContext } from "@/lib/brief-context";
 
 type CalendarEvent = {
   id: string;
@@ -104,6 +109,8 @@ export default function MeetingPlannerPageContent() {
   const { isGoogleTasksConnected, connectGoogleTasks } = useIntegrations();
   const { meetings } = useMeetingHistory();
   const { user } = useAuth();
+  const workspaceId = user?.workspace?.id;
+  const { boards } = useWorkspaceBoards(workspaceId);
 
   const [people, setPeople] = useState<Person[]>([]);
   const [calendarEvents, setCalendarEvents] = useState<CalendarEvent[]>([]);
@@ -125,6 +132,12 @@ export default function MeetingPlannerPageContent() {
   const [manualAttendees, setManualAttendees] = useState<string[]>([]);
   const [schedulePeopleSearch, setSchedulePeopleSearch] = useState("");
   const [isSchedulingMeeting, setIsSchedulingMeeting] = useState(false);
+  const [isTaskDetailDialogOpen, setIsTaskDetailDialogOpen] = useState(false);
+  const [taskForDetailView, setTaskForDetailView] = useState<ExtractedTaskSchema | null>(null);
+  const [taskDetailContext, setTaskDetailContext] = useState<{
+    personId: string;
+    taskId: string;
+  } | null>(null);
 
   useEffect(() => {
     if (!user?.uid) {
@@ -405,6 +418,106 @@ export default function MeetingPlannerPageContent() {
       variant: success ? "default" : "destructive",
     });
   };
+
+  const mapTaskToExtracted = (task: Task): ExtractedTaskSchema => ({
+    id: task.id,
+    title: task.title,
+    description: task.description ?? null,
+    priority: task.priority,
+    status: task.status,
+    dueAt: task.dueAt ?? null,
+    assignee: task.assignee ?? null,
+    assigneeName: task.assigneeName ?? null,
+    subtasks: null,
+    comments: task.comments ?? null,
+    researchBrief: task.researchBrief ?? null,
+    aiAssistanceText: task.aiAssistanceText ?? null,
+    sourceSessionId: task.sourceSessionId ?? undefined,
+    sourceSessionName: task.sourceSessionName ?? null,
+  });
+
+  const handleOpenTaskDetails = (person: Person, task: Task) => {
+    setTaskForDetailView(mapTaskToExtracted(task));
+    setTaskDetailContext({ personId: person.id, taskId: task.id });
+    setIsTaskDetailDialogOpen(true);
+  };
+
+  const handleSaveTaskDetails = async (
+    updatedTask: ExtractedTaskSchema,
+    options?: { close?: boolean }
+  ) => {
+    if (!taskDetailContext) return;
+    try {
+      const response = await fetch(`/api/tasks/${taskDetailContext.taskId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: updatedTask.title,
+          description: updatedTask.description ?? null,
+          priority: updatedTask.priority,
+          dueAt: updatedTask.dueAt ?? null,
+          status: updatedTask.status || "todo",
+          comments: updatedTask.comments ?? null,
+          researchBrief: updatedTask.researchBrief ?? null,
+          aiAssistanceText: updatedTask.aiAssistanceText ?? null,
+        }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(payload.error || "Failed to update task.");
+      }
+      setPersonTasks((prev) => {
+        const next = { ...prev };
+        const tasksForPerson = next[taskDetailContext.personId] || [];
+        next[taskDetailContext.personId] = tasksForPerson.map((task) =>
+          task.id === taskDetailContext.taskId
+            ? {
+                ...task,
+                title: updatedTask.title,
+                description: updatedTask.description ?? "",
+                priority: updatedTask.priority,
+                dueAt: updatedTask.dueAt ?? null,
+                status: updatedTask.status || "todo",
+                comments: updatedTask.comments ?? null,
+                researchBrief: updatedTask.researchBrief ?? null,
+                aiAssistanceText: updatedTask.aiAssistanceText ?? null,
+              }
+            : task
+        );
+        return next;
+      });
+      setTaskForDetailView(updatedTask);
+      if (options?.close !== false) {
+        setIsTaskDetailDialogOpen(false);
+        setTaskForDetailView(null);
+        setTaskDetailContext(null);
+      }
+      toast({ title: "Task updated" });
+    } catch (error) {
+      console.error("Failed to update task:", error);
+      toast({
+        title: "Update failed",
+        description: error instanceof Error ? error.message : "Try again in a moment.",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleMoveTaskToBoard = useCallback(
+    async (boardId: string) => {
+      if (!workspaceId || !taskForDetailView) {
+        throw new Error("Workspace not ready.");
+      }
+      await moveTaskToBoard(workspaceId, taskForDetailView.id, boardId);
+    },
+    [taskForDetailView, workspaceId]
+  );
+
+  const getBriefContext = useCallback(
+    (task: ExtractedTaskSchema) =>
+      buildBriefContext(task, meetings, people),
+    [meetings, people]
+  );
 
   const handleToggleSchedulePerson = (person: Person) => {
     setScheduleSelectedPeople((prev) => {
@@ -939,8 +1052,14 @@ export default function MeetingPlannerPageContent() {
                             const due = formatDueDate(task.dueAt);
                             return (
                               <li key={task.id}>
-                                {task.title} {getPriorityIcon(task.priority)}
-                                {due ? ` - ${due}` : ""}
+                                <button
+                                  type="button"
+                                  onClick={() => handleOpenTaskDetails(section.person, task)}
+                                  className="w-full text-left rounded-md px-2 py-1 transition hover:bg-muted/40"
+                                >
+                                  {task.title} {getPriorityIcon(task.priority)}
+                                  {due ? ` - ${due}` : ""}
+                                </button>
                               </li>
                             );
                           })}
@@ -1035,6 +1154,24 @@ export default function MeetingPlannerPageContent() {
         </Card>
         </div>
       </div>
+      <TaskDetailDialog
+        isOpen={isTaskDetailDialogOpen}
+        onClose={() => {
+          setIsTaskDetailDialogOpen(false);
+          setTaskForDetailView(null);
+          setTaskDetailContext(null);
+        }}
+        task={taskForDetailView}
+        onSave={handleSaveTaskDetails}
+        people={people}
+        workspaceId={workspaceId}
+        boards={boards}
+        currentBoardId={taskForDetailView?.addedToBoardId ?? null}
+        onMoveToBoard={handleMoveTaskToBoard}
+        getBriefContext={getBriefContext}
+        shareTitle={agendaMeetingTitle || "Meeting Planner"}
+        supportsSubtasks={false}
+      />
     </div>
   );
 }

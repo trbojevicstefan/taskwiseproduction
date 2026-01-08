@@ -40,7 +40,10 @@ export const formatTasksToSlackBlocks = (
         details.push(`_Priority: ${task.priority}_`);
       }
       const assignee = task.assignee?.name || task.assigneeName;
-      if (assignee) {
+      const assigneeSlackId = task.assignee?.slackId;
+      if (assigneeSlackId) {
+        details.push(`*Owner:* <@${assigneeSlackId}>`);
+      } else if (assignee) {
         details.push(`*Owner:* ${assignee}`);
       }
       if (task.dueAt) {

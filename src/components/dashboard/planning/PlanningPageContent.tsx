@@ -1301,6 +1301,8 @@ export default function PlanningPageContent() {
         onClose={() => setIsTaskDetailDialogVisible(false)}
         task={taskForDetailView}
         onSave={handleSaveTaskDetails}
+        people={people}
+        shareTitle={editableTitle || "Planning"}
       />
 
       <AlertDialog open={isDeleteConfirmOpen} onOpenChange={setIsDeleteConfirmOpen}>

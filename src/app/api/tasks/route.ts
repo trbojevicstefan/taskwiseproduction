@@ -89,6 +89,8 @@ export async function POST(request: Request) {
     sourceSessionType: body.sourceSessionType ?? "task",
     sourceTaskId: body.sourceTaskId ?? null,
     taskState: body.taskState ?? "active",
+    researchBrief: body.researchBrief ?? null,
+    aiAssistanceText: body.aiAssistanceText ?? null,
     createdAt: now,
     lastUpdated: now,
   };

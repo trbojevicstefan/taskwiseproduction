@@ -303,7 +303,11 @@ const formatTasksToSlackBlocks = (tasks: any[], sourceTitle: string, customMessa
             
             const details: string[] = [];
             if (task.priority && task.priority !== 'medium') { details.push(`_Priority: ${task.priority}_`); }
-            if (task.assignee?.name) { details.push(`*Owner:* ${task.assignee.name}`); }
+            if (task.assignee?.slackId) {
+                details.push(`*Owner:* <@${task.assignee.slackId}>`);
+            } else if (task.assignee?.name) {
+                details.push(`*Owner:* ${task.assignee.name}`);
+            }
             if (task.dueAt) { const date = new Date(task.dueAt); if (!isNaN(date.getTime())) { details.push(`_Due: ${date.toLocaleDateString()}_`); } }
             if (details.length > 0) { taskText += `\n>${details.join(' | ')}`; }
             

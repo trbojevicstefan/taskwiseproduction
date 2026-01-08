@@ -125,6 +125,7 @@ export function normalizeTask(task: any): ExtractedTaskSchema {
       name: task.assignee.name ?? null,
       email: task.assignee.email === undefined ? null : task.assignee.email,
       photoURL: task.assignee.photoURL === undefined ? null : task.assignee.photoURL,
+      slackId: task.assignee.slackId === undefined ? null : task.assignee.slackId,
     };
   }
 

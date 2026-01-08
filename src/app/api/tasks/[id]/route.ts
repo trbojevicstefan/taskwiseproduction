@@ -34,6 +34,8 @@ const applyTaskUpdate = (existing: ExtractedTaskSchema, source: any) => {
   setIfDefined("sourceEvidence", source.sourceEvidence ?? null);
   setIfDefined("aiProvider", source.aiProvider ?? null);
   setIfDefined("comments", source.comments ?? null);
+  setIfDefined("researchBrief", source.researchBrief ?? null);
+  setIfDefined("aiAssistanceText", source.aiAssistanceText ?? null);
   setIfDefined("completionSuggested", source.completionSuggested);
   setIfDefined("completionConfidence", source.completionConfidence ?? null);
   setIfDefined("completionEvidence", source.completionEvidence ?? null);

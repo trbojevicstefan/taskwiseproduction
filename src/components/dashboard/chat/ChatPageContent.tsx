@@ -73,6 +73,7 @@ import { apiFetch } from '@/lib/api';
 import type { Person } from '@/types/person';
 import type { Board } from '@/types/board';
 import { shareTasksNative, formatTasksToText, copyTextToClipboard, exportTasksToCSV, exportTasksToMarkdown, exportTasksToPDF } from '@/lib/exportUtils';
+import { moveTaskToBoard } from '@/lib/board-actions';
 import AssignPersonDialog from '../planning/AssignPersonDialog';
 import DashboardHeader from '../DashboardHeader';
 import { RadialMenu } from './RadialMenu';
@@ -91,6 +92,7 @@ import PushToGoogleTasksDialog from '../common/PushToGoogleTasksDialog';
 import PushToTrelloDialog from '../common/PushToTrelloDialog';
 import { TASK_TYPE_LABELS, TASK_TYPE_VALUES, type TaskTypeCategory } from '@/lib/task-types';
 import type { Meeting } from '@/types/meeting';
+import { buildBriefContext } from "@/lib/brief-context";
 
 
 const findTaskById = (tasks: ExtractedTaskSchema[], taskId: string): ExtractedTaskSchema | null => {
@@ -776,6 +778,35 @@ export default function ChatPageContent() {
     toast,
     workspaceId,
   ]);
+
+  const handleMoveTaskToBoard = useCallback(
+    async (boardId: string) => {
+      if (!workspaceId || !taskForDetailView) {
+        throw new Error("Workspace not ready.");
+      }
+      await moveTaskToBoard(workspaceId, taskForDetailView.id, boardId);
+      const boardName =
+        boards.find((board) => board.id === boardId)?.name || "Board";
+      const updatedTasks = markTaskAddedToBoard(
+        suggestedTasks,
+        taskForDetailView.id,
+        boardId,
+        boardName
+      );
+      applyTaskUpdate(updatedTasks, { skipHistory: true });
+      setTaskForDetailView((prev) =>
+        prev ? { ...prev, addedToBoardId: boardId, addedToBoardName: boardName } : prev
+      );
+    },
+    [
+      applyTaskUpdate,
+      boards,
+      markTaskAddedToBoard,
+      suggestedTasks,
+      taskForDetailView,
+      workspaceId,
+    ]
+  );
 
   const resetTaskHistory = useCallback((tasks: ExtractedTaskSchema[]) => {
     setUndoStack([]);
@@ -1526,6 +1557,16 @@ export default function ChatPageContent() {
       setIsTaskDetailDialogVisible(false);
     }
   };
+
+  const getBriefContext = useCallback(
+    (task: ExtractedTaskSchema) => {
+      const meeting = getMeetingForSession(getActiveSession());
+      return buildBriefContext(task, meetings, people, {
+        primaryMeetingId: meeting?.id,
+      });
+    },
+    [getActiveSession, getMeetingForSession, meetings, people]
+  );
 
   const handleDeleteSelected = () => {
     if (selectedTaskIds.size === 0) return;
@@ -2593,12 +2634,19 @@ export default function ChatPageContent() {
         </DialogContent>
       </Dialog>
 
-      <TaskDetailDialog
-        isOpen={isTaskDetailDialogVisible}
-        onClose={() => setIsTaskDetailDialogVisible(false)}
-        task={taskForDetailView}
-        onSave={handleSaveTaskDetails}
-      />
+        <TaskDetailDialog
+          isOpen={isTaskDetailDialogVisible}
+          onClose={() => setIsTaskDetailDialogVisible(false)}
+          task={taskForDetailView}
+          onSave={handleSaveTaskDetails}
+          people={people}
+          workspaceId={workspaceId}
+          boards={boards}
+          currentBoardId={taskForDetailView?.addedToBoardId ?? null}
+          onMoveToBoard={handleMoveTaskToBoard}
+          getBriefContext={getBriefContext}
+          shareTitle={editableTitle || "Chat"}
+        />
       <Dialog open={isFullTextViewerOpen} onOpenChange={setIsFullTextViewerOpen}>
         <DialogContent className="max-w-3xl">
           <DialogHeader>

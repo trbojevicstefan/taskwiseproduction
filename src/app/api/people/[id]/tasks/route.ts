@@ -13,6 +13,13 @@ const serializeTask = (task: any) => ({
   lastUpdated: task.lastUpdated?.toISOString?.() || task.lastUpdated,
 });
 
+const normalizeId = (value: any) => {
+  if (!value) return "";
+  if (typeof value === "string") return value;
+  if (typeof value.toString === "function") return value.toString();
+  return String(value);
+};
+
 const flattenExtractedTasks = (
   tasks: ExtractedTaskSchema[] = []
 ): ExtractedTaskSchema[] => {
@@ -128,11 +135,13 @@ export async function GET(
   const meetingSessionsWithTasks = new Set<string>();
   const chatSessionsWithTasks = new Set<string>();
   tasks.forEach((task) => {
-    if (task?.sourceSessionType === "meeting" && task.sourceSessionId) {
-      meetingSessionsWithTasks.add(String(task.sourceSessionId));
+    const sourceType = task?.sourceSessionType || task?.origin;
+    const sessionId = normalizeId(task?.sourceSessionId);
+    if (sourceType === "meeting" && sessionId) {
+      meetingSessionsWithTasks.add(sessionId);
     }
-    if (task?.sourceSessionType === "chat" && task.sourceSessionId) {
-      chatSessionsWithTasks.add(String(task.sourceSessionId));
+    if (sourceType === "chat" && sessionId) {
+      chatSessionsWithTasks.add(sessionId);
     }
   });
 
@@ -192,5 +201,18 @@ export async function GET(
     ...chatTasks,
   ];
 
-  return NextResponse.json(normalizedTasks);
+  const seen = new Set<string>();
+  const dedupedTasks = normalizedTasks.filter((task) => {
+    const sourceSessionId = normalizeId(task?.sourceSessionId);
+    const sourceTaskId = normalizeId(task?.sourceTaskId);
+    const key =
+      sourceSessionId && sourceTaskId
+        ? `${sourceSessionId}:${sourceTaskId}`
+        : normalizeId(task?.id ?? task?._id);
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+
+  return NextResponse.json(dedupedTasks);
 }

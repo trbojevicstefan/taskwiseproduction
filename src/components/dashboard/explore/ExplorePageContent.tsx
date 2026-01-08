@@ -32,6 +32,9 @@ import AssignPersonDialog from '../planning/AssignPersonDialog';
 import { onPeopleSnapshot, addPerson } from '@/lib/data';
 import type { Person } from '@/types/person';
 import SetDueDateDialog from '../planning/SetDueDateDialog';
+import { useWorkspaceBoards } from "@/hooks/use-workspace-boards";
+import { moveTaskToBoard } from "@/lib/board-actions";
+import { buildBriefContext } from "@/lib/brief-context";
 
 
 const getTaskAndAllDescendantIds = (task: ExtractedTaskSchema): string[] => {
@@ -46,6 +49,8 @@ type ContentFilter = 'all' | 'with_tasks' | 'with_people';
 
 export default function ExplorePageContent() {
   const { user } = useAuth();
+  const workspaceId = user?.workspace?.id;
+  const { boards } = useWorkspaceBoards(workspaceId);
   const { meetings: allMeetings, isLoadingMeetingHistory, updateMeeting } = useMeetingHistory();
   const { isSlackConnected, isGoogleTasksConnected, isTrelloConnected } = useIntegrations();
   const [currentDate, setCurrentDate] = useState(new Date());
@@ -245,6 +250,22 @@ export default function ExplorePageContent() {
           }
       toast({ title: "Task Updated", description: "Your changes have been saved." });
   };
+
+  const handleMoveTaskToBoard = useCallback(
+    async (boardId: string) => {
+      if (!workspaceId || !taskForDetailView) {
+        throw new Error("Workspace not ready.");
+      }
+      await moveTaskToBoard(workspaceId, taskForDetailView.id, boardId);
+    },
+    [taskForDetailView, workspaceId]
+  );
+
+  const getBriefContext = useCallback(
+    (task: ExtractedTaskSchema) =>
+      buildBriefContext(task, allMeetings, people),
+    [allMeetings, people]
+  );
   
   const selectedTasks = useMemo(() => {
     const tasks: ExtractedTaskSchema[] = [];
@@ -469,12 +490,19 @@ export default function ExplorePageContent() {
         onPushToTrello={() => setIsPushToTrelloOpen(true)}
         isTrelloConnected={isTrelloConnected}
       />
-       <TaskDetailDialog
-        isOpen={isTaskDetailDialogVisible}
-        onClose={() => setIsTaskDetailDialogVisible(false)}
-        task={taskForDetailView}
-        onSave={handleSaveTaskDetails}
-      />
+        <TaskDetailDialog
+         isOpen={isTaskDetailDialogVisible}
+         onClose={() => setIsTaskDetailDialogVisible(false)}
+          task={taskForDetailView}
+          onSave={handleSaveTaskDetails}
+          people={people}
+          workspaceId={workspaceId}
+          boards={boards}
+          currentBoardId={taskForDetailView?.addedToBoardId ?? null}
+          onMoveToBoard={handleMoveTaskToBoard}
+          getBriefContext={getBriefContext}
+          shareTitle="Explore"
+        />
       <SelectionViewDialog
         isOpen={isSelectionViewVisible}
         onClose={() => setIsSelectionViewVisible(false)}

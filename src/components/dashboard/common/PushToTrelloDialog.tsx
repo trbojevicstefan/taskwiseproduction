@@ -31,6 +31,18 @@ export default function PushToTrelloDialog({ isOpen, onClose, tasks }: PushToTre
   const [isPushing, setIsPushing] = useState(false);
   const { toast } = useToast();
 
+  const buildCardDescription = (task: ExtractedTaskSchema) => {
+    const sections: string[] = [];
+    if (task.description) sections.push(task.description);
+    if (task.researchBrief) {
+      sections.push(`AI Research Brief:\n${task.researchBrief}`);
+    }
+    if (task.aiAssistanceText) {
+      sections.push(`AI Assistance:\n${task.aiAssistanceText}`);
+    }
+    return sections.join('\n\n');
+  };
+
   const fetchBoards = useCallback(async () => {
     if (!isTrelloConnected) return;
     setIsFetchingBoards(true);
@@ -112,7 +124,7 @@ export default function PushToTrelloDialog({ isOpen, onClose, tasks }: PushToTre
             await trelloCreateCardFn({
                 listId: selectedListId,
                 name: task.title,
-                desc: task.description || '',
+                desc: buildCardDescription(task),
                 subtasks: task.subtasks || [],
             });
         }

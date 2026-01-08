@@ -131,22 +131,31 @@ const SelectionToolbar: React.FC<SelectionToolbarProps> = ({
                         </Button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="center">
-                        {isGoogleTasksConnected && onPushToGoogleTasks && (
-                           <DropdownMenuItem onSelect={onPushToGoogleTasks}>
+                        {onPushToGoogleTasks && (
+                           <DropdownMenuItem
+                             onSelect={onPushToGoogleTasks}
+                             disabled={!isGoogleTasksConnected}
+                           >
                                <GoogleTasksIcon />
                                Push to Google Tasks
                            </DropdownMenuItem>
                         )}
-                        {isTrelloConnected && onPushToTrello && (
-                            <DropdownMenuItem onSelect={onPushToTrello}>
+                        {onPushToTrello && (
+                            <DropdownMenuItem
+                              onSelect={onPushToTrello}
+                              disabled={!isTrelloConnected}
+                            >
                                 <SiTrello className="mr-2 h-4 w-4" color="#0079BF" />
                                 Push to Trello
                             </DropdownMenuItem>
                         )}
-                        {(isGoogleTasksConnected || isTrelloConnected) && <DropdownMenuSeparator />}
+                        {(onPushToGoogleTasks || onPushToTrello) && <DropdownMenuSeparator />}
                         
-                        {isSlackConnected && onShareToSlack && (
-                           <DropdownMenuItem onSelect={onShareToSlack}>
+                        {onShareToSlack && (
+                           <DropdownMenuItem
+                             onSelect={onShareToSlack}
+                             disabled={!isSlackConnected}
+                           >
                                <Slack size={14} className="mr-2" /> Share to Slack
                            </DropdownMenuItem>
                         )}

@@ -51,11 +51,25 @@ export const createTaskList = async (accessToken: string, title: string): Promis
   return response.json();
 };
 
+const buildTaskNotes = (task: ExtractedTaskSchema) => {
+  const sections: string[] = [];
+  if (task.description) {
+    sections.push(task.description);
+  }
+  if (task.researchBrief) {
+    sections.push(`AI Research Brief:\n${task.researchBrief}`);
+  }
+  if (task.aiAssistanceText) {
+    sections.push(`AI Assistance:\n${task.aiAssistanceText}`);
+  }
+  return sections.join('\n\n');
+};
+
 // Creates a single task, optionally as a subtask of another
 const createTask = async (accessToken: string, taskListId: string, task: ExtractedTaskSchema, parentGoogleTaskId?: string): Promise<GoogleTask> => {
   const googleTaskPayload: Partial<GoogleTask> = {
     title: task.title,
-    notes: task.description || undefined,
+    notes: buildTaskNotes(task) || undefined,
     due: task.dueAt ? new Date(task.dueAt).toISOString() : undefined,
     status: 'needsAction',
   };

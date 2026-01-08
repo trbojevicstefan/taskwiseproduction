@@ -15,6 +15,10 @@ import { runPromptWithFallback } from '@/ai/prompt-fallback';
 const GenerateResearchBriefInputSchema = z.object({
   taskTitle: z.string().describe('The title of the task for which to generate a research brief.'),
   taskDescription: z.string().optional().describe('The detailed description of the task, if available.'),
+  assigneeName: z.string().optional().describe("The assignee's name, if available."),
+  taskPriority: z.enum(["low", "medium", "high"]).optional().describe("Task priority, if available."),
+  primaryTranscript: z.string().optional().describe('Full transcript for the primary meeting context.'),
+  relatedTranscripts: z.array(z.string()).optional().describe('Additional transcripts related to the assignee.'),
 });
 export type GenerateResearchBriefInput = z.infer<typeof GenerateResearchBriefInputSchema>;
 
@@ -50,14 +54,33 @@ Task Title: {{{taskTitle}}}
 {{#if taskDescription}}
 Task Description: {{{taskDescription}}}
 {{/if}}
+{{#if assigneeName}}
+Assignee: {{{assigneeName}}}
+{{/if}}
+{{#if taskPriority}}
+Task Priority: {{{taskPriority}}}
+{{/if}}
 
-Based on the provided task information, please generate a research brief covering the following sections (use markdown for formatting):
-1.  **Problem Overview:** Briefly describe the core problem or objective this task aims to address.
-2.  **Key Considerations/Questions:** What are the important factors, questions, or areas that need to be explored or answered for this task?
-3.  **Potential Obstacles/Risks:** What are some potential challenges, risks, or roadblocks that might be encountered?
-4.  **Possible Angles for Deeper Research:** Suggest 2-3 specific areas or topics that could be researched further to support this task.
+{{#if primaryTranscript}}
+Primary Meeting Transcript:
+{{{primaryTranscript}}}
+{{/if}}
 
-Keep the brief concise and actionable. The brief should be formatted as a single markdown string.
+{{#if relatedTranscripts}}
+Additional Relevant Transcripts:
+{{#each relatedTranscripts}}
+- Transcript {{@index}}:
+{{this}}
+{{/each}}
+{{/if}}
+
+Based on the provided task information, please generate a short research brief covering the following sections (use markdown for formatting):
+1.  **Problem Overview:** 1 short sentence.
+2.  **Key Considerations/Questions:** 2-3 brief bullet points.
+3.  **Potential Obstacles/Risks:** 1-2 brief bullet points.
+4.  **Possible Angles for Deeper Research:** 2 brief bullet points.
+
+Use the transcripts to ground the brief in real context. If transcripts are missing, focus on the task details. Keep the brief concise and actionable: aim for 8-10 lines total, avoid long paragraphs, and keep each bullet to a single line. The brief should be formatted as a single markdown string.
 `,
 });
 

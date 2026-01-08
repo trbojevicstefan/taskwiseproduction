@@ -134,6 +134,9 @@ import PushToTrelloDialog from "../common/PushToTrelloDialog";
 import PeopleDiscoveryDialog from '../people/PeopleDiscoveryDialog';
 import SelectionViewDialog from '../explore/SelectionViewDialog';
 import { TASK_TYPE_LABELS, TASK_TYPE_VALUES, type TaskTypeCategory } from '@/lib/task-types';
+import { useWorkspaceBoards } from "@/hooks/use-workspace-boards";
+import { moveTaskToBoard } from "@/lib/board-actions";
+import { buildBriefContext } from "@/lib/brief-context";
 
 
 const flavorMap: Record<string, { name: string; color: string; icon: React.ReactNode }> = {
@@ -932,6 +935,8 @@ export function MeetingDetailSheet({
     variant?: "sheet" | "page";
 }) {
     const { user } = useAuth();
+    const workspaceId = user?.workspace?.id;
+    const { boards } = useWorkspaceBoards(workspaceId);
     const { meetings, isLoadingMeetingHistory, updateMeeting, deleteMeeting, refreshMeetings } = useMeetingHistory();
     const { isSlackConnected, isGoogleTasksConnected, isTrelloConnected } = useIntegrations();
     const { updateSession } = useChatHistory();
@@ -1235,7 +1240,7 @@ export function MeetingDetailSheet({
     };
 
     const handleViewDetails = (task: ExtractedTaskSchema) => {
-      setTaskForDetailView(task);
+      setTaskForDetailView({ ...task, sourceSessionId: meeting?.id });
       setIsTaskDetailDialogVisible(true);
     };
 
@@ -1255,6 +1260,22 @@ export function MeetingDetailSheet({
         }
         toast({ title: "Task Updated" });
       };
+
+    const handleMoveTaskToBoard = useCallback(
+      async (boardId: string) => {
+        if (!workspaceId || !taskForDetailView) {
+          throw new Error("Workspace not ready.");
+        }
+        await moveTaskToBoard(workspaceId, taskForDetailView.id, boardId);
+      },
+      [taskForDetailView, workspaceId]
+    );
+
+    const getBriefContext = useCallback(
+      (task: ExtractedTaskSchema) =>
+        buildBriefContext(task, meetings, people, { primaryMeetingId: meeting?.id }),
+      [meeting?.id, meetings, people]
+    );
     
     const flavor = meeting ? flavorMap[meeting.tags?.[0].toLowerCase() as keyof typeof flavorMap || 'default'] : null;
     const meetingDurationMinutes = useMemo(() => getMeetingDurationMinutes(meeting || null), [meeting]);
@@ -2466,6 +2487,13 @@ export function MeetingDetailSheet({
             onClose={() => setIsTaskDetailDialogVisible(false)}
             task={taskForDetailView}
             onSave={handleSaveTaskDetails}
+            people={people}
+            workspaceId={workspaceId}
+            boards={boards}
+            currentBoardId={taskForDetailView?.addedToBoardId ?? null}
+            onMoveToBoard={handleMoveTaskToBoard}
+            getBriefContext={getBriefContext}
+            shareTitle={meeting?.title || "Meeting"}
         />
         <Dialog open={!!activePerson} onOpenChange={(open) => { if (!open) setActivePerson(null); }}>
             <DialogContent className="sm:max-w-md">

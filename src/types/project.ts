@@ -39,4 +39,6 @@ export interface Task {
   completionEvidence?: TaskEvidence[] | null;
   completionTargets?: CompletionTarget[] | null;
   taskState?: "active" | "suggested" | "archived" | null;
+  researchBrief?: string | null;
+  aiAssistanceText?: string | null;
 }
