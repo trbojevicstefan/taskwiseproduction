@@ -428,7 +428,7 @@ export default function MeetingPlannerPageContent() {
     dueAt: task.dueAt ?? null,
     assignee: task.assignee ?? null,
     assigneeName: task.assigneeName ?? null,
-    subtasks: null,
+    subtasks: (task as any).subtasks ?? undefined,
     comments: task.comments ?? null,
     researchBrief: task.researchBrief ?? null,
     aiAssistanceText: task.aiAssistanceText ?? null,
@@ -1170,7 +1170,7 @@ export default function MeetingPlannerPageContent() {
         onMoveToBoard={handleMoveTaskToBoard}
         getBriefContext={getBriefContext}
         shareTitle={agendaMeetingTitle || "Meeting Planner"}
-        supportsSubtasks={false}
+        supportsSubtasks
       />
     </div>
   );

@@ -262,7 +262,6 @@ export const ingestFathomMeeting = async ({
       !existing.extractedTasks?.length ||
       !existingTranscript ||
       !existing.allTaskLevels ||
-      !existing.chatSessionId ||
       !existing.planningSessionId;
 
     if (shouldReanalyze) {
@@ -406,31 +405,10 @@ export const ingestFathomMeeting = async ({
         state: "tasks_ready",
       };
 
-      let chatSessionId = existing.chatSessionId
+      const chatSessionId = existing.chatSessionId
         ? String(existing.chatSessionId)
         : null;
-      if (!chatSessionId) {
-        chatSessionId = randomUUID();
-        meetingUpdate.chatSessionId = chatSessionId;
-        await db.collection("chatSessions").insertOne({
-          _id: chatSessionId,
-          userId,
-          workspaceId,
-          title: `Chat about "${meetingTitle}"`,
-          messages: [],
-          suggestedTasks: finalizedTasks,
-          originalAiTasks: sanitizedTasks,
-          originalAllTaskLevels: sanitizedTaskLevels,
-          taskRevisions: [],
-          people: uniquePeople,
-          folderId: null,
-          sourceMeetingId: existing._id.toString(),
-          allTaskLevels: sanitizedTaskLevels,
-          meetingMetadata: analysisResult.meetingMetadata || undefined,
-          createdAt: now,
-          lastActivityAt: now,
-        });
-      } else {
+      if (chatSessionId) {
         await db.collection("chatSessions").updateMany(
           {
             userId: userIdQuery,
@@ -705,7 +683,6 @@ export const ingestFathomMeeting = async ({
 
   const now = new Date();
   const meetingId = randomUUID();
-  const chatId = randomUUID();
   const planId = randomUUID();
 
   const meeting = {
@@ -731,7 +708,7 @@ export const ingestFathomMeeting = async ({
             },
           ]
         : [],
-    chatSessionId: chatId,
+    chatSessionId: null,
     planningSessionId: planId,
     allTaskLevels: sanitizedTaskLevels,
     keyMoments: analysisResult.keyMoments || [],
@@ -771,25 +748,6 @@ export const ingestFathomMeeting = async ({
     lastActivityAt: now,
   };
 
-  const chatSession = {
-    _id: chatId,
-    userId,
-    workspaceId,
-    title: `Chat about "${meetingTitle}"`,
-    messages: [],
-    suggestedTasks: finalizedTasks,
-    originalAiTasks: sanitizedTasks,
-    originalAllTaskLevels: sanitizedTaskLevels,
-    taskRevisions: [],
-    people: uniquePeople,
-    folderId: null,
-    sourceMeetingId: meetingId,
-    allTaskLevels: sanitizedTaskLevels,
-    meetingMetadata: analysisResult.meetingMetadata || undefined,
-    createdAt: now,
-    lastActivityAt: now,
-  };
-
   const planningSession = {
     _id: planId,
     userId,
@@ -809,7 +767,6 @@ export const ingestFathomMeeting = async ({
   };
 
   await db.collection("meetings").insertOne(meeting);
-  await db.collection("chatSessions").insertOne(chatSession);
   await db.collection("planningSessions").insertOne(planningSession);
   if (uniquePeople.length) {
     try {

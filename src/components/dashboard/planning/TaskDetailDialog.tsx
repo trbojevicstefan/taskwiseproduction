@@ -1,8 +1,9 @@
 // src/components/dashboard/planning/TaskDetailDialog.tsx
 "use client";
 
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import type { ExtractedTaskSchema as DisplayTask } from '@/types/chat';
+import type { Task } from '@/types/project';
 import {
   Dialog,
   DialogContent,
@@ -31,6 +32,8 @@ import { motion } from 'framer-motion';
 import { useAuth } from '@/contexts/AuthContext';
 import { useIntegrations } from "@/contexts/IntegrationsContext";
 import { copyTextToClipboard, formatTasksToText } from "@/lib/exportUtils";
+import { apiFetch } from "@/lib/api";
+import { normalizeTask } from "@/lib/data";
 import ShareToSlackDialog from "@/components/dashboard/common/ShareToSlackDialog";
 import PushToGoogleTasksDialog from "@/components/dashboard/common/PushToGoogleTasksDialog";
 import PushToTrelloDialog from "@/components/dashboard/common/PushToTrelloDialog";
@@ -38,7 +41,6 @@ import type { Person } from "@/types/person";
 import { SiTrello } from "@icons-pack/react-simple-icons";
 import { getTaskBoardMembership } from "@/lib/board-actions";
 import type { BriefContext } from "@/lib/brief-context";
-import ResearchBriefOverlay from "@/components/dashboard/planning/ResearchBriefOverlay";
 
 type BoardOption = { id: string; name: string };
 
@@ -82,6 +84,7 @@ export default function TaskDetailDialog({
   const [subtasks, setSubtasks] = useState<DisplayTask["subtasks"]>([]);
   const [newComment, setNewComment] = useState('');
   const [newSubtaskTitle, setNewSubtaskTitle] = useState("");
+  const [isAddingSubtask, setIsAddingSubtask] = useState(false);
   const [isGeneratingBrief, setIsGeneratingBrief] = useState(false);
   const [isGeneratingAssistance, setIsGeneratingAssistance] = useState(false);
   const [isShareToSlackOpen, setIsShareToSlackOpen] = useState(false);
@@ -95,15 +98,11 @@ export default function TaskDetailDialog({
   const [isEditingBrief, setIsEditingBrief] = useState(false);
   const [isEditingAssistance, setIsEditingAssistance] = useState(false);
   const [isBriefExpanded, setIsBriefExpanded] = useState(false);
-  const [isBriefOverlayOpen, setIsBriefOverlayOpen] = useState(false);
-  const [briefOverlayMinElapsed, setBriefOverlayMinElapsed] = useState(false);
-  const [briefOverlayPhase, setBriefOverlayPhase] = useState<"loading" | "complete">("loading");
-  const briefOverlayTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const lastTaskIdRef = useRef<string | null>(null);
   const { toast } = useToast();
   const { user } = useAuth();
   const { isSlackConnected, isGoogleTasksConnected, isTrelloConnected } = useIntegrations();
   const UNASSIGNED_VALUE = "__unassigned__";
+  const isLinkedSubtaskMode = supportsSubtasks === true && task?.subtasks === undefined;
   
   useEffect(() => {
     if (task) {
@@ -171,67 +170,56 @@ export default function TaskDetailDialog({
     setAssigneeSelection(resolved ? resolved.id : null);
   }, [people, task]);
 
-  useEffect(() => {
-    const taskId = task?.id ?? null;
-    const lastTaskId = lastTaskIdRef.current;
-
-    if (taskId) {
-      lastTaskIdRef.current = taskId;
-    }
-
-    const shouldReset =
-      !isOpen ||
-      (taskId && lastTaskId && lastTaskId !== taskId) ||
-      (!taskId && !isGeneratingBrief && !isBriefOverlayOpen);
-
-    if (!shouldReset) return;
-
-    setIsBriefOverlayOpen(false);
-    setBriefOverlayMinElapsed(false);
-    setBriefOverlayPhase("loading");
-    if (briefOverlayTimerRef.current) {
-      clearTimeout(briefOverlayTimerRef.current);
-      briefOverlayTimerRef.current = null;
-    }
-  }, [isOpen, task?.id, isBriefOverlayOpen, isGeneratingBrief]);
-
-  useEffect(() => {
-    if (!isGeneratingBrief) return;
-    if (briefOverlayTimerRef.current) {
-      clearTimeout(briefOverlayTimerRef.current);
-    }
-    setIsBriefOverlayOpen(true);
-    setBriefOverlayPhase("loading");
-    setBriefOverlayMinElapsed(false);
-    briefOverlayTimerRef.current = setTimeout(() => {
-      setBriefOverlayMinElapsed(true);
-    }, 8000);
-  }, [isGeneratingBrief]);
+  const fetchLinkedSubtasks = async (
+    parentId: string,
+    visited: Set<string>
+  ): Promise<DisplayTask[]> => {
+    if (visited.has(parentId)) return [];
+    visited.add(parentId);
+    const children = await apiFetch<Task[]>(
+      `/api/tasks?parentId=${encodeURIComponent(parentId)}`
+    );
+    if (!children.length) return [];
+    const nested = await Promise.all(
+      children.map(async (child) => {
+        const childSubtasks = await fetchLinkedSubtasks(child.id, visited);
+        const normalized = normalizeTask(child) as DisplayTask;
+        return {
+          ...normalized,
+          subtasks: childSubtasks.length ? childSubtasks : null,
+        };
+      })
+    );
+    return nested;
+  };
 
   useEffect(() => {
-    return () => {
-      if (briefOverlayTimerRef.current) {
-        clearTimeout(briefOverlayTimerRef.current);
+    if (!isOpen || !isLinkedSubtaskMode || !task?.id) return;
+    let isActive = true;
+    const load = async () => {
+      try {
+        const nextSubtasks = await fetchLinkedSubtasks(task.id, new Set<string>());
+        if (isActive) {
+          setSubtasks(nextSubtasks);
+        }
+      } catch (error) {
+        if (isActive) {
+          setSubtasks([]);
+        }
+        console.error("Failed to load subtasks:", error);
+        toast({
+          title: "Subtasks unavailable",
+          description: "We couldn't load subtasks for this task.",
+          variant: "destructive",
+        });
       }
     };
-  }, []);
+    void load();
+    return () => {
+      isActive = false;
+    };
+  }, [isLinkedSubtaskMode, isOpen, task?.id, toast]);
 
-  useEffect(() => {
-    if (!isBriefOverlayOpen) return;
-    if (isGeneratingBrief) return;
-    if (!briefOverlayMinElapsed) return;
-    setBriefOverlayPhase("complete");
-    const timer = setTimeout(() => {
-      setIsBriefOverlayOpen(false);
-      setBriefOverlayMinElapsed(false);
-      setBriefOverlayPhase("loading");
-      if (briefOverlayTimerRef.current) {
-        clearTimeout(briefOverlayTimerRef.current);
-        briefOverlayTimerRef.current = null;
-      }
-    }, 900);
-    return () => clearTimeout(timer);
-  }, [briefOverlayMinElapsed, isBriefOverlayOpen, isGeneratingBrief]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -309,6 +297,13 @@ export default function TaskDetailDialog({
     };
   };
 
+  const persistTaskUpdate = async (
+    overrides: Partial<DisplayTask>,
+    options?: { close?: boolean }
+  ) => {
+    await Promise.resolve(onSave(buildUpdatedTask(overrides), options));
+  };
+
   const handleGenerateBrief = async () => {
     if (!task) return;
     setIsGeneratingBrief(true);
@@ -327,8 +322,17 @@ export default function TaskDetailDialog({
       });
       setResearchBrief(result.researchBrief);
       setIsEditingBrief(false);
-      onSave(buildUpdatedTask({ researchBrief: result.researchBrief }), { close: false });
-      toast({ title: "Brief Generated!", description: "AI Research Brief is now available." });
+      try {
+        await persistTaskUpdate({ researchBrief: result.researchBrief }, { close: false });
+        toast({ title: "Brief Generated!", description: "AI Research Brief is now available." });
+      } catch (saveError) {
+        console.error("Failed to save research brief:", saveError);
+        toast({
+          title: "Brief Generated, Not Saved",
+          description: "We couldn't save the brief. Try again in a moment.",
+          variant: "destructive",
+        });
+      }
     } catch (error) {
       console.error("Error generating research brief:", error);
       setResearchBrief("Failed to generate brief. Please try again.");
@@ -350,8 +354,23 @@ export default function TaskDetailDialog({
       });
       setAiAssistanceText(result.assistanceMarkdown);
       setIsEditingAssistance(false);
-      onSave(buildUpdatedTask({ aiAssistanceText: result.assistanceMarkdown }), { close: false });
-      toast({ title: "AI Assistance Ready!", description: "Suggestions are available in the 'AI Assistance' section." });
+      try {
+        await persistTaskUpdate(
+          { aiAssistanceText: result.assistanceMarkdown },
+          { close: false }
+        );
+        toast({
+          title: "AI Assistance Ready!",
+          description: "Suggestions are available in the 'AI Assistance' section.",
+        });
+      } catch (saveError) {
+        console.error("Failed to save AI assistance:", saveError);
+        toast({
+          title: "Assistance Generated, Not Saved",
+          description: "We couldn't save the assistance. Try again in a moment.",
+          variant: "destructive",
+        });
+      }
     } catch (error) {
       console.error("Error generating task assistance:", error);
       setAiAssistanceText("Failed to get assistance. Please try again.");
@@ -381,8 +400,58 @@ export default function TaskDetailDialog({
     onSave(buildUpdatedTask({ comments: nextComments }), { close: false });
   };
 
-  const handleAddSubtask = () => {
+  const handleAddSubtask = async () => {
     if (!newSubtaskTitle.trim()) return;
+    if (isLinkedSubtaskMode) {
+      if (!task || isAddingSubtask) return;
+      setIsAddingSubtask(true);
+      try {
+        const parentMeta = task as DisplayTask & {
+          projectId?: string | null;
+          workspaceId?: string | null;
+          sourceSessionType?: string | null;
+          taskState?: string | null;
+          origin?: string | null;
+        };
+        const created = await apiFetch<Task>("/api/tasks", {
+          method: "POST",
+          body: JSON.stringify({
+            title: newSubtaskTitle.trim(),
+            description: "",
+            status: status || "todo",
+            priority: priority || "medium",
+            dueAt: null,
+            parentId: task.id,
+            workspaceId: workspaceId ?? parentMeta.workspaceId ?? null,
+            projectId: parentMeta.projectId ?? null,
+            sourceSessionId: task.sourceSessionId ?? null,
+            sourceSessionName: task.sourceSessionName ?? null,
+            sourceSessionType:
+              parentMeta.sourceSessionType ?? parentMeta.origin ?? "task",
+            taskState: parentMeta.taskState ?? "active",
+          }),
+        });
+        const normalized = normalizeTask(created) as DisplayTask;
+        const nextSubtasks = [...(subtasks || []), normalized];
+        setSubtasks(nextSubtasks);
+        setNewSubtaskTitle("");
+        await apiFetch(`/api/tasks/${task.id}`, {
+          method: "PATCH",
+          body: JSON.stringify({ subtaskCount: nextSubtasks.length }),
+        });
+        onSave(buildUpdatedTask({ subtasks: nextSubtasks }), { close: false });
+      } catch (error) {
+        console.error("Failed to add subtask:", error);
+        toast({
+          title: "Subtask not saved",
+          description: "We couldn't add the subtask. Try again in a moment.",
+          variant: "destructive",
+        });
+      } finally {
+        setIsAddingSubtask(false);
+      }
+      return;
+    }
     const nextSubtask: DisplayTask = {
       id: globalThis.crypto?.randomUUID?.() || `subtask_${Date.now()}`,
       title: newSubtaskTitle.trim(),
@@ -629,421 +698,422 @@ export default function TaskDetailDialog({
     <Dialog open={isOpen} onOpenChange={onClose}>
       <DialogContent className="sm:max-w-5xl h-[92vh] p-0 overflow-hidden">
         <div className="relative h-full">
-          <ResearchBriefOverlay isOpen={isBriefOverlayOpen} phase={briefOverlayPhase} />
           <div className="flex h-full min-h-0 flex-col">
-          <DialogHeader className="px-6 py-4 border-b bg-gradient-to-r from-background via-muted/30 to-background backdrop-blur">
-            <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-              <div>
-                <DialogTitle>Task Details</DialogTitle>
-                <DialogDescription>
-                  View, edit, and enhance your task with AI-powered tools.
-                </DialogDescription>
-              </div>
-              <div className="flex flex-wrap gap-2">
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={handleGenerateBrief}
-                  disabled={isGeneratingBrief}
-                >
-                  {isGeneratingBrief ? (
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin text-amber-500" />
-                  ) : (
-                    <Sparkles className="mr-2 h-4 w-4 text-amber-500" />
-                  )}
-                  {researchBrief ? "Regenerate Brief" : "Generate Brief"}
-                </Button>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={handleGenerateAssistance}
-                  disabled={isGeneratingAssistance}
-                >
-                  {isGeneratingAssistance ? (
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin text-orange-500" />
-                  ) : (
-                    <Sparkles className="mr-2 h-4 w-4 text-orange-500" />
-                  )}
-                  {aiAssistanceText ? "Regenerate Assist" : "Get Assistance"}
-                </Button>
-              </div>
-            </div>
-          </DialogHeader>
-          <div className="grid grid-cols-1 lg:grid-cols-[1.6fr_1fr] flex-1 min-h-0">
-            <div className="min-h-0">
-              <ScrollArea className="h-full min-h-0 bg-gradient-to-br from-background via-background to-muted/10">
-                <motion.div
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ duration: 0.5 }}
-                  className="space-y-6 p-6"
-                >
-                <div className="space-y-2">
-                  <Label htmlFor="title">Title</Label>
-                  <Input
-                    id="title"
-                    value={title}
-                    onChange={(e) => setTitle(e.target.value)}
-                    className="text-lg font-semibold"
-                  />
+            <DialogHeader className="px-6 py-4 border-b bg-gradient-to-r from-background via-muted/30 to-background backdrop-blur">
+              <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                <div>
+                  <DialogTitle>Task Details</DialogTitle>
+                  <DialogDescription>
+                    View, edit, and enhance your task with AI-powered tools.
+                  </DialogDescription>
                 </div>
-                <div className="space-y-2">
-                  <Label htmlFor="description">Description</Label>
-                  <Textarea
-                    id="description"
-                    value={description}
-                    onChange={(e) => setDescription(e.target.value)}
-                    className="min-h-[120px]"
-                    placeholder="Add a more detailed description..."
-                  />
-                </div>
-
-                {researchBrief ? (
-                  <div
-                    className={cn(
-                      "rounded-xl border-l-4 border border-border/60 p-4 shadow-sm",
-                      priorityTone[priority]
-                    )}
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={handleGenerateBrief}
+                    disabled={isGeneratingBrief}
                   >
-                    <div className="flex items-center justify-between gap-3">
-                      <div className="flex items-center gap-2 text-sm font-semibold">
-                        <Sparkles className="h-4 w-4 text-amber-500" />
-                        AI Research Brief
-                      </div>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => setIsEditingBrief((prev) => !prev)}
-                      >
-                        {isEditingBrief ? "Done" : "Edit"}
-                      </Button>
-                    </div>
-                    {isEditingBrief ? (
-                      <Textarea
-                        id="ai-research-brief"
-                        value={researchBrief}
-                        onChange={(e) => setResearchBrief(e.target.value)}
-                        className="mt-3 min-h-[160px] bg-background/70"
-                      />
+                    {isGeneratingBrief ? (
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin text-amber-500" />
                     ) : (
-                      <div className="mt-3 space-y-2 leading-relaxed">
-                        <div className={cn(isBriefCollapsed && "max-h-[240px] overflow-hidden")}>
-                          {renderMarkdownBlocks(researchBrief)}
-                        </div>
-                        {shouldCollapseBrief ? (
+                      <Sparkles className="mr-2 h-4 w-4 text-amber-500" />
+                    )}
+                    {researchBrief ? "Regenerate Brief" : "Generate Brief"}
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={handleGenerateAssistance}
+                    disabled={isGeneratingAssistance}
+                  >
+                    {isGeneratingAssistance ? (
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin text-orange-500" />
+                    ) : (
+                      <Sparkles className="mr-2 h-4 w-4 text-orange-500" />
+                    )}
+                    {aiAssistanceText ? "Regenerate Assist" : "Get Assistance"}
+                  </Button>
+                </div>
+              </div>
+            </DialogHeader>
+            <div className="grid grid-cols-1 lg:grid-cols-[1.6fr_1fr] grid-rows-[minmax(0,1fr)] flex-1 min-h-0">
+              <div className="min-h-0 flex flex-col">
+                <ScrollArea className="flex-1 min-h-0 bg-gradient-to-br from-background via-background to-muted/10">
+                  <motion.div
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.5 }}
+                    className="space-y-6 p-6"
+                  >
+                    <div className="space-y-2">
+                      <Label htmlFor="title">Title</Label>
+                      <Input
+                        id="title"
+                        value={title}
+                        onChange={(e) => setTitle(e.target.value)}
+                        className="text-lg font-semibold"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="description">Description</Label>
+                      <Textarea
+                        id="description"
+                        value={description}
+                        onChange={(e) => setDescription(e.target.value)}
+                        className="min-h-[120px]"
+                        placeholder="Add a more detailed description..."
+                      />
+                    </div>
+
+                    {researchBrief ? (
+                      <div
+                        className={cn(
+                          "rounded-xl border-l-4 border border-border/60 p-4 shadow-sm",
+                          priorityTone[priority]
+                        )}
+                      >
+                        <div className="flex items-center justify-between gap-3">
+                          <div className="flex items-center gap-2 text-sm font-semibold">
+                            <Sparkles className="h-4 w-4 text-amber-500" />
+                            AI Research Brief
+                          </div>
                           <Button
                             type="button"
                             variant="ghost"
                             size="sm"
-                            onClick={() => setIsBriefExpanded((prev) => !prev)}
-                            className="px-0 text-xs text-muted-foreground hover:text-foreground"
+                            onClick={() => setIsEditingBrief((prev) => !prev)}
                           >
-                            {isBriefExpanded ? "Show less" : "Show more"}
+                            {isEditingBrief ? "Done" : "Edit"}
                           </Button>
-                        ) : null}
-                      </div>
-                    )}
-                  </div>
-                ) : null}
-
-                {aiAssistanceText ? (
-                  <div
-                    className={cn(
-                      "rounded-xl border-l-4 border border-border/60 p-4 shadow-sm",
-                      priorityTone[priority]
-                    )}
-                  >
-                    <div className="flex items-center justify-between gap-3">
-                      <div className="flex items-center gap-2 text-sm font-semibold">
-                        <Sparkles className="h-4 w-4 text-orange-500" />
-                        AI Assistance
-                      </div>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => setIsEditingAssistance((prev) => !prev)}
-                      >
-                        {isEditingAssistance ? "Done" : "Edit"}
-                      </Button>
-                    </div>
-                    {isEditingAssistance ? (
-                      <Textarea
-                        id="ai-assistance"
-                        value={aiAssistanceText}
-                        onChange={(e) => setAiAssistanceText(e.target.value)}
-                        className="mt-3 min-h-[160px] bg-background/70"
-                      />
-                    ) : (
-                      <div className="mt-3 space-y-2 leading-relaxed">
-                        {renderMarkdownBlocks(aiAssistanceText)}
-                      </div>
-                    )}
-                  </div>
-                ) : null}
-
-                {canEditSubtasks && (
-                  <div className="space-y-3">
-                    <Label>Subtasks</Label>
-                    <div className="space-y-2">
-                      {(subtasks || []).length === 0 && (
-                        <p className="text-xs text-muted-foreground">
-                          No subtasks yet.
-                        </p>
-                      )}
-                      {(subtasks || []).map((subtask) => (
-                        <div
-                          key={subtask.id}
-                          className="rounded-md border bg-muted/30 px-3 py-2 text-xs"
-                        >
-                          <p className="font-semibold text-foreground">
-                            {subtask.title}
-                          </p>
-                          {subtask.description ? (
-                            <p className="mt-1 text-muted-foreground">
-                              {subtask.description}
-                            </p>
-                          ) : null}
                         </div>
-                      ))}
-                    </div>
-                    <div className="flex flex-col gap-2 sm:flex-row">
-                      <Input
-                        placeholder="Add a new subtask..."
-                        value={newSubtaskTitle}
-                        onChange={(event) => setNewSubtaskTitle(event.target.value)}
-                        onKeyDown={(event) => {
-                          if (event.key === "Enter") {
-                            event.preventDefault();
-                            handleAddSubtask();
-                          }
-                        }}
-                      />
+                        {isEditingBrief ? (
+                          <Textarea
+                            id="ai-research-brief"
+                            value={researchBrief}
+                            onChange={(e) => setResearchBrief(e.target.value)}
+                            className="mt-3 min-h-[160px] bg-background/70"
+                          />
+                        ) : (
+                          <div className="mt-3 space-y-2 leading-relaxed">
+                            <div className={cn(isBriefCollapsed && "max-h-[240px] overflow-hidden")}>
+                              {renderMarkdownBlocks(researchBrief)}
+                            </div>
+                            {shouldCollapseBrief ? (
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => setIsBriefExpanded((prev) => !prev)}
+                                className="px-0 text-xs text-muted-foreground hover:text-foreground"
+                              >
+                                {isBriefExpanded ? "Show less" : "Show more"}
+                              </Button>
+                            ) : null}
+                          </div>
+                        )}
+                      </div>
+                    ) : null}
+
+                    {aiAssistanceText ? (
+                      <div
+                        className={cn(
+                          "rounded-xl border-l-4 border border-border/60 p-4 shadow-sm",
+                          priorityTone[priority]
+                        )}
+                      >
+                        <div className="flex items-center justify-between gap-3">
+                          <div className="flex items-center gap-2 text-sm font-semibold">
+                            <Sparkles className="h-4 w-4 text-orange-500" />
+                            AI Assistance
+                          </div>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => setIsEditingAssistance((prev) => !prev)}
+                          >
+                            {isEditingAssistance ? "Done" : "Edit"}
+                          </Button>
+                        </div>
+                        {isEditingAssistance ? (
+                          <Textarea
+                            id="ai-assistance"
+                            value={aiAssistanceText}
+                            onChange={(e) => setAiAssistanceText(e.target.value)}
+                            className="mt-3 min-h-[160px] bg-background/70"
+                          />
+                        ) : (
+                          <div className="mt-3 space-y-2 leading-relaxed">
+                            {renderMarkdownBlocks(aiAssistanceText)}
+                          </div>
+                        )}
+                      </div>
+                    ) : null}
+
+                    {canEditSubtasks && (
+                      <div className="space-y-3">
+                        <Label>Subtasks</Label>
+                        <div className="space-y-2">
+                          {(subtasks || []).length === 0 && (
+                            <p className="text-xs text-muted-foreground">
+                              No subtasks yet.
+                            </p>
+                          )}
+                          {(subtasks || []).map((subtask) => (
+                            <div
+                              key={subtask.id}
+                              className="rounded-md border bg-muted/30 px-3 py-2 text-xs"
+                            >
+                              <p className="font-semibold text-foreground">
+                                {subtask.title}
+                              </p>
+                              {subtask.description ? (
+                                <p className="mt-1 text-muted-foreground">
+                                  {subtask.description}
+                                </p>
+                              ) : null}
+                            </div>
+                          ))}
+                        </div>
+                        <div className="flex flex-col gap-2 sm:flex-row">
+                          <Input
+                            placeholder="Add a new subtask..."
+                            value={newSubtaskTitle}
+                            onChange={(event) => setNewSubtaskTitle(event.target.value)}
+                            onKeyDown={(event) => {
+                              if (event.key === "Enter") {
+                                event.preventDefault();
+                                handleAddSubtask();
+                              }
+                            }}
+                          />
                       <Button
                         type="button"
                         variant="outline"
                         onClick={handleAddSubtask}
-                        disabled={!newSubtaskTitle.trim()}
+                        disabled={!newSubtaskTitle.trim() || isAddingSubtask}
                       >
                         Add subtask
                       </Button>
-                    </div>
-                  </div>
-                )}
-
-                <div className="space-y-3">
-                  <Label>Comments</Label>
-                  <div className="space-y-3">
-                    {(comments || []).length === 0 && (
-                      <p className="text-xs text-muted-foreground">No comments yet.</p>
-                    )}
-                    {(comments || []).map((comment) => (
-                      <div key={comment.id} className="rounded-md border bg-muted/30 p-3 text-xs">
-                        <div className="flex items-center justify-between text-muted-foreground">
-                          <span className="font-semibold text-foreground">
-                            {comment.authorName || "Contributor"}
-                          </span>
-                          <span>{format(new Date(comment.createdAt), "MMM d, h:mm a")}</span>
                         </div>
-                        <p className="mt-2 text-foreground whitespace-pre-wrap">{comment.text}</p>
                       </div>
-                    ))}
-                  </div>
-                  <div className="flex flex-col gap-2">
-                    <Textarea
-                      value={newComment}
-                      onChange={(e) => setNewComment(e.target.value)}
-                      placeholder="Add a comment..."
-                      className="min-h-[80px]"
-                    />
-                    <div className="flex justify-end">
-                      <Button type="button" size="sm" onClick={handleAddComment} disabled={!newComment.trim()}>
-                        Add Comment
-                      </Button>
-                    </div>
-                  </div>
-                </div>
+                    )}
 
-                {task?.sourceEvidence && task.sourceEvidence.length > 0 && (
-                  <div className="space-y-2">
-                    <Label>Source Evidence</Label>
-                    <div className="space-y-2">
-                      {task.sourceEvidence.map((evidence, index) => (
-                        <div key={`${task.id}-evidence-${index}`} className="rounded-md border bg-muted/30 p-3 text-xs">
-                          <p className="font-semibold">
-                            {evidence.speaker || "Speaker"}
-                            {evidence.timestamp ? ` - ${evidence.timestamp}` : ""}
-                          </p>
-                          <p className="text-muted-foreground mt-1">{evidence.snippet}</p>
+                    <div className="space-y-3">
+                      <Label>Comments</Label>
+                      <div className="space-y-3">
+                        {(comments || []).length === 0 && (
+                          <p className="text-xs text-muted-foreground">No comments yet.</p>
+                        )}
+                        {(comments || []).map((comment) => (
+                          <div key={comment.id} className="rounded-md border bg-muted/30 p-3 text-xs">
+                            <div className="flex items-center justify-between text-muted-foreground">
+                              <span className="font-semibold text-foreground">
+                                {comment.authorName || "Contributor"}
+                              </span>
+                              <span>{format(new Date(comment.createdAt), "MMM d, h:mm a")}</span>
+                            </div>
+                            <p className="mt-2 text-foreground whitespace-pre-wrap">{comment.text}</p>
+                          </div>
+                        ))}
+                      </div>
+                      <div className="flex flex-col gap-2">
+                        <Textarea
+                          value={newComment}
+                          onChange={(e) => setNewComment(e.target.value)}
+                          placeholder="Add a comment..."
+                          className="min-h-[80px]"
+                        />
+                        <div className="flex justify-end">
+                          <Button type="button" size="sm" onClick={handleAddComment} disabled={!newComment.trim()}>
+                            Add Comment
+                          </Button>
                         </div>
-                      ))}
+                      </div>
+                    </div>
+
+                    {task?.sourceEvidence && task.sourceEvidence.length > 0 && (
+                      <div className="space-y-2">
+                        <Label>Source Evidence</Label>
+                        <div className="space-y-2">
+                          {task.sourceEvidence.map((evidence, index) => (
+                            <div key={`${task.id}-evidence-${index}`} className="rounded-md border bg-muted/30 p-3 text-xs">
+                              <p className="font-semibold">
+                                {evidence.speaker || "Speaker"}
+                                {evidence.timestamp ? ` - ${evidence.timestamp}` : ""}
+                              </p>
+                              <p className="text-muted-foreground mt-1">{evidence.snippet}</p>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </motion.div>
+                </ScrollArea>
+              </div>
+
+              <motion.div
+                initial={{ opacity: 0, x: 10 }}
+                animate={{ opacity: 1, x: 0 }}
+                transition={{ duration: 0.5 }}
+                className="h-full min-h-0 border-l bg-gradient-to-b from-muted/30 via-muted/10 to-background flex flex-col"
+              >
+                <div className="flex-1 min-h-0 overflow-y-auto p-6 space-y-4">
+                  <div className="rounded-xl border bg-background/80 p-4 space-y-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="status">Status</Label>
+                      <Select value={status || "todo"} onValueChange={(value: string) => setStatus(value as DisplayTask["status"])}>
+                        <SelectTrigger><SelectValue placeholder="Select status" /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="todo">To do</SelectItem>
+                          <SelectItem value="inprogress">In progress</SelectItem>
+                          <SelectItem value="done">Done</SelectItem>
+                          <SelectItem value="recurring">Recurring</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="priority">Priority</Label>
+                      <Select value={priority} onValueChange={(value: string) => setPriority(value as DisplayTask["priority"])}>
+                        <SelectTrigger><SelectValue placeholder="Select priority" /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="low">Low</SelectItem>
+                          <SelectItem value="medium">Medium</SelectItem>
+                          <SelectItem value="high">High</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="dueAt">Due Date</Label>
+                      <Popover>
+                        <PopoverTrigger asChild>
+                          <Button variant={"outline"} className={cn("w-full justify-start text-left font-normal", !dueAt && "text-muted-foreground")}>
+                            <CalendarIcon className="mr-2 h-4 w-4" />
+                            {dueAt ? format(dueAt, "PPP") : <span>Pick a date</span>}
+                          </Button>
+                        </PopoverTrigger>
+                        <PopoverContent className="w-auto p-0">
+                          <Calendar mode="single" selected={dueAt} onSelect={setDueAt} initialFocus />
+                        </PopoverContent>
+                      </Popover>
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Assigned to</Label>
+                      <Select
+                        value={assigneeSelection || ""}
+                        onValueChange={(value) =>
+                          setAssigneeSelection(value === "" ? null : value)
+                        }
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder={assigneeMeta.label} />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value={UNASSIGNED_VALUE}>Unassigned</SelectItem>
+                          {people.map((person) => (
+                            <SelectItem key={person.id} value={person.id}>
+                              {person.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <div className="flex items-center gap-3 rounded-lg border bg-muted/30 px-3 py-2">
+                        <Avatar className="h-8 w-8">
+                          <AvatarImage src={assigneeMeta.avatarUrl || undefined} />
+                          <AvatarFallback>{getInitials(assigneeMeta.label)}</AvatarFallback>
+                        </Avatar>
+                        <div className="min-w-0">
+                          <p className="text-sm font-semibold truncate">{assigneeMeta.label}</p>
+                          <p className="text-xs text-muted-foreground truncate">
+                            {selectedPerson?.email ||
+                              task?.assignee?.email ||
+                              "No email"}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Board</Label>
+                      <Select
+                        value={selectedBoardId}
+                        onValueChange={handleBoardChange}
+                        disabled={
+                          isMovingBoard ||
+                          isResolvingBoard ||
+                          !onMoveToBoard ||
+                          !hasBoards
+                        }
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder={boardPlaceholder} />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {hasBoards ? (
+                            boards.map((board) => (
+                              <SelectItem key={board.id} value={board.id}>
+                                {board.name}
+                              </SelectItem>
+                            ))
+                          ) : (
+                            <SelectItem value="__no_boards__" disabled>
+                              No boards available
+                            </SelectItem>
+                          )}
+                        </SelectContent>
+                      </Select>
                     </div>
                   </div>
-                )}
 
-                </motion.div>
-              </ScrollArea>
-            </div>
-
-            <motion.div
-              initial={{ opacity: 0, x: 10 }}
-              animate={{ opacity: 1, x: 0 }}
-              transition={{ duration: 0.5 }}
-              className="h-full border-l bg-gradient-to-b from-muted/30 via-muted/10 to-background p-6 space-y-4"
-            >
-              <div className="rounded-xl border bg-background/80 p-4 space-y-4">
-                <div className="space-y-2">
-                  <Label htmlFor="status">Status</Label>
-                  <Select value={status || "todo"} onValueChange={(value) => setStatus(value as DisplayTask["status"])}>
-                    <SelectTrigger><SelectValue placeholder="Select status" /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="todo">To do</SelectItem>
-                      <SelectItem value="inprogress">In progress</SelectItem>
-                      <SelectItem value="done">Done</SelectItem>
-                      <SelectItem value="recurring">Recurring</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="priority">Priority</Label>
-                  <Select value={priority} onValueChange={(value) => setPriority(value as DisplayTask["priority"])}>
-                    <SelectTrigger><SelectValue placeholder="Select priority" /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="low">Low</SelectItem>
-                      <SelectItem value="medium">Medium</SelectItem>
-                      <SelectItem value="high">High</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="dueAt">Due Date</Label>
-                  <Popover>
-                    <PopoverTrigger asChild>
-                      <Button variant={"outline"} className={cn("w-full justify-start text-left font-normal", !dueAt && "text-muted-foreground")}>
-                        <CalendarIcon className="mr-2 h-4 w-4" />
-                        {dueAt ? format(dueAt, "PPP") : <span>Pick a date</span>}
+                  <div className="rounded-xl border bg-background/80 p-4 space-y-3">
+                    <Label>Send options</Label>
+                    <div className="grid grid-cols-2 gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setIsShareToSlackOpen(true)}
+                        disabled={!isSlackConnected}
+                      >
+                        <Slack className="mr-2 h-4 w-4" /> Slack
                       </Button>
-                    </PopoverTrigger>
-                    <PopoverContent className="w-auto p-0">
-                      <Calendar mode="single" selected={dueAt} onSelect={setDueAt} initialFocus />
-                    </PopoverContent>
-                  </Popover>
-                </div>
-                <div className="space-y-2">
-                  <Label>Assigned to</Label>
-                  <Select
-                    value={assigneeSelection || ""}
-                    onValueChange={(value) =>
-                      setAssigneeSelection(value === "" ? null : value)
-                    }
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder={assigneeMeta.label} />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value={UNASSIGNED_VALUE}>Unassigned</SelectItem>
-                      {people.map((person) => (
-                        <SelectItem key={person.id} value={person.id}>
-                          {person.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <div className="flex items-center gap-3 rounded-lg border bg-muted/30 px-3 py-2">
-                    <Avatar className="h-8 w-8">
-                      <AvatarImage src={assigneeMeta.avatarUrl || undefined} />
-                      <AvatarFallback>{getInitials(assigneeMeta.label)}</AvatarFallback>
-                    </Avatar>
-                    <div className="min-w-0">
-                      <p className="text-sm font-semibold truncate">{assigneeMeta.label}</p>
-                      <p className="text-xs text-muted-foreground truncate">
-                        {selectedPerson?.email ||
-                          task?.assignee?.email ||
-                          "No email"}
-                      </p>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setIsPushToTrelloOpen(true)}
+                        disabled={!isTrelloConnected}
+                      >
+                        <SiTrello className="mr-2 h-4 w-4" color="#0079BF" /> Trello
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setIsPushToGoogleOpen(true)}
+                        disabled={!isGoogleTasksConnected}
+                      >
+                        <ListChecks className="mr-2 h-4 w-4" /> Tasks
+                      </Button>
+                      <Button variant="outline" size="sm" onClick={handleCopyTask}>
+                        <Copy className="mr-2 h-4 w-4" /> Copy
+                      </Button>
                     </div>
                   </div>
                 </div>
-                <div className="space-y-2">
-                  <Label>Board</Label>
-                  <Select
-                    value={selectedBoardId}
-                    onValueChange={handleBoardChange}
-                    disabled={
-                      isMovingBoard ||
-                      isResolvingBoard ||
-                      !onMoveToBoard ||
-                      !hasBoards
-                    }
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder={boardPlaceholder} />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {hasBoards ? (
-                        boards.map((board) => (
-                          <SelectItem key={board.id} value={board.id}>
-                            {board.name}
-                          </SelectItem>
-                        ))
-                      ) : (
-                        <SelectItem value="__no_boards__" disabled>
-                          No boards available
-                        </SelectItem>
-                      )}
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-
-              <div className="rounded-xl border bg-background/80 p-4 space-y-3">
-                <Label>Send options</Label>
-                <div className="grid grid-cols-2 gap-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setIsShareToSlackOpen(true)}
-                    disabled={!isSlackConnected}
-                  >
-                    <Slack className="mr-2 h-4 w-4" /> Slack
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setIsPushToTrelloOpen(true)}
-                    disabled={!isTrelloConnected}
-                  >
-                    <SiTrello className="mr-2 h-4 w-4" color="#0079BF" /> Trello
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setIsPushToGoogleOpen(true)}
-                    disabled={!isGoogleTasksConnected}
-                  >
-                    <ListChecks className="mr-2 h-4 w-4" /> Tasks
-                  </Button>
-                  <Button variant="outline" size="sm" onClick={handleCopyTask}>
-                    <Copy className="mr-2 h-4 w-4" /> Copy
+                <div className="sticky bottom-0 z-10 border-t border-border/80 bg-background/80 px-6 py-4 flex justify-between">
+                  <DialogClose asChild>
+                    <Button type="button" variant="outline">
+                      Cancel
+                    </Button>
+                  </DialogClose>
+                  <Button type="button" onClick={handleSaveChanges}>
+                    Save changes
                   </Button>
                 </div>
-              </div>
-            </motion.div>
-          </div>
-          <DialogFooter className="mt-auto px-6 py-4 border-t bg-background/80">
-            <DialogClose asChild>
-              <Button type="button" variant="outline">
-                Cancel
-              </Button>
-            </DialogClose>
-            <Button type="button" onClick={handleSaveChanges}>
-              Save changes
-            </Button>
-          </DialogFooter>
+              </motion.div>
+            </div>
           </div>
         </div>
       </DialogContent>
+
       <ShareToSlackDialog
         isOpen={isShareToSlackOpen}
         onClose={() => setIsShareToSlackOpen(false)}

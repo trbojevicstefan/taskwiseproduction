@@ -180,7 +180,7 @@ export default function SlackSyncDialog({ isOpen, onClose, onSynced }: SlackSync
 
   return (
     <Dialog open={isOpen} onOpenChange={handleOpenChange}>
-      <DialogContent className="max-w-3xl">
+      <DialogContent className="max-w-3xl z-[260]" overlayClassName="z-[250]">
         <DialogHeader>
           <DialogTitle>Sync Slack Users</DialogTitle>
           <DialogDescription>

@@ -24,10 +24,14 @@ export async function GET(request: Request) {
   const userIdQuery = buildIdQuery(userId);
   const { searchParams } = new URL(request.url);
   const workspaceId = searchParams.get("workspaceId");
+  const parentId = searchParams.get("parentId");
   const includeSuggested = searchParams.get("includeSuggested") === "true";
   const filters: Record<string, any> = { userId: userIdQuery };
   if (workspaceId) {
     filters.workspaceId = workspaceId;
+  }
+  if (parentId) {
+    filters.parentId = buildIdQuery(parentId);
   }
   if (!includeSuggested) {
     filters.taskState = { $ne: "archived" };

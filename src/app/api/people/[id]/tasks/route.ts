@@ -20,6 +20,60 @@ const normalizeId = (value: any) => {
   return String(value);
 };
 
+const hasText = (value: any) =>
+  typeof value === "string" && value.trim().length > 0;
+
+const toTime = (value: any) => {
+  if (!value) return 0;
+  if (typeof value === "number") return value;
+  const date = value instanceof Date ? value : new Date(value);
+  const time = date.getTime();
+  return Number.isNaN(time) ? 0 : time;
+};
+
+const buildTaskKey = (task: any) => {
+  const sessionId = normalizeId(task?.sourceSessionId);
+  const sourceTaskId = normalizeId(task?.sourceTaskId);
+  const taskId = normalizeId(task?.id ?? task?._id);
+  if (sessionId && sourceTaskId) return `${sessionId}:${sourceTaskId}`;
+  if (sourceTaskId) return sourceTaskId;
+  if (taskId.includes(":")) return taskId;
+  return taskId;
+};
+
+const pickPreferredTask = (current: any, candidate: any) => {
+  if (!current) return candidate;
+  if (!candidate) return current;
+
+  const currentScore =
+    (hasText(current.researchBrief) ? 4 : 0) +
+    (hasText(current.aiAssistanceText) ? 2 : 0) +
+    (current.sourceSessionType ? 1 : 0);
+  const candidateScore =
+    (hasText(candidate.researchBrief) ? 4 : 0) +
+    (hasText(candidate.aiAssistanceText) ? 2 : 0) +
+    (candidate.sourceSessionType ? 1 : 0);
+
+  if (candidateScore !== currentScore) {
+    return candidateScore > currentScore ? candidate : current;
+  }
+
+  const currentTime = Math.max(
+    toTime(current.lastUpdated),
+    toTime(current.createdAt)
+  );
+  const candidateTime = Math.max(
+    toTime(candidate.lastUpdated),
+    toTime(candidate.createdAt)
+  );
+
+  if (candidateTime !== currentTime) {
+    return candidateTime > currentTime ? candidate : current;
+  }
+
+  return current;
+};
+
 const flattenExtractedTasks = (
   tasks: ExtractedTaskSchema[] = []
 ): ExtractedTaskSchema[] => {
@@ -201,18 +255,13 @@ export async function GET(
     ...chatTasks,
   ];
 
-  const seen = new Set<string>();
-  const dedupedTasks = normalizedTasks.filter((task) => {
-    const sourceSessionId = normalizeId(task?.sourceSessionId);
-    const sourceTaskId = normalizeId(task?.sourceTaskId);
-    const key =
-      sourceSessionId && sourceTaskId
-        ? `${sourceSessionId}:${sourceTaskId}`
-        : normalizeId(task?.id ?? task?._id);
-    if (!key || seen.has(key)) return false;
-    seen.add(key);
-    return true;
+  const dedupedMap = new Map<string, any>();
+  normalizedTasks.forEach((task) => {
+    const key = buildTaskKey(task);
+    if (!key) return;
+    const existing = dedupedMap.get(key);
+    dedupedMap.set(key, pickPreferredTask(existing, task));
   });
 
-  return NextResponse.json(dedupedTasks);
+  return NextResponse.json(Array.from(dedupedMap.values()));
 }

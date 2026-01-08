@@ -118,6 +118,11 @@ export const onTasksForPersonSnapshot = (
 export function normalizeTask(task: any): ExtractedTaskSchema {
   if (!task) return {} as ExtractedTaskSchema;
 
+  const rawId =
+    task.id ??
+    (task._id?.toString?.() || task._id);
+  const resolvedId = rawId || uuidv4();
+
   let sanitizedAssignee = null;
   if (task.assignee) {
     sanitizedAssignee = {
@@ -134,7 +139,7 @@ export function normalizeTask(task: any): ExtractedTaskSchema {
     : null;
 
   return {
-    id: task.id || uuidv4(),
+    id: resolvedId,
     title: task.title || "Untitled Task",
     description: task.description === undefined ? null : task.description,
     priority: task.priority || "medium",

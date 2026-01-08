@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   AlertCircle,
@@ -480,6 +480,7 @@ function AssigneeDropdown({
   const [dragOverColumn, setDragOverColumn] = useState<string | null>(null);
   const [dragOverTaskId, setDragOverTaskId] = useState<string | null>(null);
   const [dragOverPosition, setDragOverPosition] = useState<DragPosition>(null);
+  const lastLoadedBoardIdRef = useRef<string | null>(null);
 
     const orderedStatuses = useMemo(
       () => [...boardStatuses].sort((a, b) => a.order - b.order),
@@ -496,7 +497,7 @@ function AssigneeDropdown({
         dueAt: task.dueAt ?? null,
         assignee: task.assignee ?? null,
         assigneeName: task.assigneeName ?? null,
-        subtasks: null,
+        subtasks: (task as any).subtasks ?? undefined,
         comments: task.comments ?? null,
         researchBrief: task.researchBrief ?? null,
         aiAssistanceText: task.aiAssistanceText ?? null,
@@ -778,7 +779,15 @@ function AssigneeDropdown({
         ]);
         setBoardStatuses(statusList);
         setTasks(boardItems);
-        setSelectedTaskIds(new Set());
+        setSelectedTaskIds((prev) => {
+          if (!prev.size || lastLoadedBoardIdRef.current !== boardId) {
+            lastLoadedBoardIdRef.current = boardId;
+            return new Set();
+          }
+          const validIds = new Set(boardItems.map((item) => item.id));
+          const next = new Set(Array.from(prev).filter((id) => validIds.has(id)));
+          return next.size === prev.size ? prev : next;
+        });
       } catch (error) {
         console.error("Failed to load board:", error);
         toast({
@@ -2594,7 +2603,7 @@ function AssigneeDropdown({
           onMoveToBoard={handleMoveTaskToBoard}
           getBriefContext={getBriefContext}
           shareTitle={activeBoard?.name || "Board"}
-          supportsSubtasks={false}
+          supportsSubtasks
         />
 
         <ShareToSlackDialog

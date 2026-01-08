@@ -29,6 +29,30 @@ const collectSessionIds = (session: any, fallbackId?: string | null) => {
   return Array.from(ids);
 };
 
+const ACTIVITY_KEYS = new Set([
+  "artifacts",
+  "recordingId",
+  "recordingIdHash",
+  "originalTranscript",
+  "summary",
+  "meetingMetadata",
+  "startTime",
+  "endTime",
+  "duration",
+  "state",
+  "tags",
+]);
+
+const shouldRefreshLastActivity = (payload: Record<string, any> | null) => {
+  if (!payload) return false;
+  if (Array.isArray(payload.extractedTasks) && payload.extractedTasks.length > 0) {
+    return true;
+  }
+  return Array.from(ACTIVITY_KEYS).some((key) =>
+    Object.prototype.hasOwnProperty.call(payload, key)
+  );
+};
+
 const updateLinkedChatSessions = async (
   db: any,
   userId: string,
@@ -77,6 +101,37 @@ const cleanupChatTasksForSessions = async (
   });
 };
 
+const collectDescendantTaskIds = async (
+  db: any,
+  userIdQuery: any,
+  parentIds: string[]
+) => {
+  const allIds = new Set<string>(parentIds);
+  const queue = [...parentIds];
+
+  while (queue.length > 0) {
+    const batch = queue.splice(0, 200);
+    const children = await db
+      .collection<any>("tasks")
+      .find({
+        userId: userIdQuery,
+        parentId: { $in: batch },
+      })
+      .project({ _id: 1 })
+      .toArray();
+
+    children.forEach((child) => {
+      const childId = String(child._id);
+      if (!allIds.has(childId)) {
+        allIds.add(childId);
+        queue.push(childId);
+      }
+    });
+  }
+
+  return Array.from(allIds);
+};
+
 export async function PATCH(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
@@ -89,13 +144,16 @@ export async function PATCH(
 
   const body = await request.json().catch(() => ({}));
   const { recordingId, recordingIdHash, ...safeBody } = body || {};
-  const update = { ...safeBody, lastActivityAt: new Date() };
+  const update: Record<string, any> = { ...safeBody };
   let extractedTasks: ExtractedTaskSchema[] | null = null;
   if (Array.isArray(safeBody.extractedTasks)) {
     extractedTasks = safeBody.extractedTasks.map((task: ExtractedTaskSchema) =>
       normalizeTask(task)
     );
     update.extractedTasks = extractedTasks;
+  }
+  if (shouldRefreshLastActivity(safeBody)) {
+    update.lastActivityAt = new Date();
   }
 
   const db = await getDb();
@@ -236,12 +294,12 @@ export async function DELETE(
       })
       .project({ _id: 1 })
       .toArray();
-    const taskIds = tasksToRemove.map((task) => String(task._id));
+    const rootTaskIds = tasksToRemove.map((task) => String(task._id));
+    const taskIds = await collectDescendantTaskIds(db, userIdQuery, rootTaskIds);
 
     await db.collection<any>("tasks").deleteMany({
       userId: userIdQuery,
-      sourceSessionType: "meeting",
-      sourceSessionId: { $in: sessionIdList },
+      _id: { $in: taskIds },
     });
 
     if (taskIds.length) {

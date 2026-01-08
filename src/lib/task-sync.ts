@@ -25,23 +25,28 @@ export interface TaskSyncResult {
 const buildTaskRecords = (
   tasks: ExtractedTaskSchema[],
   options: TaskSyncOptions,
-  now: Date
+  now: Date,
+  existingBySourceTaskId: Map<string, string>
 ) => {
   const records: any[] = [];
   const ids: string[] = [];
   const origin = options.origin || options.sourceSessionType;
+  const resolveTaskId = (sourceTaskId: string) =>
+    existingBySourceTaskId.get(sourceTaskId) || sourceTaskId;
 
   const walk = (items: ExtractedTaskSchema[], parentId: string | null) => {
     items.forEach((item, index) => {
       const task = normalizeTask(item);
-      ids.push(task.id);
+      const sourceTaskId = task.id;
+      const taskId = resolveTaskId(sourceTaskId);
+      ids.push(taskId);
       const assigneeNameRaw = task.assigneeName || task.assignee?.name || null;
       const assigneeNameKey = assigneeNameRaw
         ? normalizePersonNameKey(assigneeNameRaw)
         : null;
 
       records.push({
-        _id: task.id,
+        _id: taskId,
         userId: options.userId,
         workspaceId: options.workspaceId ?? null,
         title: task.title,
@@ -68,7 +73,7 @@ const buildTaskRecords = (
         sourceSessionId: options.sourceSessionId,
         sourceSessionName: options.sourceSessionName ?? null,
         sourceSessionType: options.sourceSessionType,
-        sourceTaskId: task.id,
+        sourceTaskId,
         projectId: null,
         parentId,
         order: index,
@@ -77,7 +82,7 @@ const buildTaskRecords = (
       });
 
       if (task.subtasks?.length) {
-        walk(task.subtasks, task.id);
+        walk(task.subtasks, taskId);
       }
     });
   };
@@ -92,9 +97,34 @@ export const syncTasksForSource = async (
   options: TaskSyncOptions
 ): Promise<TaskSyncResult> => {
   const now = new Date();
-  const { records, ids } = buildTaskRecords(tasks, options, now);
   const userIdQuery = buildIdQuery(options.userId);
   const sessionIdQuery = buildIdQuery(options.sourceSessionId);
+  const existingTasks = await db
+    .collection<any>("tasks")
+    .find({
+      userId: userIdQuery,
+      sourceSessionType: options.sourceSessionType,
+      $or: [
+        { sourceSessionId: sessionIdQuery },
+        { sourceSessionId: options.sourceSessionId },
+      ],
+    })
+    .project({ _id: 1, sourceTaskId: 1 })
+    .toArray();
+  const existingBySourceTaskId = new Map<string, string>();
+  existingTasks.forEach((task) => {
+    const key =
+      task.sourceTaskId || task._id?.toString?.() || task.id;
+    if (!key) return;
+    existingBySourceTaskId.set(String(key), task._id?.toString?.() || task._id);
+  });
+
+  const { records, ids } = buildTaskRecords(
+    tasks,
+    options,
+    now,
+    existingBySourceTaskId
+  );
 
   if (records.length) {
     await db.collection("tasks").bulkWrite(

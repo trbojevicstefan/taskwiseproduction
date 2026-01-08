@@ -433,6 +433,7 @@ export default function ChatPageContent() {
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const layoutRef = useRef<HTMLDivElement>(null);
   const activeSessionIdRef = useRef<string | null>(null);
+  const lastSelectionSessionIdRef = useRef<string | null>(null);
   const lastChatIdParamRef = useRef<string | null>(null);
   const hasHandledChatParamRef = useRef(false);
 
@@ -658,6 +659,26 @@ export default function ChatPageContent() {
     }
   }, [selectedTaskIds, setShowCopyHint]);
 
+  useEffect(() => {
+    setSelectedTaskIds((prev) => {
+      if (prev.size === 0) return prev;
+      const validIds = new Set<string>();
+      suggestedTasks.forEach((task) => {
+        getTaskAndAllDescendantIds(task).forEach((id) => validIds.add(id));
+      });
+      let changed = false;
+      const next = new Set<string>();
+      prev.forEach((id) => {
+        if (validIds.has(id)) {
+          next.add(id);
+        } else {
+          changed = true;
+        }
+      });
+      return changed ? next : prev;
+    });
+  }, [suggestedTasks]);
+
   const applyTaskUpdate = useCallback(
     (
       nextTasks: ExtractedTaskSchema[],
@@ -816,6 +837,7 @@ export default function ChatPageContent() {
 
   useEffect(() => {
     const currentActiveSession = getActiveSession();
+    const currentSessionId = currentActiveSession?.id ?? null;
     if (currentActiveSession) {
       resetTaskHistory(currentActiveSession.suggestedTasks || []);
       setEditableTitle(currentActiveSession.title);
@@ -823,8 +845,11 @@ export default function ChatPageContent() {
       resetTaskHistory([]);
       setEditableTitle("New Chat");
     }
-    setSelectedTaskIds(new Set());
-    setIsEditingTitle(false);
+    if (lastSelectionSessionIdRef.current !== currentSessionId) {
+      lastSelectionSessionIdRef.current = currentSessionId;
+      setSelectedTaskIds(new Set());
+      setIsEditingTitle(false);
+    }
     const shouldShow = (currentActiveSession?.suggestedTasks?.length ?? 0) > 0;
     setActiveSidePanel((prev) => {
       if (isTabletOrMobile) return null;
@@ -1307,6 +1332,8 @@ export default function ChatPageContent() {
         const selectedAITasks = sanitizeTasksForAI(getSelectedTasks());
         const sourceMeeting = getMeetingForSession(currentSession);
         const sourceTranscript = getMeetingTranscript(sourceMeeting);
+        const shouldApplyTaskUpdate =
+          !sourceMeeting || currentTasks.length === 0 || selectedAITasks.length > 0;
 
         if (activeSessionId && currentSession && sourceMeeting) {
           if (!currentSession.sourceMeetingId || currentSession.sourceMeetingId !== sourceMeeting.id) {
@@ -1341,7 +1368,7 @@ export default function ChatPageContent() {
                   name: aiName
                 });
             } else {
-                if (result.tasks) {
+                if (result.tasks && shouldApplyTaskUpdate) {
                     const newTasks = result.tasks.map((t: ExtractedTaskSchema) => normalizeTask(t as ExtractedTaskSchema));
                     applyTaskUpdate(newTasks);
                 }

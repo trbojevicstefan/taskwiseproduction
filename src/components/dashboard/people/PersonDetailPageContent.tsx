@@ -135,7 +135,7 @@ export default function PersonDetailPageContent({ personId }: PersonDetailPageCo
       dueAt: task.dueAt ?? null,
       assignee: task.assignee ?? null,
       assigneeName: task.assignee?.name ?? null,
-      subtasks: null,
+      subtasks: (task as any).subtasks ?? undefined,
       status: task.status,
       comments: task.comments ?? null,
       researchBrief: task.researchBrief ?? null,
@@ -1064,7 +1064,7 @@ export default function PersonDetailPageContent({ personId }: PersonDetailPageCo
           onMoveToBoard={handleMoveTaskToBoard}
           getBriefContext={getBriefContext}
           shareTitle={currentPersonData.name || "Person"}
-          supportsSubtasks={false}
+          supportsSubtasks
         />
       <AlertDialog open={isDeleteTaskConfirmOpen} onOpenChange={setIsDeleteTaskConfirmOpen}>
         <AlertDialogContent>

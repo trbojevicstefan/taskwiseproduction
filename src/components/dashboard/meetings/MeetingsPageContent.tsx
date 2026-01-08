@@ -965,6 +965,7 @@ export function MeetingDetailSheet({
       role: "attendee" | "mentioned";
       existingPerson: Person | null;
     } | null>(null);
+    const lastMeetingIdRef = useRef<string | null>(null);
 
     const meeting = useMemo(() => meetings.find((m) => m.id === id) || null, [id, meetings]);
     const { toast } = useToast();
@@ -1137,20 +1138,31 @@ export function MeetingDetailSheet({
     }, [selectableMeetingPeople, selectedPeopleKeys]);
 
     useEffect(() => {
-        if (meeting) {
-            setEditableTitle(meeting.title);
-            setSelectedTaskIds(new Set()); // Clear selection when meeting changes
+        if (!meeting) {
+            lastMeetingIdRef.current = null;
+            return;
+        }
+        if (lastMeetingIdRef.current !== meeting.id) {
+            lastMeetingIdRef.current = meeting.id;
+            setSelectedTaskIds(new Set());
             setSelectedPeopleKeys(new Set());
             setActivePerson(null);
-
-            // Check for new people when a meeting is opened
-            const hasSeenPopup = sessionStorage.getItem(`seen-people-popup-${meeting.id}`);
-            if (user?.onboardingCompleted && selectableMeetingPeople.length > 0 && !hasSeenPopup) {
-                setIsDiscoveryDialogOpen(true);
-                sessionStorage.setItem(`seen-people-popup-${meeting.id}`, 'true');
-            }
         }
-    }, [meeting, user?.onboardingCompleted, selectableMeetingPeople]);
+    }, [meeting?.id]);
+
+    useEffect(() => {
+        if (!meeting || isEditingTitle) return;
+        setEditableTitle(meeting.title);
+    }, [isEditingTitle, meeting?.id, meeting?.title]);
+
+    useEffect(() => {
+        if (!meeting) return;
+        const hasSeenPopup = sessionStorage.getItem(`seen-people-popup-${meeting.id}`);
+        if (user?.onboardingCompleted && selectableMeetingPeople.length > 0 && !hasSeenPopup) {
+            setIsDiscoveryDialogOpen(true);
+            sessionStorage.setItem(`seen-people-popup-${meeting.id}`, 'true');
+        }
+    }, [meeting?.id, user?.onboardingCompleted, selectableMeetingPeople]);
 
     useEffect(() => {
         if (!meeting) return;
@@ -1338,6 +1350,30 @@ export function MeetingDetailSheet({
       collectIds(openTasks);
       return ids;
     }, [openTasks]);
+    useEffect(() => {
+        if (!meeting?.extractedTasks) return;
+        setSelectedTaskIds((prev) => {
+            if (prev.size === 0) return prev;
+            const validIds = new Set<string>();
+            const collect = (tasks: ExtractedTaskSchema[]) => {
+                tasks.forEach((task) => {
+                    validIds.add(task.id);
+                    if (task.subtasks) collect(task.subtasks);
+                });
+            };
+            collect(meeting.extractedTasks || []);
+            let changed = false;
+            const next = new Set<string>();
+            prev.forEach((id) => {
+                if (validIds.has(id)) {
+                    next.add(id);
+                } else {
+                    changed = true;
+                }
+            });
+            return changed ? next : prev;
+        });
+    }, [meeting?.extractedTasks]);
     const completedTasks = useMemo(() => {
         if (!meeting) return [];
         return (meeting.extractedTasks || []).filter(

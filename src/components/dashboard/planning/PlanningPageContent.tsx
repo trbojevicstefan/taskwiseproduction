@@ -1,7 +1,7 @@
 // src/components/dashboard/planning/PlanningPageContent.tsx
 "use client";
 
-import React, { useState, useCallback, useEffect, useMemo } from 'react';
+import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Input } from '@/components/ui/input'; // Added for title editing
@@ -86,7 +86,8 @@ type DetailLevel = 'light' | 'medium' | 'detailed';
 
 // Helper to normalize a single task for storage compatibility
 const sanitizeTaskForInternalState = (task: any): DisplayTask => {
-  const newId = task.id || uuidv4();
+  const rawId = task?.id ?? (task?._id?.toString?.() || task?._id);
+  const newId = rawId || uuidv4();
   return {
     id: newId,
     title: task.title || "Untitled Task",
@@ -196,6 +197,7 @@ export default function PlanningPageContent() {
   const [isGeneratingInitialPlan, setIsGeneratingInitialPlan] = useState(false);
   const [extractedTasks, setExtractedTasks] = useState<DisplayTask[]>([]);
   const [selectedTaskIds, setSelectedTaskIds] = useState<Set<string>>(new Set());
+  const lastPlanningSessionIdRef = useRef<string | null>(null);
   const { toast } = useToast();
   const { 
     activePlanningSessionId, 
@@ -263,11 +265,11 @@ export default function PlanningPageContent() {
 
   useEffect(() => {
     const activeSession = stableGetActivePlanningSession();
+    const sessionId = activeSession?.id ?? null;
     if (activeSession) {
       setPastedContent(activeSession.inputText);
       setTypedInput(''); // Typed input is transient
       setExtractedTasks(activeSession.extractedTasks || []); 
-      setSelectedTaskIds(new Set());
       setEditableTitle(activeSession.title); // Initialize editable title
       if (activeSession.extractedTasks && activeSession.extractedTasks.length > 0) {
         setIsInputAreaVisible(false); 
@@ -278,11 +280,14 @@ export default function PlanningPageContent() {
       setPastedContent('');
       setTypedInput('');
       setExtractedTasks([]);
-      setSelectedTaskIds(new Set());
       setIsInputAreaVisible(true);
       setEditableTitle("New Plan"); // Default for new plan
     }
-    setIsEditingTitle(false); // Ensure editing mode is off when session changes
+    if (lastPlanningSessionIdRef.current !== sessionId) {
+      lastPlanningSessionIdRef.current = sessionId;
+      setSelectedTaskIds(new Set());
+      setIsEditingTitle(false); // Ensure editing mode is off when session changes
+    }
   }, [activePlanningSessionId, stableGetActivePlanningSession]);
 
   useEffect(() => {
@@ -304,6 +309,26 @@ export default function PlanningPageContent() {
       setShowCopyHint(false);
     }
   }, [selectedTaskIds, setShowCopyHint]);
+
+  useEffect(() => {
+    setSelectedTaskIds((prev) => {
+      if (prev.size === 0) return prev;
+      const validIds = new Set<string>();
+      extractedTasks.forEach((task) => {
+        getTaskAndAllDescendantIds(task).forEach((id) => validIds.add(id));
+      });
+      let changed = false;
+      const next = new Set<string>();
+      prev.forEach((id) => {
+        if (validIds.has(id)) {
+          next.add(id);
+        } else {
+          changed = true;
+        }
+      });
+      return changed ? next : prev;
+    });
+  }, [extractedTasks]);
   
   const getSelectedTasks = (): DisplayTask[] => {
     const buildHierarchy = (tasks: DisplayTask[]): DisplayTask[] => {

@@ -82,7 +82,34 @@ export async function GET(
     boardUpdatedAt: item.updatedAt,
   }));
 
-  return NextResponse.json(response);
+  const toTime = (value: any) => {
+    if (!value) return 0;
+    if (value instanceof Date) return value.getTime();
+    const time = new Date(value).getTime();
+    return Number.isNaN(time) ? 0 : time;
+  };
+  const latestByTaskId = new Map<string, any>();
+  response.forEach((item) => {
+    const key = String(item.id);
+    const existing = latestByTaskId.get(key);
+    if (
+      !existing ||
+      toTime(item.boardUpdatedAt || item.boardCreatedAt) >
+        toTime(existing.boardUpdatedAt || existing.boardCreatedAt)
+    ) {
+      latestByTaskId.set(key, item);
+    }
+  });
+  const seen = new Set<string>();
+  const deduped = response.filter((item) => {
+    const key = String(item.id);
+    if (seen.has(key)) return false;
+    if (latestByTaskId.get(key) !== item) return false;
+    seen.add(key);
+    return true;
+  });
+
+  return NextResponse.json(deduped);
 }
 
 export async function POST(
@@ -134,6 +161,33 @@ export async function POST(
   const now = new Date();
   let taskId = typeof body.taskId === "string" ? body.taskId : null;
   let task: any = null;
+
+  if (taskId) {
+    const taskIdQuery = buildIdQuery(taskId);
+    const existingItem = await db.collection<any>("boardItems").findOne({
+      userId: userIdQuery,
+      workspaceId,
+      boardId,
+      taskId: taskIdQuery,
+    });
+    if (existingItem) {
+      task = await db.collection<any>("tasks").findOne({
+        userId: userIdQuery,
+        $or: [{ _id: taskIdQuery }, { id: taskId }],
+      });
+      if (!task) {
+        return NextResponse.json({ error: "Task not found." }, { status: 404 });
+      }
+      return NextResponse.json({
+        ...serializeTask(task),
+        boardItemId: existingItem._id,
+        boardStatusId: existingItem.statusId,
+        boardRank: existingItem.rank,
+        boardCreatedAt: existingItem.createdAt,
+        boardUpdatedAt: existingItem.updatedAt,
+      });
+    }
+  }
 
   if (!taskId) {
     const title = typeof body.title === "string" ? body.title.trim() : "";

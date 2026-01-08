@@ -3,6 +3,37 @@ import { getDb } from "@/lib/db";
 import { getSessionUserId } from "@/lib/server-auth";
 import { buildIdQuery } from "@/lib/mongo-id";
 
+const collectDescendantTaskIds = async (
+  db: any,
+  userIdQuery: any,
+  parentIds: string[]
+) => {
+  const allIds = new Set<string>(parentIds);
+  const queue = [...parentIds];
+
+  while (queue.length > 0) {
+    const batch = queue.splice(0, 200);
+    const children = await db
+      .collection<any>("tasks")
+      .find({
+        userId: userIdQuery,
+        parentId: { $in: batch },
+      })
+      .project({ _id: 1 })
+      .toArray();
+
+    children.forEach((child) => {
+      const childId = String(child._id);
+      if (!allIds.has(childId)) {
+        allIds.add(childId);
+        queue.push(childId);
+      }
+    });
+  }
+
+  return Array.from(allIds);
+};
+
 export async function POST(request: Request) {
   const userId = await getSessionUserId();
   if (!userId) {
@@ -68,12 +99,12 @@ export async function POST(request: Request) {
     })
     .project({ _id: 1 })
     .toArray();
-  const taskIds = tasksToRemove.map((task) => String(task._id));
+  const rootTaskIds = tasksToRemove.map((task) => String(task._id));
+  const taskIds = await collectDescendantTaskIds(db, userIdQuery, rootTaskIds);
 
   const deleteResult = await db.collection<any>("tasks").deleteMany({
     userId: userIdQuery,
-    sourceSessionType: "meeting",
-    sourceSessionId: { $in: sessionIdList },
+    _id: { $in: taskIds },
   });
 
   if (taskIds.length) {
