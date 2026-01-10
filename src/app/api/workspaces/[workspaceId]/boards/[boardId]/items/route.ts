@@ -164,11 +164,17 @@ export async function POST(
 
   if (taskId) {
     const taskIdQuery = buildIdQuery(taskId);
+    const normalizedTaskId = taskId && taskId.includes(":") ? taskId.split(":").slice(1).join(":") : null;
+    const normalizedTaskIdQuery = normalizedTaskId ? buildIdQuery(normalizedTaskId) : null;
+    const orConds: any[] = [{ taskId: taskIdQuery }];
+    if (normalizedTaskIdQuery) orConds.push({ taskId: normalizedTaskIdQuery });
+    orConds.push({ taskCanonicalId: taskIdQuery });
+    if (normalizedTaskIdQuery) orConds.push({ taskCanonicalId: normalizedTaskIdQuery });
     const existingItem = await db.collection<any>("boardItems").findOne({
       userId: userIdQuery,
       workspaceId,
       boardId,
-      taskId: taskIdQuery,
+      $or: orConds,
     });
     if (existingItem) {
       task = await db.collection<any>("tasks").findOne({

@@ -110,7 +110,8 @@ const updateMeetingTasks = async (
   userId: string,
   meetingId: string,
   taskId: string,
-  status: TaskStatus
+  status: TaskStatus,
+  options?: { touch?: boolean }
 ): Promise<SessionUpdateResult | null> => {
   const userIdQuery = buildIdQuery(userId);
   const sessionIdQuery = buildIdQuery(meetingId);
@@ -128,9 +129,11 @@ const updateMeetingTasks = async (
   if (!updated) {
     return { updated: false, session: meeting, tasks: meeting.extractedTasks || [] };
   }
-  await db
-    .collection<any>("meetings")
-    .updateOne(filter, { $set: { extractedTasks: tasks, lastActivityAt: new Date() } });
+  const set: any = { extractedTasks: tasks };
+  if (options?.touch !== false) {
+    set.lastActivityAt = new Date();
+  }
+  await db.collection<any>("meetings").updateOne(filter, { $set: set });
   return { updated: true, session: meeting, tasks };
 };
 
@@ -139,7 +142,8 @@ const updateChatTasks = async (
   userId: string,
   sessionId: string,
   taskId: string,
-  status: TaskStatus
+  status: TaskStatus,
+  options?: { touch?: boolean }
 ): Promise<SessionUpdateResult | null> => {
   const userIdQuery = buildIdQuery(userId);
   const sessionIdQuery = buildIdQuery(sessionId);
@@ -157,9 +161,11 @@ const updateChatTasks = async (
   if (!updated) {
     return { updated: false, session, tasks: session.suggestedTasks || [] };
   }
-  await db
-    .collection<any>("chatSessions")
-    .updateOne(filter, { $set: { suggestedTasks: tasks, lastActivityAt: new Date() } });
+  const set: any = { suggestedTasks: tasks };
+  if (options?.touch !== false) {
+    set.lastActivityAt = new Date();
+  }
+  await db.collection<any>("chatSessions").updateOne(filter, { $set: set });
   return { updated: true, session, tasks };
 };
 
@@ -275,7 +281,8 @@ export async function PATCH(request: Request) {
       userId,
       sourceSessionId,
       taskId,
-      normalizedStatus
+      normalizedStatus,
+      { touch: false }
     );
     if (!result?.updated) {
       return NextResponse.json({ error: "Task not found." }, { status: 404 });
@@ -350,7 +357,8 @@ export async function PATCH(request: Request) {
         userId,
         meetingId,
         taskId,
-        normalizedStatus
+        normalizedStatus,
+        { touch: false }
       );
       if (meetingResult?.updated) {
         await db.collection<any>("tasks").updateOne(

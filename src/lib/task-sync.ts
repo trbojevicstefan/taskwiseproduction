@@ -116,7 +116,7 @@ export const syncTasksForSource = async (
     const key =
       task.sourceTaskId || task._id?.toString?.() || task.id;
     if (!key) return;
-    existingBySourceTaskId.set(String(key), task._id?.toString?.() || task._id);
+    existingBySourceTaskId.set(String(key), task._id);
   });
 
   const { records, ids } = buildTaskRecords(
@@ -128,13 +128,30 @@ export const syncTasksForSource = async (
 
   if (records.length) {
     await db.collection("tasks").bulkWrite(
-      records.map(({ _id, ...rest }) => ({
-        updateOne: {
-          filter: { _id, userId: userIdQuery },
-          update: { $set: rest, $setOnInsert: { createdAt: now } },
-          upsert: true,
-        },
-      })),
+      records.map((rec) => {
+        const { _id, sourceTaskId, ...rest } = rec;
+        if (sourceTaskId) {
+          return {
+            updateOne: {
+              filter: {
+                userId: userIdQuery,
+                sourceSessionId: options.sourceSessionId,
+                sourceTaskId,
+              },
+              update: { $set: rest, $setOnInsert: { createdAt: now, _id } },
+              upsert: true,
+            },
+          };
+        }
+
+        return {
+          updateOne: {
+            filter: { _id, userId: userIdQuery },
+            update: { $set: rest, $setOnInsert: { createdAt: now } },
+            upsert: true,
+          },
+        };
+      }),
       { ordered: false }
     );
   }

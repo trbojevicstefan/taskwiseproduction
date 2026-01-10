@@ -45,6 +45,20 @@ export const ensureBoardItemsForTasks = async (
     .toArray();
   const existingIds = new Set(existing.map((item) => String(item.taskId)));
 
+  // Map extracted task ids to canonical tasks._id when available to avoid
+  // creating board items that reference non-canonical ids. We keep the
+  // existing `taskId` field for backward compatibility and add
+  // `taskCanonicalId` when a matching task is found.
+  const canonicalMap = new Map();
+  const foundTasks = await db
+    .collection<any>("tasks")
+    .find({ userId: userIdQuery, sourceTaskId: { $in: taskIds } })
+    .project({ _id: 1, sourceTaskId: 1 })
+    .toArray();
+  foundTasks.forEach((t) => {
+    if (t && t.sourceTaskId) canonicalMap.set(String(t.sourceTaskId), t._id);
+  });
+
   const now = new Date();
   const ranksByStatus = new Map<string, number>();
   for (const status of statuses) {
@@ -73,6 +87,7 @@ export const ensureBoardItemsForTasks = async (
         workspaceId,
         boardId,
         taskId: task.id,
+        taskCanonicalId: canonicalMap.get(task.id) || null,
         statusId,
         rank: nextRank,
         createdAt: now,

@@ -55,6 +55,9 @@ export async function POST(
   const userIdQuery = buildIdQuery(userId);
   const taskIdQuery = buildIdQuery(taskId);
 
+  const normalizedTaskId = taskId && taskId.includes(":") ? taskId.split(":").slice(1).join(":") : null;
+  const normalizedTaskIdQuery = normalizedTaskId ? buildIdQuery(normalizedTaskId) : null;
+
   const task = await db.collection<any>("tasks").findOne({
     userId: userIdQuery,
     $or: [{ _id: taskIdQuery }, { id: taskId }],
@@ -90,10 +93,14 @@ export async function POST(
   const statusIdValue = status._id?.toString?.() || status._id;
   const now = new Date();
 
+  const orConds: any[] = [{ taskId: taskIdQuery }];
+  if (normalizedTaskIdQuery) orConds.push({ taskId: normalizedTaskIdQuery });
+  orConds.push({ taskCanonicalId: taskIdQuery });
+  if (normalizedTaskIdQuery) orConds.push({ taskCanonicalId: normalizedTaskIdQuery });
   await db.collection<any>("boardItems").deleteMany({
     userId: userIdQuery,
     workspaceId,
-    taskId: taskIdQuery,
+    $or: orConds,
   });
 
   await db.collection<any>("tasks").updateOne(

@@ -60,6 +60,23 @@ export async function POST(request: Request) {
 
   await db.collection<any>("chatSessions").insertOne(session);
 
+  // Attach canonical task ids to suggestedTasks when possible
+  if (Array.isArray(session.suggestedTasks) && session.suggestedTasks.length) {
+    try {
+      const normalized = session.suggestedTasks.map((t: any) => t.id || t._id || t.sourceTaskId || null).filter(Boolean);
+      if (normalized.length) {
+        const userIdQuery = buildIdQuery(userId);
+        const matches = await db.collection("tasks").find({ userId: userIdQuery, sourceTaskId: { $in: normalized } }).project({ _id: 1, sourceTaskId: 1 }).toArray();
+        const map = new Map(matches.map((r: any) => [String(r.sourceTaskId), String(r._id)]));
+        const augmented = session.suggestedTasks.map((t: any) => ({ ...t, taskCanonicalId: map.get(t.id) || undefined }));
+        await db.collection("chatSessions").updateOne({ _id: session._id }, { $set: { suggestedTasks: augmented } });
+        session.suggestedTasks = augmented;
+      }
+    } catch (error) {
+      console.error("Failed to attach canonical ids to new chat session:", error);
+    }
+  }
+
   return NextResponse.json(serializeSession(session));
 }
 

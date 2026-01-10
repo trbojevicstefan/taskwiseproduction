@@ -29,9 +29,18 @@ export async function GET(
   const db = await getDb();
   const userIdQuery = buildIdQuery(userId);
   const taskIdQuery = buildIdQuery(taskId);
+  const normalizedTaskId = taskId && taskId.includes(":") ? taskId.split(":").slice(1).join(":") : null;
+  const normalizedTaskIdQuery = normalizedTaskId ? buildIdQuery(normalizedTaskId) : null;
+  const orConditions: any[] = [];
+  orConditions.push({ taskId: taskIdQuery });
+  if (normalizedTaskIdQuery) orConditions.push({ taskId: normalizedTaskIdQuery });
+  // also consider canonical linkage
+  orConditions.push({ taskCanonicalId: taskIdQuery });
+  if (normalizedTaskIdQuery) orConditions.push({ taskCanonicalId: normalizedTaskIdQuery });
+
   const items = await db
     .collection<any>("boardItems")
-    .find({ userId: userIdQuery, workspaceId, taskId: taskIdQuery })
+    .find({ userId: userIdQuery, workspaceId, $or: orConditions })
     .sort({ updatedAt: -1, createdAt: -1 })
     .toArray();
 

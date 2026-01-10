@@ -93,6 +93,22 @@ export async function PATCH(
       }
     }
   }
+  // After syncing tasks, attach canonical ids to session suggestedTasks where available
+  try {
+    const sessionAfter = await db.collection<any>("chatSessions").findOne(filter);
+    if (sessionAfter && Array.isArray(sessionAfter.suggestedTasks) && sessionAfter.suggestedTasks.length) {
+      const sourceIds = sessionAfter.suggestedTasks.map((t: any) => t.id).filter(Boolean);
+      if (sourceIds.length) {
+        const userIdQuery2 = buildIdQuery(userId);
+        const tasks = await db.collection("tasks").find({ userId: userIdQuery2, sourceTaskId: { $in: sourceIds } }).project({ _id: 1, sourceTaskId: 1 }).toArray();
+        const map = new Map(tasks.map((r: any) => [String(r.sourceTaskId), String(r._id)]));
+        const augmented = sessionAfter.suggestedTasks.map((t: any) => ({ ...t, taskCanonicalId: map.get(t.id) || undefined }));
+        await db.collection("chatSessions").updateOne(filter, { $set: { suggestedTasks: augmented } });
+      }
+    }
+  } catch (error) {
+    console.error("Failed to attach canonical ids to chat session after sync:", error);
+  }
   if (session?.sourceMeetingId) {
     await cleanupChatTasksForSession(db, userId, session);
   }

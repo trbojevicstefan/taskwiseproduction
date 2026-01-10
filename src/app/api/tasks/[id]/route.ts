@@ -180,7 +180,8 @@ const updateMeetingTasks = async (
   db: any,
   userId: string,
   meetingId: string,
-  updater: (tasks: ExtractedTaskSchema[]) => { tasks: ExtractedTaskSchema[]; updated: boolean }
+  updater: (tasks: ExtractedTaskSchema[]) => { tasks: ExtractedTaskSchema[]; updated: boolean },
+  options?: { touch?: boolean }
 ) => {
   const userIdQuery = buildIdQuery(userId);
   const sessionIdQuery = buildIdQuery(meetingId);
@@ -197,9 +198,11 @@ const updateMeetingTasks = async (
   if (!result.updated) {
     return { updated: false, session: meeting, tasks: currentTasks as ExtractedTaskSchema[] };
   }
-  await db.collection<any>("meetings").updateOne(filter, {
-    $set: { extractedTasks: result.tasks, lastActivityAt: new Date() },
-  });
+  const set: any = { extractedTasks: result.tasks };
+  if (options?.touch !== false) {
+    set.lastActivityAt = new Date();
+  }
+  await db.collection<any>("meetings").updateOne(filter, { $set: set });
   return { updated: true, session: meeting, tasks: result.tasks };
 };
 
@@ -207,7 +210,8 @@ const updateChatTasks = async (
   db: any,
   userId: string,
   sessionId: string,
-  updater: (tasks: ExtractedTaskSchema[]) => { tasks: ExtractedTaskSchema[]; updated: boolean }
+  updater: (tasks: ExtractedTaskSchema[]) => { tasks: ExtractedTaskSchema[]; updated: boolean },
+  options?: { touch?: boolean }
 ) => {
   const userIdQuery = buildIdQuery(userId);
   const sessionIdQuery = buildIdQuery(sessionId);
@@ -224,9 +228,11 @@ const updateChatTasks = async (
   if (!result.updated) {
     return { updated: false, session, tasks: currentTasks as ExtractedTaskSchema[] };
   }
-  await db.collection<any>("chatSessions").updateOne(filter, {
-    $set: { suggestedTasks: result.tasks, lastActivityAt: new Date() },
-  });
+  const set: any = { suggestedTasks: result.tasks };
+  if (options?.touch !== false) {
+    set.lastActivityAt = new Date();
+  }
+  await db.collection<any>("chatSessions").updateOne(filter, { $set: set });
   return { updated: true, session, tasks: result.tasks };
 };
 
@@ -238,8 +244,12 @@ const syncTaskUpdateToSource = async (db: any, userId: string, taskRecord: any) 
   }
 
   if (sessionType === "meeting") {
-    const result = await updateMeetingTasks(db, userId, sessionId, (tasks) =>
-      updateTaskInList(tasks, taskRecord)
+    const result = await updateMeetingTasks(
+      db,
+      userId,
+      sessionId,
+      (tasks) => updateTaskInList(tasks, taskRecord),
+      { touch: false }
     );
     if (result?.updated) {
       const linkedSessions = await updateLinkedChatSessions(
@@ -258,10 +268,13 @@ const syncTaskUpdateToSource = async (db: any, userId: string, taskRecord: any) 
   );
   if (result?.updated && result.session?.sourceMeetingId) {
     const meetingId = String(result.session.sourceMeetingId);
-    const meetingResult = await updateMeetingTasks(db, userId, meetingId, () => ({
-      tasks: result.tasks,
-      updated: true,
-    }));
+    const meetingResult = await updateMeetingTasks(
+      db,
+      userId,
+      meetingId,
+      () => ({ tasks: result.tasks, updated: true }),
+      { touch: false }
+    );
     if (meetingResult?.updated) {
       try {
         await syncTasksForSource(db, meetingResult.tasks, {
@@ -400,7 +413,7 @@ const syncTaskDeletesToSource = async (
       const updater = (tasks: ExtractedTaskSchema[]) =>
         removeTasksFromList(tasks, session.ids);
       if (session.type === "meeting") {
-        const result = await updateMeetingTasks(db, userId, session.id, updater);
+        const result = await updateMeetingTasks(db, userId, session.id, updater, { touch: false });
         if (result?.updated) {
           const linkedSessions = await updateLinkedChatSessions(
             db,
@@ -416,10 +429,13 @@ const syncTaskDeletesToSource = async (
       const result = await updateChatTasks(db, userId, session.id, updater);
       if (result?.updated && result.session?.sourceMeetingId) {
         const meetingId = String(result.session.sourceMeetingId);
-        const meetingResult = await updateMeetingTasks(db, userId, meetingId, () => ({
-          tasks: result.tasks,
-          updated: true,
-        }));
+        const meetingResult = await updateMeetingTasks(
+          db,
+          userId,
+          meetingId,
+          () => ({ tasks: result.tasks, updated: true }),
+          { touch: false }
+        );
         if (meetingResult?.updated) {
           const linkedSessions = await updateLinkedChatSessions(
             db,
@@ -445,9 +461,13 @@ const removeTaskFromSession = async (
 ) => {
   if (!sessionType || !sessionId || !taskId) return false;
   const ids = new Set<string>([taskId]);
-  if (sessionType === "meeting") {
-    const result = await updateMeetingTasks(db, userId, sessionId, (tasks) =>
-      removeTasksFromList(tasks, ids)
+    if (sessionType === "meeting") {
+    const result = await updateMeetingTasks(
+      db,
+      userId,
+      sessionId,
+      (tasks) => removeTasksFromList(tasks, ids),
+      { touch: false }
     );
     if (result?.updated) {
       const linkedSessions = await updateLinkedChatSessions(
@@ -464,12 +484,15 @@ const removeTaskFromSession = async (
   const result = await updateChatTasks(db, userId, sessionId, (tasks) =>
     removeTasksFromList(tasks, ids)
   );
-  if (result?.updated && result.session?.sourceMeetingId) {
+    if (result?.updated && result.session?.sourceMeetingId) {
     const meetingId = String(result.session.sourceMeetingId);
-    const meetingResult = await updateMeetingTasks(db, userId, meetingId, () => ({
-      tasks: result.tasks,
-      updated: true,
-    }));
+    const meetingResult = await updateMeetingTasks(
+      db,
+      userId,
+      meetingId,
+      () => ({ tasks: result.tasks, updated: true }),
+      { touch: false }
+    );
     if (meetingResult?.updated) {
       const linkedSessions = await updateLinkedChatSessions(
         db,

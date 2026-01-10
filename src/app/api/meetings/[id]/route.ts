@@ -45,9 +45,7 @@ const ACTIVITY_KEYS = new Set([
 
 const shouldRefreshLastActivity = (payload: Record<string, any> | null) => {
   if (!payload) return false;
-  if (Array.isArray(payload.extractedTasks) && payload.extractedTasks.length > 0) {
-    return true;
-  }
+  // Only consider explicit meeting-level activity keys for touching lastActivityAt.
   return Array.from(ACTIVITY_KEYS).some((key) =>
     Object.prototype.hasOwnProperty.call(payload, key)
   );

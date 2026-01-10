@@ -1212,7 +1212,7 @@ export const applyCompletionTargets = async (
     );
     if (!updated) return;
     await db.collection<any>(collectionName).updateOne(filter, {
-      $set: { [taskField]: tasks, lastActivityAt: new Date() },
+      $set: { [taskField]: tasks },
     });
   };
 

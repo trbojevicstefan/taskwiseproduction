@@ -405,29 +405,10 @@ export const ingestFathomMeeting = async ({
         state: "tasks_ready",
       };
 
+      // Defer updating chat sessions until after tasks are synced and board items ensured
       const chatSessionId = existing.chatSessionId
         ? String(existing.chatSessionId)
         : null;
-      if (chatSessionId) {
-        await db.collection("chatSessions").updateMany(
-          {
-            userId: userIdQuery,
-            $or: [{ _id: buildIdQuery(chatSessionId) }, { id: chatSessionId }],
-          },
-          {
-            $set: {
-              title: `Chat about "${meetingTitle}"`,
-              suggestedTasks: finalizedTasks,
-              originalAiTasks: sanitizedTasks,
-              originalAllTaskLevels: sanitizedTaskLevels,
-              people: uniquePeople,
-              allTaskLevels: sanitizedTaskLevels,
-              meetingMetadata: analysisResult.meetingMetadata || undefined,
-              lastActivityAt: now,
-            },
-          }
-        );
-      }
 
       let planningSessionId = existing.planningSessionId
         ? String(existing.planningSessionId)
@@ -517,6 +498,48 @@ export const ingestFathomMeeting = async ({
           boardId: defaultBoard._id,
           tasks: syncTasks,
         });
+      }
+
+      // Now that tasks are synced and board items exist, attach canonical ids to chat session suggested tasks
+      if (chatSessionId) {
+        try {
+          const sourceIds = finalizedTasks
+            .map((t: any) => t.id)
+            .filter(Boolean);
+          if (sourceIds.length) {
+            const userIdQuery2 = buildIdQuery(userId);
+            const tasks = await db
+              .collection("tasks")
+              .find({ userId: userIdQuery2, sourceTaskId: { $in: sourceIds } })
+              .project({ _id: 1, sourceTaskId: 1 })
+              .toArray();
+            const map = new Map(tasks.map((r: any) => [String(r.sourceTaskId), String(r._id)]));
+            const augmented = finalizedTasks.map((t: any) => ({
+              ...t,
+              taskCanonicalId: map.get(t.id) || undefined,
+            }));
+            await db.collection("chatSessions").updateMany(
+              {
+                userId: userIdQuery,
+                $or: [{ _id: buildIdQuery(chatSessionId) }, { id: chatSessionId }],
+              },
+              {
+                $set: {
+                  title: `Chat about "${meetingTitle}"`,
+                  suggestedTasks: augmented,
+                  originalAiTasks: sanitizedTasks,
+                  originalAllTaskLevels: sanitizedTaskLevels,
+                  people: uniquePeople,
+                  allTaskLevels: sanitizedTaskLevels,
+                  meetingMetadata: analysisResult.meetingMetadata || undefined,
+                  lastActivityAt: now,
+                },
+              }
+            );
+          }
+        } catch (error) {
+          console.error("Failed to attach canonical ids to chat sessions:", error);
+        }
       }
     } else if (Array.isArray(existing.extractedTasks) && existing.extractedTasks.length) {
       const syncTasks = filterTasksForSessionSync(
@@ -766,7 +789,29 @@ export const ingestFathomMeeting = async ({
     lastActivityAt: now,
   };
 
-  await db.collection("meetings").insertOne(meeting);
+  // Ensure idempotent insertion: upsert by userId + recordingIdHash to avoid duplicates
+  if (meeting.recordingIdHash) {
+    try {
+      const userIdQuery2 = buildIdQuery(userId);
+      const filter = { userId: userIdQuery2, recordingIdHash: meeting.recordingIdHash };
+      const { _id: insertId } = meeting;
+      const setFields = { ...meeting };
+      delete setFields._id;
+      // Avoid conflicting updates when using $setOnInsert for createdAt
+      delete setFields.createdAt;
+      await db.collection("meetings").updateOne(
+        filter,
+        { $set: setFields, $setOnInsert: { createdAt: meeting.createdAt, _id: insertId } },
+        { upsert: true }
+      );
+    } catch (error) {
+      // Fallback to a plain insert if something unexpected happens
+      console.error("Meeting upsert failed, falling back to insert:", error);
+      await db.collection("meetings").insertOne(meeting);
+    }
+  } else {
+    await db.collection("meetings").insertOne(meeting);
+  }
   await db.collection("planningSessions").insertOne(planningSession);
   if (uniquePeople.length) {
     try {
