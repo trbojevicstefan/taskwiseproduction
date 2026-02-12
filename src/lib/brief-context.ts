@@ -7,8 +7,59 @@ export type BriefContext = {
   relatedTranscripts?: string[];
 };
 
+const MAX_PRIMARY_TRANSCRIPT_CHARS = 7000;
+const MAX_RELATED_TRANSCRIPT_CHARS = 2800;
+
 const normalize = (value?: string | null) =>
   (value || "").trim().toLowerCase();
+
+const getTaskKeywords = (task: ExtractedTaskSchema) => {
+  const source = `${task.title || ""} ${task.description || ""} ${task.assignee?.name || ""} ${task.assigneeName || ""}`
+    .toLowerCase()
+    .split(/[^a-z0-9]+/g)
+    .map((token) => token.trim())
+    .filter((token) => token.length >= 4);
+
+  const unique = new Set<string>();
+  source.forEach((token) => {
+    if (!unique.has(token) && unique.size < 12) unique.add(token);
+  });
+  return Array.from(unique);
+};
+
+const clipTranscript = (
+  transcript: string | null | undefined,
+  maxChars: number,
+  keywords: string[]
+) => {
+  const value = transcript?.trim();
+  if (!value) return null;
+  if (value.length <= maxChars) return value;
+
+  const lower = value.toLowerCase();
+  let focusIndex = -1;
+  for (const keyword of keywords) {
+    const idx = lower.indexOf(keyword);
+    if (idx >= 0) {
+      focusIndex = idx;
+      break;
+    }
+  }
+
+  if (focusIndex < 0) {
+    return `${value.slice(0, maxChars).trim()} ...`;
+  }
+
+  const preWindow = Math.floor(maxChars * 0.35);
+  let start = Math.max(0, focusIndex - preWindow);
+  const end = Math.min(value.length, start + maxChars);
+  start = Math.max(0, end - maxChars);
+
+  let excerpt = value.slice(start, end).trim();
+  if (start > 0) excerpt = `... ${excerpt}`;
+  if (end < value.length) excerpt = `${excerpt} ...`;
+  return excerpt;
+};
 
 const getMeetingTranscript = (meeting?: Meeting | null) => {
   if (!meeting) return null;
@@ -75,8 +126,19 @@ const meetingMatchesAssignee = (
 };
 
 const sortMeetingsByRecency = (items: Meeting[]) => {
-  const toTime = (value: any) =>
-    value?.toMillis ? value.toMillis() : value ? new Date(value).getTime() : 0;
+  const toTime = (value: unknown) => {
+    if (!value) return 0;
+    if (
+      typeof value === "object" &&
+      value !== null &&
+      "toMillis" in value &&
+      typeof (value as { toMillis?: unknown }).toMillis === "function"
+    ) {
+      return (value as { toMillis: () => number }).toMillis();
+    }
+    const date = new Date(value as string | number | Date);
+    return Number.isNaN(date.getTime()) ? 0 : date.getTime();
+  };
   return [...items].sort((a, b) => {
     const aTime = toTime(a.lastActivityAt ?? a.createdAt);
     const bTime = toTime(b.lastActivityAt ?? b.createdAt);
@@ -90,6 +152,7 @@ export const buildBriefContext = (
   people: Person[] = [],
   options: { primaryMeetingId?: string | null; maxRelated?: number } = {}
 ): BriefContext => {
+  const keywords = getTaskKeywords(task);
   const maxRelated = options.maxRelated ?? 5;
   const primaryMeetingId = options.primaryMeetingId || task.sourceSessionId;
   const primaryMeeting =
@@ -97,7 +160,11 @@ export const buildBriefContext = (
       ? meetings.find((meeting) => meeting.id === primaryMeetingId) || null
       : null;
 
-  const primaryTranscript = getMeetingTranscript(primaryMeeting);
+  const primaryTranscript = clipTranscript(
+    getMeetingTranscript(primaryMeeting),
+    MAX_PRIMARY_TRANSCRIPT_CHARS,
+    keywords
+  );
 
   const assigneeKeys = collectAssigneeKeys(task, people);
   const matchedMeetings = sortMeetingsByRecency(
@@ -114,7 +181,11 @@ export const buildBriefContext = (
   let fallbackPrimary: string | null = null;
   matchedMeetings.forEach((meeting) => {
     if (usedMeetingIds.has(meeting.id)) return;
-    const transcript = getMeetingTranscript(meeting);
+    const transcript = clipTranscript(
+      getMeetingTranscript(meeting),
+      MAX_RELATED_TRANSCRIPT_CHARS,
+      keywords
+    );
     if (!transcript) return;
     if (!primaryTranscript && !fallbackPrimary) {
       fallbackPrimary = transcript;

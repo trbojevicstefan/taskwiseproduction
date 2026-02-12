@@ -9,6 +9,7 @@
  */
 
 import { ai } from '@/ai/genkit';
+import type { PromptGenerateOptions } from "@genkit-ai/ai";
 import { z } from 'zod';
 import { runPromptWithFallback } from '@/ai/prompt-fallback';
 
@@ -27,6 +28,15 @@ export async function generateTaskAssistance(input: GenerateTaskAssistanceInput)
   return generateTaskAssistanceFlow(input);
 }
 
+const ASSISTANCE_MODEL =
+  process.env.OPENAI_TASK_ASSISTANCE_MODEL || "gpt-4o-mini";
+const ASSISTANCE_MAX_OUTPUT_TOKENS = (() => {
+  const parsed = Number(process.env.OPENAI_TASK_ASSISTANCE_MAX_OUTPUT_TOKENS || 520);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 520;
+})();
+const MAX_TITLE_CHARS = 220;
+const MAX_DESCRIPTION_CHARS = 1400;
+
 const unwrapMarkdown = (value: string): string => {
   const trimmed = value.trim();
   try {
@@ -39,6 +49,18 @@ const unwrapMarkdown = (value: string): string => {
     return trimmed;
   }
 };
+
+const toSingleLine = (value: string, maxChars: number) =>
+  value.replace(/\s+/g, " ").trim().slice(0, maxChars);
+
+const prepareAssistanceInput = (
+  input: GenerateTaskAssistanceInput
+): GenerateTaskAssistanceInput => ({
+  taskTitle: toSingleLine(input.taskTitle || "", MAX_TITLE_CHARS) || "Untitled Task",
+  taskDescription: input.taskDescription
+    ? toSingleLine(input.taskDescription, MAX_DESCRIPTION_CHARS)
+    : undefined,
+});
 
 const taskAssistancePrompt = ai.definePrompt({
   name: 'taskAssistancePrompt',
@@ -69,9 +91,26 @@ const generateTaskAssistanceFlow = ai.defineFlow(
   },
   async (input: GenerateTaskAssistanceInput) => {
     try {
-      const { output, text } = await runPromptWithFallback(taskAssistancePrompt, input);
-      if (output?.assistanceMarkdown) {
-        return { assistanceMarkdown: unwrapMarkdown(output.assistanceMarkdown) };
+      const preparedInput = prepareAssistanceInput(input);
+      const promptOptions: PromptGenerateOptions<unknown, unknown> = {
+        config: {
+          model: ASSISTANCE_MODEL,
+          maxOutputTokens: ASSISTANCE_MAX_OUTPUT_TOKENS,
+        },
+      };
+      const { output, text } = await runPromptWithFallback(
+        taskAssistancePrompt,
+        preparedInput,
+        promptOptions,
+        {
+          endpoint: "/api/ai/task-insights",
+          operation: "assistance",
+          promptName: "taskAssistancePrompt",
+        }
+      );
+      const parsedOutput = output as { assistanceMarkdown?: string } | undefined;
+      if (parsedOutput?.assistanceMarkdown) {
+        return { assistanceMarkdown: unwrapMarkdown(parsedOutput.assistanceMarkdown) };
       }
       if (text && text.trim()) {
         return { assistanceMarkdown: unwrapMarkdown(text) };

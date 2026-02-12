@@ -86,13 +86,13 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import SetDueDateDialog from '../planning/SetDueDateDialog';
 import SelectionToolbar from '../common/SelectionToolbar';
 import SelectionViewDialog from '../explore/SelectionViewDialog';
-import { generateResearchBrief, type GenerateResearchBriefInput } from '@/ai/flows/generate-research-brief-flow';
 import ShareToSlackDialog from '../common/ShareToSlackDialog';
 import PushToGoogleTasksDialog from '../common/PushToGoogleTasksDialog';
 import PushToTrelloDialog from '../common/PushToTrelloDialog';
 import { TASK_TYPE_LABELS, TASK_TYPE_VALUES, type TaskTypeCategory } from '@/lib/task-types';
 import type { Meeting } from '@/types/meeting';
 import { buildBriefContext } from "@/lib/brief-context";
+import { generateTaskBrief } from "@/lib/task-insights-client";
 
 
 const findTaskById = (tasks: ExtractedTaskSchema[], taskId: string): ExtractedTaskSchema | null => {
@@ -1044,23 +1044,31 @@ export default function ChatPageContent() {
     setIsGeneratingBriefs(true);
     toast({ title: "Generating Briefs...", description: `AI is preparing briefs for ${selectedTaskIds.size} task(s).` });
 
-    const briefPromises = Array.from(selectedTaskIds).map(async (taskId) => {
+    const results: Array<{ taskId: string; brief: string | null }> = [];
+    let limitReached = false;
+    for (const taskId of selectedTaskIds) {
       const taskToUpdate = findTaskById(suggestedTasks, taskId);
-      if (!taskToUpdate) return null;
-      const input: GenerateResearchBriefInput = {
-        taskTitle: taskToUpdate.title,
-        taskDescription: taskToUpdate.description || undefined,
-      };
+      if (!taskToUpdate) continue;
       try {
-        const briefResult = await generateResearchBrief(input);
-        return { taskId, brief: briefResult.researchBrief };
+        const briefResult = await generateTaskBrief({
+          taskTitle: taskToUpdate.title,
+          taskDescription: taskToUpdate.description || undefined,
+        });
+        results.push({ taskId, brief: briefResult.researchBrief });
       } catch (error) {
+        const message = error instanceof Error ? error.message : "Could not generate brief.";
+        if (message.toLowerCase().includes("monthly ai brief limit reached")) {
+          limitReached = true;
+          toast({
+            title: "Brief limit reached",
+            description: "You have used all 10 AI Brief generations for this month.",
+            variant: "destructive",
+          });
+          break;
+        }
         console.error(`Error generating brief for task ${taskToUpdate.title}:`, error);
-        return null;
       }
-    });
-
-    const results = await Promise.all(briefPromises);
+    }
 
     const applyBriefToTask = (nodes: ExtractedTaskSchema[], idToUpdate: string, brief: string): ExtractedTaskSchema[] => {
       return nodes.map((node) => {
@@ -1092,7 +1100,7 @@ export default function ChatPageContent() {
         }
       }
       toast({ title: "Briefs Generated", description: `Research briefs generated for ${briefsApplied} task(s).` });
-    } else {
+    } else if (!limitReached) {
       toast({ title: "No Briefs Generated", description: "Could not generate briefs for the selected tasks.", variant: "destructive" });
     }
     setIsGeneratingBriefs(false);
@@ -1256,13 +1264,21 @@ export default function ChatPageContent() {
                 if (result.isMeeting && result.meeting) {
                     const newMeeting = await createNewMeeting(result.meeting);
                     if (newMeeting) {
+                        const meetingTasks = newMeeting.extractedTasks || result.tasks;
                         const newChat = await createNewSession({
                           title: `Chat about "${newMeeting.title}"`,
                           sourceMeetingId: newMeeting.id,
-                          initialTasks: result.tasks,
-                          initialPeople: result.people,
+                          initialTasks: meetingTasks,
+                          initialPeople: newMeeting.attendees,
+                          allTaskLevels: result.allTaskLevels,
                         });
-                        const newPlan = await createNewPlanningSession(newMeeting.summary, result.tasks, `Plan from "${newMeeting.title}"`, result.allTaskLevels, newMeeting.id);
+                        const newPlan = await createNewPlanningSession(
+                          newMeeting.summary,
+                          meetingTasks,
+                          `Plan from "${newMeeting.title}"`,
+                          result.allTaskLevels,
+                          newMeeting.id
+                        );
                         if (newChat && newPlan) {
                             await updateMeeting(newMeeting.id, { chatSessionId: newChat.id, planningSessionId: newPlan.id });
                         }

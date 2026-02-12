@@ -29,6 +29,8 @@ export interface DbUser {
   googleScopes?: string | null;
   googleConnected?: boolean;
   googleEmail?: string | null;
+  briefGenerationMonth?: string | null;
+  briefGenerationCount?: number;
 }
 
 const USERS_COLLECTION = "users";
@@ -86,6 +88,8 @@ export const createUser = async ({
     googleScopes: null,
     googleConnected: false,
     googleEmail: null,
+    briefGenerationMonth: null,
+    briefGenerationCount: 0,
   };
 
   const result = await db.collection<DbUser>(USERS_COLLECTION).insertOne(doc as DbUser);
