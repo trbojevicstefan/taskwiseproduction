@@ -8,6 +8,7 @@ import { syncTasksForSource } from "@/lib/task-sync";
 import { ensureDefaultBoard } from "@/lib/boards";
 import { ensureBoardItemsForTasks } from "@/lib/board-items";
 import { getWorkspaceIdForUser } from "@/lib/workspace";
+import { postMeetingAutomationToSlack } from "@/lib/slack-automation";
 import type { ExtractedTaskSchema } from "@/types/chat";
 import {
   applyCompletionTargets,
@@ -216,6 +217,15 @@ export async function POST(request: Request) {
     } catch (error) {
       console.error("Failed to sync meeting tasks after creation:", error);
     }
+  }
+
+  if (user) {
+    await postMeetingAutomationToSlack({
+      user,
+      meetingTitle: meeting.title || "Meeting",
+      meetingSummary: meeting.summary || "",
+      tasks: (meeting.extractedTasks || []) as ExtractedTaskSchema[],
+    });
   }
 
   return NextResponse.json(serializeMeeting(meeting));

@@ -22,6 +22,8 @@ const updateSchema = z.object({
   taskGranularityPreference: z.enum(["light", "medium", "detailed"]).optional(),
   autoApproveCompletedTasks: z.boolean().optional(),
   completionMatchThreshold: z.number().min(0.4).max(0.95).optional(),
+  slackAutoShareEnabled: z.boolean().optional(),
+  slackAutoShareChannelId: z.string().optional().nullable(),
 });
 
 const toAppUser = (user: Awaited<ReturnType<typeof findUserById>>) => {
@@ -53,6 +55,8 @@ const toAppUser = (user: Awaited<ReturnType<typeof findUserById>>) => {
       typeof user.completionMatchThreshold === "number"
         ? user.completionMatchThreshold
         : 0.6,
+    slackAutoShareEnabled: Boolean(user.slackAutoShareEnabled),
+    slackAutoShareChannelId: user.slackAutoShareChannelId || null,
     googleConnected: Boolean(user.googleConnected),
     googleEmail: user.googleEmail || null,
   };
@@ -140,6 +144,12 @@ export async function PATCH(request: Request) {
       : {}),
     ...(update.completionMatchThreshold !== undefined
       ? { completionMatchThreshold: update.completionMatchThreshold }
+      : {}),
+    ...(update.slackAutoShareEnabled !== undefined
+      ? { slackAutoShareEnabled: update.slackAutoShareEnabled }
+      : {}),
+    ...(update.slackAutoShareChannelId !== undefined
+      ? { slackAutoShareChannelId: update.slackAutoShareChannelId }
       : {}),
   });
 

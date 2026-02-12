@@ -23,6 +23,8 @@ export interface DbUser {
   taskGranularityPreference?: "light" | "medium" | "detailed";
   autoApproveCompletedTasks?: boolean;
   completionMatchThreshold?: number;
+  slackAutoShareEnabled?: boolean;
+  slackAutoShareChannelId?: string | null;
   googleAccessToken?: string | null;
   googleRefreshToken?: string | null;
   googleTokenExpiry?: number | null;
@@ -82,6 +84,8 @@ export const createUser = async ({
     taskGranularityPreference: "medium",
     autoApproveCompletedTasks: false,
     completionMatchThreshold: 0.6,
+    slackAutoShareEnabled: false,
+    slackAutoShareChannelId: null,
     googleAccessToken: null,
     googleRefreshToken: null,
     googleTokenExpiry: null,

@@ -1,7 +1,7 @@
 // src/components/dashboard/settings/SettingsPageContent.tsx
 "use client";
 
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -17,6 +17,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { useUIState, type UIScale } from '@/contexts/UIStateContext';
 import { Slider } from '@/components/ui/slider';
 import { Switch } from '@/components/ui/switch';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { cn } from '@/lib/utils';
 import { Logo } from '@/components/ui/logo';
 import Image from 'next/image';
@@ -36,6 +37,11 @@ const scaleLabels: { [key in UIScale]: string } = {
   'very-large': 'Very Large',
 };
 const scaleValues: UIScale[] = ['small', 'medium', 'large', 'very-large'];
+
+type SlackChannel = {
+  id: string;
+  name: string;
+};
 
 const IntegrationCard: React.FC<{
   icon: React.ElementType;
@@ -155,6 +161,10 @@ export default function SettingsPageContent() {
   const [hasCopied, setHasCopied] = useState(false);
   const [autoApproveCompleted, setAutoApproveCompleted] = useState(false);
   const [completionMatchThreshold, setCompletionMatchThreshold] = useState(60);
+  const [slackAutomationEnabled, setSlackAutomationEnabled] = useState(false);
+  const [slackAutomationChannelId, setSlackAutomationChannelId] = useState("");
+  const [slackChannels, setSlackChannels] = useState<SlackChannel[]>([]);
+  const [isLoadingSlackChannels, setIsLoadingSlackChannels] = useState(false);
   
   const [isAvatarDialogOpen, setIsAvatarDialogOpen] = useState(false);
   const [selectedAvatarUrl, setSelectedAvatarUrl] = useState('');
@@ -269,8 +279,57 @@ export default function SettingsPageContent() {
           ? Math.round(user.completionMatchThreshold * 100)
           : 60;
       setCompletionMatchThreshold(thresholdValue);
+      setSlackAutomationEnabled(Boolean(user.slackAutoShareEnabled));
+      setSlackAutomationChannelId(user.slackAutoShareChannelId || "");
     }
   }, [user]);
+
+  const loadSlackChannels = useCallback(
+    async (showErrorToast = true): Promise<SlackChannel[]> => {
+      if (!isSlackConnected) {
+        setSlackChannels([]);
+        return [];
+      }
+      setIsLoadingSlackChannels(true);
+      try {
+        const response = await fetch("/api/slack/channels");
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          throw new Error(payload?.error || "Could not load Slack channels.");
+        }
+        const channels = Array.isArray(payload?.channels)
+          ? (payload.channels as SlackChannel[])
+          : [];
+        setSlackChannels(channels);
+        return channels;
+      } catch (error) {
+        console.error("Failed to fetch Slack channels:", error);
+        const message =
+          error instanceof Error
+            ? error.message
+            : "Could not load Slack channels.";
+        if (showErrorToast) {
+          toast({
+            title: "Channel Load Failed",
+            description: message,
+            variant: "destructive",
+          });
+        }
+        return [];
+      } finally {
+        setIsLoadingSlackChannels(false);
+      }
+    },
+    [isSlackConnected, toast]
+  );
+
+  useEffect(() => {
+    if (!isSlackConnected) {
+      setSlackChannels([]);
+      return;
+    }
+    void loadSlackChannels(false);
+  }, [isSlackConnected, loadSlackChannels]);
 
   const handleProfileSave = async () => {
     if (!displayName.trim()) {
@@ -348,6 +407,87 @@ export default function SettingsPageContent() {
       toast({
         title: "Update Failed",
         description: "Could not update completion threshold.",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleSlackAutomationToggle = async (value: boolean) => {
+    if (value && !isSlackConnected) {
+      toast({
+        title: "Slack Not Connected",
+        description: "Connect Slack first, then enable meeting auto-sharing.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const previousEnabled = slackAutomationEnabled;
+    const previousChannelId = slackAutomationChannelId;
+    setSlackAutomationEnabled(value);
+
+    let nextChannelId = slackAutomationChannelId;
+    if (value && !nextChannelId) {
+      const channels =
+        slackChannels.length > 0 ? slackChannels : await loadSlackChannels();
+      if (!channels.length) {
+        setSlackAutomationEnabled(previousEnabled);
+        setSlackAutomationChannelId(previousChannelId);
+        toast({
+          title: "No Channels Available",
+          description:
+            "No Slack channels were found. Add or unarchive a channel, then try again.",
+          variant: "destructive",
+        });
+        return;
+      }
+      nextChannelId = channels[0].id;
+      setSlackAutomationChannelId(nextChannelId);
+    }
+
+    try {
+      await updateUserProfile(
+        {
+          slackAutoShareEnabled: value,
+          slackAutoShareChannelId: nextChannelId || null,
+        },
+        true
+      );
+      toast({
+        title: "Slack Automation Updated",
+        description: value
+          ? "New processed meetings will post summaries and action items to Slack."
+          : "Slack auto-sharing for meetings has been turned off.",
+      });
+    } catch (error) {
+      console.error("Failed to update Slack automation setting:", error);
+      setSlackAutomationEnabled(previousEnabled);
+      setSlackAutomationChannelId(previousChannelId);
+      toast({
+        title: "Update Failed",
+        description: "Could not update Slack automation.",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleSlackAutomationChannelChange = async (channelId: string) => {
+    const previousChannelId = slackAutomationChannelId;
+    setSlackAutomationChannelId(channelId);
+    try {
+      await updateUserProfile({ slackAutoShareChannelId: channelId }, true);
+      toast({
+        title: "Slack Channel Saved",
+        description: slackAutomationEnabled
+          ? "New processed meetings will be shared to the selected channel."
+          : "Channel saved. Enable Slack automation to start auto-sharing.",
+      });
+    } catch (error) {
+      console.error("Failed to update Slack automation channel:", error);
+      setSlackAutomationChannelId(previousChannelId);
+      toast({
+        title: "Update Failed",
+        description: "Could not save Slack channel selection.",
         variant: "destructive",
       });
     }
@@ -638,7 +778,7 @@ export default function SettingsPageContent() {
                       <ClipboardCheck className="text-sky-400 drop-shadow-[0_2px_4px_rgba(56,189,248,0.5)]" />
                       Meeting Automation
                     </CardTitle>
-                    <CardDescription>Control how TaskWiseAI handles completed items.</CardDescription>
+                    <CardDescription>Control automated completion review and Slack sharing for meetings.</CardDescription>
                   </CardHeader>
                   <CardContent>
                     <div className="flex items-center justify-between gap-6">
@@ -678,6 +818,84 @@ export default function SettingsPageContent() {
                       <div className="flex items-center justify-between text-xs text-muted-foreground">
                         <span>40%</span>
                         <span>95%</span>
+                      </div>
+                    </div>
+
+                    <div className="mt-8 border-t border-border/60 pt-6 space-y-4">
+                      <div className="flex items-center justify-between gap-6">
+                        <div className="space-y-1">
+                          <Label className="text-sm font-medium">Auto-share meetings to Slack</Label>
+                          <p className="text-xs text-muted-foreground">
+                            Automatically send each newly processed meeting summary and action items.
+                          </p>
+                        </div>
+                        <Switch
+                          checked={slackAutomationEnabled}
+                          onCheckedChange={handleSlackAutomationToggle}
+                          aria-label="Auto-share new meetings to Slack"
+                          disabled={!isSlackConnected}
+                        />
+                      </div>
+
+                      <div className="space-y-2">
+                        <div className="flex items-center justify-between gap-3">
+                          <Label htmlFor="slack-automation-channel" className="text-sm font-medium">
+                            Slack Channel
+                          </Label>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => void loadSlackChannels()}
+                            disabled={!isSlackConnected || isLoadingSlackChannels}
+                          >
+                            {isLoadingSlackChannels ? (
+                              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                            ) : (
+                              <RefreshCw className="mr-2 h-4 w-4" />
+                            )}
+                            Refresh
+                          </Button>
+                        </div>
+                        <Select
+                          value={slackAutomationChannelId || ""}
+                          onValueChange={handleSlackAutomationChannelChange}
+                          disabled={
+                            !isSlackConnected ||
+                            isLoadingSlackChannels ||
+                            slackChannels.length === 0
+                          }
+                        >
+                          <SelectTrigger id="slack-automation-channel">
+                            <SelectValue
+                              placeholder={
+                                !isSlackConnected
+                                  ? "Connect Slack to choose a channel"
+                                  : isLoadingSlackChannels
+                                    ? "Loading channels..."
+                                    : "Select a channel"
+                              }
+                            />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {slackChannels.map((channel) => (
+                              <SelectItem key={channel.id} value={channel.id}>
+                                # {channel.name}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        {!isSlackConnected && (
+                          <p className="text-xs text-muted-foreground">
+                            Connect Slack in the Integrations section first.
+                          </p>
+                        )}
+                        {isSlackConnected &&
+                          !isLoadingSlackChannels &&
+                          slackChannels.length === 0 && (
+                            <p className="text-xs text-muted-foreground">
+                              No channels were found in your Slack workspace.
+                            </p>
+                          )}
                       </div>
                     </div>
                   </CardContent>

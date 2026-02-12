@@ -21,6 +21,7 @@ import { upsertPeopleFromAttendees } from "@/lib/people-sync";
 import { syncTasksForSource } from "@/lib/task-sync";
 import { ensureDefaultBoard } from "@/lib/boards";
 import { ensureBoardItemsForTasks } from "@/lib/board-items";
+import { postMeetingAutomationToSlack } from "@/lib/slack-automation";
 
 type FathomIngestResult =
   | { status: "created"; meetingId: string }
@@ -552,6 +553,13 @@ export const ingestFathomMeeting = async ({
           console.error("Failed to attach canonical ids to chat sessions:", error);
         }
       }
+
+      await postMeetingAutomationToSlack({
+        user,
+        meetingTitle,
+        meetingSummary,
+        tasks: finalizedTasks,
+      });
     } else if (Array.isArray(existing.extractedTasks) && existing.extractedTasks.length) {
       const syncTasks = filterTasksForSessionSync(
         existing.extractedTasks as ExtractedTaskSchema[],
@@ -864,6 +872,13 @@ export const ingestFathomMeeting = async ({
       tasks: syncTasks,
     });
   }
+
+  await postMeetingAutomationToSlack({
+    user,
+    meetingTitle,
+    meetingSummary,
+    tasks: finalizedTasks,
+  });
 
   return { status: "created", meetingId };
 };

@@ -28,6 +28,8 @@ export interface AppUser extends Person {
   taskGranularityPreference?: 'light' | 'medium' | 'detailed';
   autoApproveCompletedTasks?: boolean;
   completionMatchThreshold?: number;
+  slackAutoShareEnabled?: boolean;
+  slackAutoShareChannelId?: string | null;
   googleConnected?: boolean;
   googleEmail?: string | null;
 }
