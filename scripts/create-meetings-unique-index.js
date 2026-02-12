@@ -9,10 +9,13 @@ if (!uri) {
 (async () => {
   const client = new MongoClient(uri);
   await client.connect();
-  const db = client.db();
+  const dbName = process.env.MONGODB_DB || "taskwise";
+  const db = client.db(dbName);
   const meetings = db.collection('meetings');
   try {
-    console.log('Creating unique index on { userId:1, recordingIdHash:1 } (partial on recordingIdHash)');
+    console.log(
+      `Creating unique index on { userId:1, recordingIdHash:1 } (partial on recordingIdHash) in DB "${dbName}"`
+    );
     await meetings.createIndex(
       { userId: 1, recordingIdHash: 1 },
       { unique: true, partialFilterExpression: { recordingIdHash: { $exists: true } }, name: 'unique_user_recordingHash' }

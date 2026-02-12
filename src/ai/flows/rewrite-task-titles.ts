@@ -34,6 +34,35 @@ const RewriteTaskTitlesOutputSchema = z.object({
 
 type RewriteTaskItem = z.infer<typeof RewriteTaskTitlesInputSchema.shape.tasks>[number];
 
+const ACTION_START_VERBS = new Set([
+  "add",
+  "align",
+  "book",
+  "build",
+  "check",
+  "collect",
+  "complete",
+  "confirm",
+  "create",
+  "deliver",
+  "deploy",
+  "design",
+  "draft",
+  "finalize",
+  "fix",
+  "implement",
+  "prepare",
+  "review",
+  "schedule",
+  "send",
+  "set",
+  "share",
+  "sync",
+  "update",
+  "verify",
+  "write",
+]);
+
 const rewriteTaskTitlesPrompt = ai.definePrompt({
   name: 'rewriteTaskTitlesPrompt',
   input: { schema: RewriteTaskTitlesInputSchema },
@@ -88,6 +117,32 @@ const flattenTasks = (tasks: TaskType[], prefix = ''): RewriteTaskItem[] => {
   return items;
 };
 
+const scoreTitleQuality = (item: RewriteTaskItem): number => {
+  const title = item.title?.trim() || "";
+  if (!title || !isValidTitle(title) || isPlaceholderTitle(title)) return 0;
+  const normalizedWords = title
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .split(/\s+/)
+    .filter(Boolean);
+  if (!normalizedWords.length) return 0;
+  let score = 0.55;
+  const wordCount = normalizedWords.length;
+  if (wordCount >= 2 && wordCount <= 10) {
+    score += 0.15;
+  } else if (wordCount <= 1 || wordCount > 14) {
+    score -= 0.1;
+  }
+  if (ACTION_START_VERBS.has(normalizedWords[0])) {
+    score += 0.2;
+  }
+  const descriptionLength = item.description?.trim().length || 0;
+  if (descriptionLength >= 14) {
+    score += 0.1;
+  }
+  return Math.max(0, Math.min(1, score));
+};
+
 const applyRewrites = (
   tasks: TaskType[],
   updates: Map<string, { title?: string; description?: string }>,
@@ -120,10 +175,16 @@ export async function rewriteTaskTitles(
   if (!tasks.length) return tasks;
   const flattened = flattenTasks(tasks);
   if (!flattened.length) return tasks;
+  const lowQualityItems = flattened.filter((item) => scoreTitleQuality(item) < 0.72);
+  if (!lowQualityItems.length) {
+    return tasks;
+  }
 
   const { output, text } = await runPromptWithFallback(rewriteTaskTitlesPrompt, {
     contextText,
-    tasks: flattened,
+    tasks: lowQualityItems,
+  }, undefined, {
+    endpoint: "rewriteTaskTitles",
   });
   const raw = extractJsonValue(output, text);
   const parsed = RewriteTaskTitlesOutputSchema.safeParse(raw);

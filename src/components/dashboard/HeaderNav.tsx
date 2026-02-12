@@ -2,6 +2,7 @@
 // src/components/dashboard/HeaderNav.tsx
 "use client";
 
+import { useMemo, useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
@@ -16,24 +17,27 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { LogOut, Settings, UserCircle, Sun, Moon, HelpCircle, ClipboardPaste, Copy, Building, UserPlus, Command, RefreshCw } from 'lucide-react';
 import { useTheme } from 'next-themes';
-import { SidebarTrigger } from '@/components/ui/sidebar'; 
 import { useRouter } from 'next/navigation';
-import { usePasteAction } from '@/contexts/PasteActionContext';
 import { useUIState } from '@/contexts/UIStateContext';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { useToast } from '@/hooks/use-toast';
 import { useIsMobile } from '@/hooks/use-mobile'; // Import the hook
 import { useMeetingHistory } from '@/contexts/MeetingHistoryContext';
 
+const INITIAL_NOTIFICATION_LIMIT = 5;
+const NOTIFICATION_PAGE_SIZE = 5;
+
 export default function HeaderNav() {
   const { user, logout, updateUserProfile } = useAuth();
   const { theme, setTheme } = useTheme();
   const router = useRouter();
-  const { openPasteDialog } = usePasteAction();
   const { showCopyHint } = useUIState();
   const { toast } = useToast();
   const isMobile = useIsMobile(); // Use the hook
   const { meetings, updateMeeting } = useMeetingHistory();
+  const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
+  const [visibleNotificationCount, setVisibleNotificationCount] = useState(INITIAL_NOTIFICATION_LIMIT);
+  const [isDisregardingAll, setIsDisregardingAll] = useState(false);
 
 
   const getInitials = (name: string | null | undefined) => {
@@ -41,11 +45,41 @@ export default function HeaderNav() {
     return name.split(' ').map(n => n[0]).join('').toUpperCase().substring(0, 2);
   };
 
-  const unreadFathomMeetings = meetings.filter(
-    (meeting) =>
-      meeting.ingestSource === "fathom" && !meeting.fathomNotificationReadAt
+  const getTimeValue = (value: unknown): number => {
+    if (typeof value === "number") return value;
+    if (
+      typeof value === "object" &&
+      value !== null &&
+      "toMillis" in value &&
+      typeof (value as { toMillis?: unknown }).toMillis === "function"
+    ) {
+      return (value as { toMillis: () => number }).toMillis();
+    }
+    if (value instanceof Date) return value.getTime();
+    if (typeof value === "string") {
+      const parsed = new Date(value).getTime();
+      return Number.isNaN(parsed) ? 0 : parsed;
+    }
+    return 0;
+  };
+
+  const unreadFathomMeetings = useMemo(
+    () =>
+      meetings
+        .filter(
+          (meeting) =>
+            meeting.ingestSource === "fathom" && !meeting.fathomNotificationReadAt
+        )
+        .sort((a, b) => {
+          const aTime = getTimeValue(a.lastActivityAt) || getTimeValue(a.createdAt);
+          const bTime = getTimeValue(b.lastActivityAt) || getTimeValue(b.createdAt);
+          return bTime - aTime;
+        }),
+    [meetings]
   );
   const unreadCount = unreadFathomMeetings.length;
+  const visibleNotifications = unreadFathomMeetings.slice(0, visibleNotificationCount);
+  const hasMoreNotifications = unreadCount > visibleNotificationCount;
 
   const handleOpenNotification = async (meetingId: string) => {
     const meeting = unreadFathomMeetings.find((item) => item.id === meetingId);
@@ -55,6 +89,53 @@ export default function HeaderNav() {
       });
     }
     router.push(`/meetings/${meetingId}`);
+  };
+
+  const handleLoadMoreNotifications = () => {
+    setVisibleNotificationCount((previous) =>
+      Math.min(previous + NOTIFICATION_PAGE_SIZE, unreadCount)
+    );
+  };
+
+  const handleDisregardAllNotifications = async () => {
+    if (unreadCount === 0 || isDisregardingAll) return;
+    setIsDisregardingAll(true);
+    const readTimestamp = new Date().toISOString();
+
+    try {
+      const results = await Promise.all(
+        unreadFathomMeetings.map(async (meeting) => {
+          const updated = await updateMeeting(meeting.id, {
+            fathomNotificationReadAt: readTimestamp,
+          });
+          return Boolean(updated);
+        })
+      );
+
+      const failedCount = results.filter((wasUpdated) => !wasUpdated).length;
+      if (failedCount === 0) {
+        toast({
+          title: "Notifications cleared",
+          description: "All unread notifications were disregarded.",
+        });
+        setVisibleNotificationCount(INITIAL_NOTIFICATION_LIMIT);
+      } else {
+        toast({
+          title: "Partially cleared",
+          description: `${failedCount} notification${failedCount === 1 ? " was" : "s were"} not updated.`,
+          variant: "destructive",
+        });
+      }
+    } catch (error) {
+      console.error("Failed to disregard all notifications:", error);
+      toast({
+        title: "Error",
+        description: "Could not disregard all notifications.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsDisregardingAll(false);
+    }
   };
   
   const handleResetOnboarding = async () => {
@@ -143,7 +224,15 @@ export default function HeaderNav() {
         </Button>
 
         {user && (
-        <DropdownMenu>
+        <DropdownMenu
+            open={isProfileMenuOpen}
+            onOpenChange={(open) => {
+                setIsProfileMenuOpen(open);
+                if (open) {
+                    setVisibleNotificationCount(INITIAL_NOTIFICATION_LIMIT);
+                }
+            }}
+        >
             <DropdownMenuTrigger asChild>
             <Button variant="ghost" className="relative h-9 w-9 rounded-full">
                 <Avatar className="h-9 w-9">
@@ -174,8 +263,21 @@ export default function HeaderNav() {
                 <span>Notifications</span>
                 {unreadCount > 0 && <Badge variant="destructive">{unreadCount}</Badge>}
             </DropdownMenuLabel>
+            {unreadCount > 0 && (
+                <DropdownMenuItem
+                    disabled={isDisregardingAll}
+                    onSelect={(event) => {
+                        event.preventDefault();
+                        void handleDisregardAllNotifications();
+                    }}
+                >
+                    <span className="text-sm text-muted-foreground">
+                        {isDisregardingAll ? "Disregarding notifications..." : "Disregard all notifications"}
+                    </span>
+                </DropdownMenuItem>
+            )}
             {unreadCount > 0 ? (
-                unreadFathomMeetings.map((meeting) => (
+                visibleNotifications.map((meeting) => (
                     <DropdownMenuItem
                         key={meeting.id}
                         onClick={() => handleOpenNotification(meeting.id)}
@@ -188,6 +290,18 @@ export default function HeaderNav() {
             ) : (
                 <DropdownMenuItem disabled>
                     <span className="text-sm text-muted-foreground">No new meetings</span>
+                </DropdownMenuItem>
+            )}
+            {hasMoreNotifications && (
+                <DropdownMenuItem
+                    onSelect={(event) => {
+                        event.preventDefault();
+                        handleLoadMoreNotifications();
+                    }}
+                >
+                    <span className="text-sm font-medium text-primary">
+                        Load more ({unreadCount - visibleNotificationCount} left)
+                    </span>
                 </DropdownMenuItem>
             )}
             <DropdownMenuSeparator />

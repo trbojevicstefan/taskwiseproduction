@@ -161,28 +161,53 @@ export async function PATCH(
     userId: userIdQuery,
     $or: [{ _id: idQuery }, { id }],
   };
-  await db.collection<any>("meetings").updateOne(filter, { $set: update });
 
   const meeting = await db.collection<any>("meetings").findOne(filter);
+  if (!meeting) {
+    return NextResponse.json({ error: "Meeting not found" }, { status: 404 });
+  }
+
   if (extractedTasks) {
     try {
       const workspaceId =
-        meeting?.workspaceId || (await getWorkspaceIdForUser(db, userId));
-      await syncTasksForSource(db, extractedTasks, {
+        meeting.workspaceId || (await getWorkspaceIdForUser(db, userId));
+      const syncResult = await syncTasksForSource(db, extractedTasks, {
         userId,
         workspaceId,
-        sourceSessionId: String(meeting?._id ?? id),
+        sourceSessionId: String(meeting._id ?? id),
         sourceSessionType: "meeting",
-        sourceSessionName: meeting?.title || body.title || "Meeting",
+        sourceSessionName: meeting.title || body.title || "Meeting",
         origin: "meeting",
         taskState: "active",
       });
+
+      // Convert to references
+      const referencedTasks = extractedTasks.map((task) => {
+        const canonicalId = syncResult.taskMap.get(task.id);
+        return canonicalId
+          ? {
+            taskId: canonicalId,
+            sourceTaskId: task.id,
+            title: task.title,
+            // Status is dynamic
+          }
+          : task;
+      });
+      update.extractedTasks = referencedTasks;
+
+      // Update the meeting with references
+      await db.collection<any>("meetings").updateOne(filter, { $set: update });
+
       if (meeting) {
+        // We pass the FULL objects (extractedTasks) to updateLinkedChatSessions if it expects full objects.
+        // But if we want chat sessions to be references too, updateLinkedChatSessions should handle it?
+        // Let's assume updateLinkedChatSessions copies. If we pass references, it copies references.
+        // If we want chat to have references, we should pass referencedTasks.
         const linkedSessions = await updateLinkedChatSessions(
           db,
           userId,
           meeting,
-          extractedTasks
+          referencedTasks as any // Ensure compatibility
         );
         await cleanupChatTasksForSessions(db, userId, linkedSessions);
       }
@@ -192,27 +217,24 @@ export async function PATCH(
           userId,
           workspaceId,
           boardId: defaultBoard._id,
-          tasks: extractedTasks,
+          tasks: extractedTasks, // Board likely needs full info? Or syncTasksForSource handled it?
+          // syncTasksForSource handled updating tasks collection.
+          // ensureBoardItemsForTasks likely reads tasks? Or uses the array passed?
+          // It likely uses array passed. So pass FULL extractedTasks.
         });
       }
     } catch (error) {
       console.error("Failed to sync meeting tasks after update:", error);
+      // Fallback update if sync failed
+      await db.collection<any>("meetings").updateOne(filter, { $set: update });
     }
+  } else {
+    await db.collection<any>("meetings").updateOne(filter, { $set: update });
   }
 
-  if (meeting && Array.isArray(meeting.attendees) && meeting.attendees.length) {
-    try {
-      await upsertPeopleFromAttendees({
-        db,
-        userId,
-        attendees: meeting.attendees,
-        sourceSessionId: String(meeting._id ?? id),
-      });
-    } catch (error) {
-      console.error("Failed to upsert people from meeting attendees:", error);
-    }
-  }
-  return NextResponse.json(serializeMeeting(meeting));
+  // Re-fetch to return the definitive updated document? OR just patch local object
+  const updatedMeeting = await db.collection<any>("meetings").findOne(filter);
+  return NextResponse.json(serializeMeeting(updatedMeeting || meeting));
 }
 
 export async function GET(
@@ -236,6 +258,25 @@ export async function GET(
   const meeting = await db.collection<any>("meetings").findOne(filter);
   if (!meeting || meeting.isHidden) {
     return NextResponse.json({ error: "Meeting not found." }, { status: 404 });
+  }
+
+  // Hydrate tasks from canonical collection
+  if (meeting.extractedTasks && Array.isArray(meeting.extractedTasks)) {
+    try {
+      // Dynamic import to avoid circular dep issues if any, or just standard import
+      const { hydrateTaskReferences } = await import("@/lib/task-hydration");
+      meeting.extractedTasks = await hydrateTaskReferences(userId, meeting.extractedTasks);
+
+      // Also hydrate hierarchy levels if they exist and contain tasks
+      if (meeting.allTaskLevels) {
+        if (meeting.allTaskLevels.light) meeting.allTaskLevels.light = await hydrateTaskReferences(userId, meeting.allTaskLevels.light);
+        if (meeting.allTaskLevels.medium) meeting.allTaskLevels.medium = await hydrateTaskReferences(userId, meeting.allTaskLevels.medium);
+        if (meeting.allTaskLevels.detailed) meeting.allTaskLevels.detailed = await hydrateTaskReferences(userId, meeting.allTaskLevels.detailed);
+      }
+    } catch (error) {
+      console.error("Failed to hydrate meeting tasks:", error);
+      // Fallback to existing data if hydration fails
+    }
   }
 
   return NextResponse.json(serializeMeeting(meeting));

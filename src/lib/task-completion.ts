@@ -75,9 +75,24 @@ const EMBEDDING_MODEL =
   process.env.OPENAI_EMBEDDINGS_MODEL || "text-embedding-3-small";
 const OPENAI_EMBEDDINGS_URL =
   process.env.OPENAI_EMBEDDINGS_URL || "https://api.openai.com/v1/embeddings";
+const TASK_COMPLETION_LLM_SNIPPET_CAP = Math.min(
+  12,
+  Math.max(
+    4,
+    Number(process.env.TASK_COMPLETION_LLM_SNIPPET_CAP || 4)
+  )
+);
+const TASK_COMPLETION_DIRECT_MATCH_MARGIN = Math.max(
+  0.08,
+  Number(process.env.TASK_COMPLETION_DIRECT_MATCH_MARGIN || 0.1)
+);
+const TASK_COMPLETION_TITLE_CAP = Math.min(
+  120,
+  Math.max(60, Number(process.env.TASK_COMPLETION_TITLE_CAP || 96))
+);
 
 const COMPLETION_CUE_REGEX =
-  /\b(done|complete|completed|finished|resolved|fixed|shipped|delivered|launched|closed|closed out|wrapped up|wrapped|already did|already done|already handled|already taken care of|handled|taken care of|sorted|sorted out|checked off|signed off|approved|submitted|sent|filed|paid|merged|deployed|published|released|live|ready|in place|all set|good to go|bought|purchased|acquired|ordered|booked|scheduled|set up|setup|implemented|configured|installed)\b/i;
+  /\b(done|complete|completed|finished|resolved|fixed|shipped|delivered|launched|closed|closed out|wrapped up|wrapped|already did|already done|already handled|already taken care of|handled|taken care of|sorted|sorted out|checked off|signed off|approved|submitted|sent|filed|paid|merged|deployed|published|released|live|went live|in prod|in production|rolled out|ready|in place|all set|good to go|bought|purchased|acquired|ordered|booked|scheduled|set up|setup|implemented|configured|installed)\b/i;
 const COMPLETION_NEGATION_REGEX =
   /\b(?:not|never|no|hasn't|haven't|didn't|isn't|wasn't|can't|cannot|won't)\b[^.]{0,32}\b(?:done|complete|completed|finished|resolved|fixed|handled|taken care of|bought|purchased|ready|live|shipped|delivered|launched|approved)\b/i;
 const GENERIC_COMPLETION_REGEX =
@@ -110,7 +125,7 @@ const normalizeAssigneeName = (value?: string | null) => {
   return normalized;
 };
 
-const normalizeEmail = (value?: string | null) =>
+export const normalizeEmail = (value?: string | null) =>
   value ? value.trim().toLowerCase() : "";
 
 const buildAssigneeKey = (
@@ -123,6 +138,13 @@ const buildAssigneeKey = (
   const normalizedName = normalizeAssigneeName(name);
   if (normalizedName) return `name:${normalizedName}`;
   return allowUnassigned ? "unassigned" : "";
+};
+
+const toCompactCandidateTitle = (value?: string | null) => {
+  const title = typeof value === "string" ? value.trim() : "";
+  if (!title) return "";
+  if (title.length <= TASK_COMPLETION_TITLE_CAP) return title;
+  return `${title.slice(0, TASK_COMPLETION_TITLE_CAP - 3).trim()}...`;
 };
 
 const matchesAttendee = (
@@ -138,63 +160,6 @@ const matchesAttendee = (
   if (normalizedName && attendeeNames.has(normalizedName)) return true;
   if (allowUnassigned && !normalizedEmail && !normalizedName) return true;
   return false;
-};
-
-const flattenExtractedTasks = (
-  tasks: ExtractedTaskSchema[] = []
-): ExtractedTaskSchema[] => {
-  const result: ExtractedTaskSchema[] = [];
-  const walk = (items: ExtractedTaskSchema[]) => {
-    items.forEach((task) => {
-      result.push(task);
-      if (task.subtasks && task.subtasks.length) {
-        walk(task.subtasks);
-      }
-    });
-  };
-  walk(tasks);
-  return result;
-};
-
-const taskIsOpen = (task: ExtractedTaskSchema | null | undefined) => {
-  const status = task?.status || "todo";
-  return status !== "done";
-};
-
-const updateTaskStatusInList = (
-  tasks: ExtractedTaskSchema[],
-  taskId: string,
-  status: ExtractedTaskSchema["status"]
-) => {
-  let updated = false;
-  const walk = (items: ExtractedTaskSchema[]): ExtractedTaskSchema[] =>
-    items.map((task) => {
-      let nextTask = task;
-      let childUpdated = false;
-
-      if (task.subtasks && task.subtasks.length) {
-        const updatedSubtasks = walk(task.subtasks);
-        if (updatedSubtasks !== task.subtasks) {
-          childUpdated = true;
-          nextTask = { ...nextTask, subtasks: updatedSubtasks };
-        }
-      }
-
-      if (task.id === taskId) {
-        updated = true;
-        return { ...nextTask, status, completionSuggested: false };
-      }
-
-      if (childUpdated) {
-        updated = true;
-        return nextTask;
-      }
-
-      return task;
-    });
-
-  const nextTasks = walk(tasks);
-  return { tasks: nextTasks, updated };
 };
 
 const chunkCandidates = <T,>(items: T[], size: number): T[][] => {
@@ -216,7 +181,7 @@ const parseTranscriptLine = (
   line: string
 ): { text: string; speaker?: string; timestamp?: string } => {
   const match = line.match(
-    /^(?:(\d{2}:\d{2}:\d{2})\s*-\s*)?(?:(.+?):\s*)?(.+)$/
+    /^(?:(\d{1,2}:\d{2}(?::\d{2})?)\s*-\s*)?(?:(.+?):\s*)?(.+)$/
   );
   if (!match) {
     return { text: line.trim() };
@@ -281,6 +246,18 @@ const extractCompletionSnippets = (transcript: string): CompletionSnippet[] => {
   }
 
   return snippets;
+};
+
+const dedupeCompletionSnippets = (snippets: CompletionSnippet[]) => {
+  const seen = new Set<string>();
+  const deduped: CompletionSnippet[] = [];
+  snippets.forEach((snippet) => {
+    const key = normalizeTitleKey(snippet.text);
+    if (!key || seen.has(key)) return;
+    seen.add(key);
+    deduped.push(snippet);
+  });
+  return deduped;
 };
 
 const buildEmbeddingText = (title?: string | null, description?: string | null) => {
@@ -354,6 +331,17 @@ const embedTexts = async (texts: string[]): Promise<number[][]> => {
       }
       const payload = await response.json();
       const data = Array.isArray(payload.data) ? payload.data : [];
+      const usageTokens =
+        typeof payload?.usage?.total_tokens === "number"
+          ? payload.usage.total_tokens
+          : null;
+      if (usageTokens !== null) {
+        debugLog("embedding batch usage", {
+          model: EMBEDDING_MODEL,
+          inputs: batch.length,
+          usageTokens,
+        });
+      }
       output.push(...data.map((item: any) => item.embedding || []));
     } catch (error) {
       console.error("Embedding failed:", error);
@@ -457,6 +445,7 @@ export const buildCompletionSuggestions = async ({
 }): Promise<ExtractedTaskSchema[]> => {
   const fullTranscript = typeof transcript === "string" ? transcript.trim() : "";
   if (!userId || !fullTranscript) return [];
+  void excludeMeetingId;
 
   const attendeeNames = new Set(
     attendees.map((person) => normalizeAssigneeName(person.name)).filter(Boolean)
@@ -489,12 +478,12 @@ export const buildCompletionSuggestions = async ({
   const workspaceFilter =
     workspaceId && workspaceId.trim()
       ? {
-          $or: [
-            { workspaceId },
-            { workspaceId: null },
-            { workspaceId: { $exists: false } },
-          ],
-        }
+        $or: [
+          { workspaceId },
+          { workspaceId: null },
+          { workspaceId: { $exists: false } },
+        ],
+      }
       : null;
 
   const taskFilters: Record<string, any> = {
@@ -509,25 +498,6 @@ export const buildCompletionSuggestions = async ({
     .find(taskFilters)
     .toArray();
 
-  const meetingFilters: Record<string, any> = { userId: userIdQuery };
-  if (workspaceFilter) {
-    meetingFilters.$and = [workspaceFilter];
-  }
-  const meetings = await db
-    .collection<any>("meetings")
-    .find(meetingFilters)
-    .project({ _id: 1, title: 1, extractedTasks: 1 })
-    .toArray();
-
-  const chatFilters: Record<string, any> = { userId: userIdQuery };
-  if (workspaceFilter) {
-    chatFilters.$and = [workspaceFilter];
-  }
-  const chatSessions = await db
-    .collection<any>("chatSessions")
-    .find(chatFilters)
-    .project({ _id: 1, title: 1, suggestedTasks: 1 })
-    .toArray();
 
   const debugInfo: CompletionDebugInfo = {
     candidateCounts: {
@@ -619,107 +589,21 @@ export const buildCompletionSuggestions = async ({
       }
     });
 
-    meetings.forEach((meeting) => {
-      if (excludeMeetingId && String(meeting._id) === excludeMeetingId) return;
-      const extracted = flattenExtractedTasks(meeting.extractedTasks || []);
-      extracted.forEach((task) => {
-        stats.meetings.total += 1;
-        if (!taskIsOpen(task)) return;
-        const assigneeName = task.assignee?.name || task.assigneeName || null;
-        const assigneeEmail = task.assignee?.email || null;
-        if (
-          !shouldIncludeAssignee(
-            assigneeName,
-            assigneeEmail,
-            allowUnassignedMatch,
-            requireAttendeeMatch
-          )
-        ) {
-          return;
-        }
-        const beforeSize = candidates.size;
-        upsertCandidate(
-          candidates,
-          {
-            title: task.title,
-            description: task.description ?? null,
-            assigneeName,
-            assigneeEmail,
-            dueAt: task.dueAt ?? null,
-            priority: task.priority ?? null,
-            sourceRank: 1,
-          },
-          {
-            sourceType: "meeting",
-            sourceSessionId: String(meeting._id),
-            taskId: task.id,
-            sourceSessionName: meeting.title,
-          },
-          allowUnassignedMatch
-        );
-        if (candidates.size > beforeSize) {
-          stats.meetings.added += 1;
-        }
-      });
-    });
-
-    chatSessions.forEach((session) => {
-      const extracted = flattenExtractedTasks(session.suggestedTasks || []);
-      extracted.forEach((task) => {
-        stats.chats.total += 1;
-        if (!taskIsOpen(task)) return;
-        const assigneeName = task.assignee?.name || task.assigneeName || null;
-        const assigneeEmail = task.assignee?.email || null;
-        if (
-          !shouldIncludeAssignee(
-            assigneeName,
-            assigneeEmail,
-            allowUnassignedMatch,
-            requireAttendeeMatch
-          )
-        ) {
-          return;
-        }
-        const beforeSize = candidates.size;
-        upsertCandidate(
-          candidates,
-          {
-            title: task.title,
-            description: task.description ?? null,
-            assigneeName,
-            assigneeEmail,
-            dueAt: task.dueAt ?? null,
-            priority: task.priority ?? null,
-            sourceRank: 2,
-          },
-          {
-            sourceType: "chat",
-            sourceSessionId: String(session._id),
-            taskId: task.id,
-            sourceSessionName: session.title,
-          },
-          allowUnassignedMatch
-        );
-        if (candidates.size > beforeSize) {
-          stats.chats.added += 1;
-        }
-      });
-    });
-
     debugLog("candidate build", {
       taskCount: tasks.length,
-      meetingCount: meetings.length,
-      chatCount: chatSessions.length,
+      meetingCount: 0,
+      chatCount: 0,
       stats,
       candidateCount: candidates.size,
     });
     debugInfo.candidateCounts = {
       taskCount: tasks.length,
-      meetingCount: meetings.length,
-      chatCount: chatSessions.length,
+      meetingCount: 0,
+      chatCount: 0,
       stats,
       candidateCount: candidates.size,
     };
+
     return candidates;
   };
 
@@ -735,14 +619,34 @@ export const buildCompletionSuggestions = async ({
     return [];
   }
 
-  const completionSnippets = extractCompletionSnippets(fullTranscript);
+  const summaryText = typeof summary === "string" ? summary.trim() : "";
+  const transcriptCompletionSnippets = extractCompletionSnippets(fullTranscript);
+  const summaryCompletionSnippets = summaryText
+    ? extractCompletionSnippets(summaryText)
+    : [];
+  const completionSnippets = dedupeCompletionSnippets([
+    ...transcriptCompletionSnippets,
+    ...summaryCompletionSnippets,
+  ]);
   debugLog("completion snippets", {
     snippetCount: completionSnippets.length,
     transcriptLength: fullTranscript.length,
+    transcriptSnippetCount: transcriptCompletionSnippets.length,
+    summarySnippetCount: summaryCompletionSnippets.length,
   });
   debugInfo.snippets.count = completionSnippets.length;
-  const completionTranscript = fullTranscript;
-  debugInfo.snippets.completionTranscriptLength = completionTranscript.length;
+  debugInfo.snippets.completionTranscriptLength = fullTranscript.length;
+  if (!completionSnippets.length) {
+    debugInfo.selection.selectionThreshold = Math.min(0.95, Math.max(0.4, minMatchRatio));
+    debugInfo.selection.minimumCandidateScore = Math.max(
+      0.45,
+      debugInfo.selection.selectionThreshold - 0.15
+    );
+    if (debug) {
+      debug(debugInfo);
+    }
+    return [];
+  }
 
   const taskEmbeddingById = new Map<string, number[]>();
   const tasksNeedingEmbedding: Array<{ id: string; text: string }> = [];
@@ -849,50 +753,74 @@ export const buildCompletionSuggestions = async ({
   debugInfo.embeddings.snippetsEmbedded = snippetEmbeddings.length;
   debugInfo.embeddings.embeddingsReady = embeddingsReady;
 
+  type RankedCandidateScore = {
+    id: string;
+    score: number;
+    tokenScore: number;
+    embeddingScore: number;
+  };
+  const rankedBySnippet: Array<{
+    snippet: CompletionSnippet;
+    scored: RankedCandidateScore[];
+  }> = [];
+
   const selectedCandidateIds = new Set<string>();
+  const shortlistCandidateIds = new Set<string>();
   const selectionThreshold = Math.min(0.95, Math.max(0.4, minMatchRatio));
   const minimumCandidateScore = Math.max(0.45, selectionThreshold - 0.15);
   debugInfo.selection.selectionThreshold = selectionThreshold;
   debugInfo.selection.minimumCandidateScore = minimumCandidateScore;
-  if (completionSnippets.length) {
-    completionSnippets.forEach((snippet, index) => {
-      const snippetTokens = toTokenSet(snippet.text);
-      const scored = candidateList
-        .map((candidate) => {
-          const tokenScore = jaccardSimilarity(
-            snippetTokens,
-            candidateTokens.get(candidate.groupId) || new Set()
-          );
-          const candidateEmbedding = candidateEmbeddings.get(candidate.groupId);
-          const snippetEmbedding = embeddingsReady ? snippetEmbeddings[index] : null;
-          const embeddingScore =
-            snippetEmbedding && candidateEmbedding
-              ? cosineSimilarity(snippetEmbedding, candidateEmbedding)
-              : 0;
-          const combinedScore = embeddingScore
-            ? embeddingScore * 0.75 + tokenScore * 0.25
-            : tokenScore;
-          return { id: candidate.groupId, score: combinedScore };
-        })
-        .sort((a, b) => b.score - a.score);
 
-      scored.slice(0, 8).forEach((item) => {
-        if (item.score >= minimumCandidateScore) {
-          selectedCandidateIds.add(item.id);
-        }
-      });
-      scored
-        .filter((item) => item.score >= selectionThreshold)
-        .forEach((item) => selectedCandidateIds.add(item.id));
+  completionSnippets.forEach((snippet, index) => {
+    const snippetTokens = toTokenSet(snippet.text);
+    const scored = candidateList
+      .map((candidate) => {
+        const tokenScore = jaccardSimilarity(
+          snippetTokens,
+          candidateTokens.get(candidate.groupId) || new Set()
+        );
+        const candidateEmbedding = candidateEmbeddings.get(candidate.groupId);
+        const snippetEmbedding = embeddingsReady ? snippetEmbeddings[index] : null;
+        const embeddingScore =
+          snippetEmbedding && candidateEmbedding
+            ? cosineSimilarity(snippetEmbedding, candidateEmbedding)
+            : 0;
+        const combinedScore = embeddingScore
+          ? embeddingScore * 0.75 + tokenScore * 0.25
+          : tokenScore;
+        return {
+          id: candidate.groupId,
+          score: combinedScore,
+          tokenScore,
+          embeddingScore,
+        };
+      })
+      .sort((a, b) => b.score - a.score);
+    rankedBySnippet.push({ snippet, scored });
+
+    scored.slice(0, 8).forEach((item) => {
+      if (item.score >= minimumCandidateScore) {
+        selectedCandidateIds.add(item.id);
+      }
     });
-  }
+    scored
+      .filter((item) => item.score >= selectionThreshold)
+      .forEach((item) => selectedCandidateIds.add(item.id));
+    scored.slice(0, 4).forEach((item) => {
+      if (item.score >= 0.2) {
+        shortlistCandidateIds.add(item.id);
+      }
+    });
+  });
 
   const filteredCandidates =
     selectedCandidateIds.size > 0
       ? candidateList.filter((candidate) =>
-          selectedCandidateIds.has(candidate.groupId)
-        )
-      : candidateList;
+        selectedCandidateIds.has(candidate.groupId)
+      )
+      : candidateList.filter((candidate) =>
+        shortlistCandidateIds.has(candidate.groupId)
+      );
 
   debugLog("candidate selection", {
     selectionThreshold,
@@ -902,71 +830,172 @@ export const buildCompletionSuggestions = async ({
   });
   debugInfo.selection.selectedCandidates = selectedCandidateIds.size;
   debugInfo.selection.filteredCandidates = filteredCandidates.length;
-
-  const useFullTranscript = true;
-  const limitedCandidates = useFullTranscript ? candidateList : filteredCandidates;
-  if (useFullTranscript) {
-    debugInfo.selection.filteredCandidates = limitedCandidates.length;
+  if (!filteredCandidates.length) {
+    if (debug) {
+      debug(debugInfo);
+    }
+    return [];
   }
-  const candidateChunks = chunkCandidates(limitedCandidates, 40);
-  const detectCompletions = async (inputTranscript: string) => {
-    const completedById = new Map<
-      string,
-      { groupId: string; confidence?: number; evidence: TaskEvidence }
-    >();
-    for (const chunk of candidateChunks) {
-      if (!chunk.length) continue;
-      const completionResponse = await detectCompletedTasks({
-        transcript: inputTranscript,
-        candidates: chunk.map((candidate) => ({
-          groupId: candidate.groupId,
-          title: candidate.title,
-          description: candidate.description || undefined,
-          assigneeName: candidate.assigneeName || undefined,
-          assigneeEmail: candidate.assigneeEmail || undefined,
-          dueAt: candidate.dueAt ? String(candidate.dueAt) : undefined,
-          priority: candidate.priority || undefined,
-        })),
-      });
-      (completionResponse.completed || []).forEach((item) => {
-        const existing = completedById.get(item.groupId);
-        const existingConfidence = existing?.confidence ?? 0;
-        const nextConfidence = item.confidence ?? 0;
-        if (!existing || nextConfidence >= existingConfidence) {
-          completedById.set(item.groupId, item);
-        }
+
+  const limitedCandidates = filteredCandidates;
+  const limitedCandidateIds = new Set(
+    limitedCandidates.map((candidate) => candidate.groupId)
+  );
+  const candidateById = new Map(
+    limitedCandidates.map((candidate) => [candidate.groupId, candidate])
+  );
+  const llmCandidateCountPerSnippet = 4;
+  const llmSnippetCap = TASK_COMPLETION_LLM_SNIPPET_CAP;
+  const llmCandidateScoreFloor = Math.max(0.32, minimumCandidateScore - 0.1);
+  const directMatchThreshold = Math.max(
+    minimumCandidateScore + 0.2,
+    selectionThreshold + 0.1
+  );
+  const directMatchMargin = TASK_COMPLETION_DIRECT_MATCH_MARGIN;
+  const completedById = new Map<
+    string,
+    { groupId: string; confidence?: number; evidence: TaskEvidence }
+  >();
+  const snippetReviewQueue: Array<{
+    snippet: CompletionSnippet;
+    topScore: number;
+    candidates: CompletionCandidate[];
+  }> = [];
+  const mergeCompletion = (payload: {
+    groupId: string;
+    confidence?: number | null;
+    evidence: TaskEvidence;
+  }) => {
+    const existing = completedById.get(payload.groupId);
+    const existingConfidence = existing?.confidence ?? 0;
+    const nextConfidence =
+      typeof payload.confidence === "number" && Number.isFinite(payload.confidence)
+        ? Math.max(0, Math.min(1, payload.confidence))
+        : 0.6;
+    if (!existing || nextConfidence >= existingConfidence) {
+      completedById.set(payload.groupId, {
+        groupId: payload.groupId,
+        confidence: nextConfidence,
+        evidence: payload.evidence,
       });
     }
-    return completedById;
   };
 
-  const completedById = await detectCompletions(completionTranscript);
-  let summaryAdded = 0;
-  const summaryText = typeof summary === "string" ? summary.trim() : "";
-  if (summaryText) {
-    const summaryTranscript = `Summary:\n${summaryText}\n\nTranscript:\n${completionTranscript}`;
-    const summaryCompletions = await detectCompletions(summaryTranscript);
-    const summaryConfidenceCap = Math.max(0.2, minMatchRatio - 0.1);
-    summaryCompletions.forEach((item, groupId) => {
-      if (completedById.has(groupId)) return;
-      const adjustedConfidence = Math.min(
-        item.confidence ?? summaryConfidenceCap,
-        summaryConfidenceCap
-      );
-      completedById.set(groupId, {
-        ...item,
-        confidence: adjustedConfidence,
+  let directMatches = 0;
+  rankedBySnippet.forEach(({ snippet, scored }) => {
+    const scopedScores = scored.filter((item) =>
+      limitedCandidateIds.has(item.id)
+    );
+    if (!scopedScores.length) return;
+    const top = scopedScores[0];
+    const runnerUp = scopedScores[1];
+    const topCandidate = candidateById.get(top.id);
+    if (!topCandidate) return;
+
+    const margin = runnerUp ? top.score - runnerUp.score : top.score;
+    const evidence: TaskEvidence = {
+      snippet: snippet.text,
+      speaker: snippet.speaker || undefined,
+      timestamp: snippet.timestamp || undefined,
+    };
+
+    if (top.score >= directMatchThreshold && margin >= directMatchMargin) {
+      directMatches += 1;
+      mergeCompletion({
+        groupId: topCandidate.groupId,
+        confidence: top.score,
+        evidence,
       });
-      summaryAdded += 1;
+      return;
+    }
+
+    const llmCandidates = scopedScores
+      .filter((item) => item.score >= llmCandidateScoreFloor)
+      .slice(0, llmCandidateCountPerSnippet)
+      .map((item) => candidateById.get(item.id))
+      .filter((candidate): candidate is CompletionCandidate => Boolean(candidate));
+    if (!llmCandidates.length) {
+      if (top.score >= minimumCandidateScore && margin >= directMatchMargin + 0.05) {
+        directMatches += 1;
+        mergeCompletion({
+          groupId: topCandidate.groupId,
+          confidence: top.score,
+          evidence,
+        });
+      }
+      return;
+    }
+    snippetReviewQueue.push({
+      snippet,
+      topScore: top.score,
+      candidates: llmCandidates,
+    });
+  });
+
+  let llmReviewCalls = 0;
+  let llmMatches = 0;
+  const snippetsForModel = snippetReviewQueue
+    .sort((a, b) => b.topScore - a.topScore)
+    .slice(0, llmSnippetCap);
+  for (const review of snippetsForModel) {
+    const prefix = [review.snippet.timestamp, review.snippet.speaker]
+      .filter(Boolean)
+      .join(" - ");
+    const snippetTranscript = prefix
+      ? `${prefix}: ${review.snippet.text}`
+      : review.snippet.text;
+    const completionResponse = await detectCompletedTasks({
+      transcript: snippetTranscript,
+      candidates: review.candidates.map((candidate) => ({
+        groupId: candidate.groupId,
+        title: toCompactCandidateTitle(candidate.title),
+        assigneeKey: buildAssigneeKey(
+          candidate.assigneeName,
+          candidate.assigneeEmail,
+          true
+        ),
+      })),
+    });
+    llmReviewCalls += 1;
+    const completedItems = completionResponse.completed || [];
+    if (!completedItems.length) {
+      if (review.candidates.length === 1 && review.topScore >= minimumCandidateScore + 0.05) {
+        mergeCompletion({
+          groupId: review.candidates[0].groupId,
+          confidence: review.topScore,
+          evidence: {
+            snippet: review.snippet.text,
+            speaker: review.snippet.speaker || undefined,
+            timestamp: review.snippet.timestamp || undefined,
+          },
+        });
+        llmMatches += 1;
+      }
+      continue;
+    }
+    completedItems.forEach((item) => {
+      mergeCompletion({
+        groupId: item.groupId,
+        confidence: item.confidence ?? review.topScore,
+        evidence: {
+          snippet: item.evidence.snippet,
+          speaker: item.evidence.speaker || undefined,
+          timestamp: item.evidence.timestamp || undefined,
+        },
+      });
+      llmMatches += 1;
     });
   }
 
   debugLog("completion results", {
-    chunks: candidateChunks.length,
+    chunks: llmReviewCalls,
     completed: completedById.size,
-    summaryAdded,
+    directMatches,
+    llmMatches,
+    reviewQueue: snippetReviewQueue.length,
+    reviewedSnippets: snippetsForModel.length,
   });
-  debugInfo.completions.chunks = candidateChunks.length;
+  debugInfo.completions.chunks = llmReviewCalls;
   debugInfo.completions.completed = completedById.size;
   if (debug) {
     debug(debugInfo);
@@ -1160,96 +1189,68 @@ export const applyCompletionTargets = async (
   userId: string,
   suggestions: ExtractedTaskSchema[]
 ) => {
-  const allTargets: CompletionTarget[] = [];
-  suggestions.forEach((suggestion) => {
-    if (suggestion.completionTargets?.length) {
-      allTargets.push(...suggestion.completionTargets);
-    }
-  });
-  if (!allTargets.length) return;
-
-  const uniqueTargets = Array.from(
-    new Map(
-      allTargets.map((target) => [
-        `${target.sourceType}:${target.sourceSessionId}:${target.taskId}`,
-        target,
-      ])
-    ).values()
-  );
-
   const userIdQuery = buildIdQuery(userId);
-  const taskTargets = uniqueTargets.filter((target) => target.sourceType === "task");
-  if (taskTargets.length) {
-    const taskIds = Array.from(
-      new Set(taskTargets.map((target) => target.taskId))
-    );
-    await db.collection("tasks").updateMany(
-      {
-        userId: userIdQuery,
-        $or: [{ _id: { $in: taskIds } }, { id: { $in: taskIds } }],
-      },
-      { $set: { status: "done" } }
-    );
-  }
 
-  const updateSessionTasks = async (
-    collectionName: "meetings" | "chatSessions",
-    taskField: "extractedTasks" | "suggestedTasks",
-    target: CompletionTarget
-  ) => {
-    const sessionIdQuery = buildIdQuery(target.sourceSessionId);
-    const filter = {
-      userId: userIdQuery,
-      $or: [{ _id: sessionIdQuery }, { id: target.sourceSessionId }],
-    };
-    const session = await db.collection<any>(collectionName).findOne(filter);
-    if (!session) return;
-    const currentTasks = session[taskField] || [];
-    const { tasks, updated } = updateTaskStatusInList(
-      currentTasks,
-      target.taskId,
-      "done"
-    );
-    if (!updated) return;
-    await db.collection<any>(collectionName).updateOne(filter, {
-      $set: { [taskField]: tasks },
-    });
-  };
+  for (const suggestion of suggestions) {
+    if (!suggestion.completionTargets?.length) continue;
 
-  const updateTaskCollectionForSessionTarget = async (target: CompletionTarget) => {
-    const sessionIdQuery = buildIdQuery(target.sourceSessionId);
-    const taskIdQuery = buildIdQuery(target.taskId);
-    await db.collection("tasks").updateMany(
-      {
-        userId: userIdQuery,
-        sourceSessionType: target.sourceType,
-        $and: [
-          {
-            $or: [
-              { sourceSessionId: sessionIdQuery },
-              { sourceSessionId: target.sourceSessionId },
-            ],
-          },
-          {
-            $or: [
-              { _id: taskIdQuery },
-              { sourceTaskId: target.taskId },
-              { sourceTaskId: taskIdQuery },
-            ],
-          },
-        ],
-      },
-      { $set: { status: "done", completionSuggested: false, lastUpdated: new Date() } }
-    );
-  };
+    const evidence = suggestion.completionEvidence || undefined;
+    const targets = suggestion.completionTargets;
 
-  for (const target of uniqueTargets) {
-    if (target.sourceType === "meeting") {
-      await updateSessionTasks("meetings", "extractedTasks", target);
-      await updateTaskCollectionForSessionTarget(target);
-    } else if (target.sourceType === "chat") {
-      await updateSessionTasks("chatSessions", "suggestedTasks", target);
-      await updateTaskCollectionForSessionTarget(target);
+    // 1. Update tasks targeted by ID (sourceType: 'task')
+    const directTaskTargets = targets.filter(t => t.sourceType === "task");
+    if (directTaskTargets.length) {
+      const taskIds = directTaskTargets.map(t => t.taskId);
+      await db.collection("tasks").updateMany(
+        {
+          userId: userIdQuery,
+          $or: [{ _id: { $in: taskIds.map(id => buildIdQuery(id)) } }, { id: { $in: taskIds } }],
+        },
+        {
+          $set: {
+            status: "done",
+            completionEvidence: evidence, // Save evidence!
+            lastUpdated: new Date()
+          }
+        }
+      );
+    }
+
+    // 2. Update tasks targeted by Session/Source ID
+    const sessionTargets = targets.filter(t => t.sourceType !== "task");
+    for (const target of sessionTargets) {
+      const sessionIdQuery = buildIdQuery(target.sourceSessionId);
+      const taskIdQuery = buildIdQuery(target.taskId);
+
+      await db.collection("tasks").updateMany(
+        {
+          userId: userIdQuery,
+          sourceSessionType: target.sourceType,
+          $and: [
+            {
+              $or: [
+                { sourceSessionId: sessionIdQuery },
+                { sourceSessionId: target.sourceSessionId },
+              ],
+            },
+            {
+              $or: [
+                { _id: taskIdQuery },
+                { sourceTaskId: target.taskId },
+                { sourceTaskId: taskIdQuery },
+              ],
+            },
+          ],
+        },
+        {
+          $set: {
+            status: "done",
+            completionEvidence: evidence, // Save evidence!
+            completionSuggested: false,
+            lastUpdated: new Date()
+          }
+        }
+      );
     }
   }
 };

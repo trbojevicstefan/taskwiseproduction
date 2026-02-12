@@ -24,10 +24,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { CalendarIcon, Sparkles, Loader2, Slack, Copy, ListChecks } from 'lucide-react';
 import { format, parseISO } from 'date-fns';
 import { cn } from '@/lib/utils';
-import { generateTaskAssistance, type GenerateTaskAssistanceOutput } from '@/ai/flows/generate-task-assistance-flow';
-import { generateResearchBrief, type GenerateResearchBriefOutput } from '@/ai/flows/generate-research-brief-flow';
 import { useToast } from "@/hooks/use-toast";
-import { ScrollArea } from '@/components/ui/scroll-area';
 import { motion } from 'framer-motion';
 import { useAuth } from '@/contexts/AuthContext';
 import { useIntegrations } from "@/contexts/IntegrationsContext";
@@ -41,6 +38,12 @@ import type { Person } from "@/types/person";
 import { SiTrello } from "@icons-pack/react-simple-icons";
 import { getTaskBoardMembership } from "@/lib/board-actions";
 import type { BriefContext } from "@/lib/brief-context";
+import {
+  fetchBriefQuota,
+  generateTaskBrief,
+  generateTaskAssistanceText,
+  type BriefQuota,
+} from "@/lib/task-insights-client";
 
 type BoardOption = { id: string; name: string };
 
@@ -98,6 +101,8 @@ export default function TaskDetailDialog({
   const [isEditingBrief, setIsEditingBrief] = useState(false);
   const [isEditingAssistance, setIsEditingAssistance] = useState(false);
   const [isBriefExpanded, setIsBriefExpanded] = useState(false);
+  const [briefQuota, setBriefQuota] = useState<BriefQuota | null>(null);
+  const [isLoadingBriefQuota, setIsLoadingBriefQuota] = useState(false);
   const { toast } = useToast();
   const { user } = useAuth();
   const { isSlackConnected, isGoogleTasksConnected, isTrelloConnected } = useIntegrations();
@@ -139,6 +144,29 @@ export default function TaskDetailDialog({
       setIsBriefExpanded(false);
     }
   }, [task, isOpen]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    let isActive = true;
+    setIsLoadingBriefQuota(true);
+    fetchBriefQuota()
+      .then((quota) => {
+        if (!isActive) return;
+        setBriefQuota(quota);
+      })
+      .catch((error) => {
+        if (!isActive) return;
+        console.error("Failed to fetch brief quota:", error);
+      })
+      .finally(() => {
+        if (isActive) {
+          setIsLoadingBriefQuota(false);
+        }
+      });
+    return () => {
+      isActive = false;
+    };
+  }, [isOpen, task?.id]);
 
   useEffect(() => {
     if (!task) {
@@ -306,13 +334,21 @@ export default function TaskDetailDialog({
 
   const handleGenerateBrief = async () => {
     if (!task) return;
+    if (isBriefLimitReached) {
+      toast({
+        title: "Brief limit reached",
+        description: "You have used all 10 AI Brief generations for this month.",
+        variant: "destructive",
+      });
+      return;
+    }
     setIsGeneratingBrief(true);
     toast({ title: "Generating Research Brief...", description: "Please wait a moment." });
     try {
       const briefContext = getBriefContext
         ? await Promise.resolve(getBriefContext(buildUpdatedTask()))
         : null;
-      const result: GenerateResearchBriefOutput = await generateResearchBrief({
+      const result = await generateTaskBrief({
         taskTitle: title,
         taskDescription: description,
         assigneeName: assigneeNameForBrief,
@@ -321,10 +357,16 @@ export default function TaskDetailDialog({
         relatedTranscripts: briefContext?.relatedTranscripts || undefined,
       });
       setResearchBrief(result.researchBrief);
+      setBriefQuota(result.briefQuota);
       setIsEditingBrief(false);
       try {
         await persistTaskUpdate({ researchBrief: result.researchBrief }, { close: false });
-        toast({ title: "Brief Generated!", description: "AI Research Brief is now available." });
+        toast({
+          title: "Brief Generated!",
+          description: result.briefQuota
+            ? `${result.briefQuota.remaining} brief${result.briefQuota.remaining === 1 ? "" : "s"} left this month.`
+            : "AI Research Brief is now available.",
+        });
       } catch (saveError) {
         console.error("Failed to save research brief:", saveError);
         toast({
@@ -335,8 +377,9 @@ export default function TaskDetailDialog({
       }
     } catch (error) {
       console.error("Error generating research brief:", error);
-      setResearchBrief("Failed to generate brief. Please try again.");
-      toast({ title: "AI Error", description: "Could not generate research brief.", variant: "destructive" });
+      const message =
+        error instanceof Error ? error.message : "Could not generate research brief.";
+      toast({ title: "AI Error", description: message, variant: "destructive" });
     } finally {
       setIsGeneratingBrief(false);
     }
@@ -345,10 +388,9 @@ export default function TaskDetailDialog({
   const handleGenerateAssistance = async () => {
     if (!task) return;
     setIsGeneratingAssistance(true);
-    setAiAssistanceText(''); // Clear previous assistance
     toast({ title: "Generating AI Assistance...", description: "Please wait a moment." });
     try {
-      const result: GenerateTaskAssistanceOutput = await generateTaskAssistance({
+      const result = await generateTaskAssistanceText({
         taskTitle: title,
         taskDescription: description,
       });
@@ -373,8 +415,9 @@ export default function TaskDetailDialog({
       }
     } catch (error) {
       console.error("Error generating task assistance:", error);
-      setAiAssistanceText("Failed to get assistance. Please try again.");
-      toast({ title: "AI Error", description: "Could not get task assistance.", variant: "destructive" });
+      const message =
+        error instanceof Error ? error.message : "Could not get task assistance.";
+      toast({ title: "AI Error", description: message, variant: "destructive" });
     } finally {
       setIsGeneratingAssistance(false);
     }
@@ -577,6 +620,10 @@ export default function TaskDetailDialog({
     assigneeMeta.label && assigneeMeta.label !== "Unassigned"
       ? assigneeMeta.label
       : undefined;
+  const isBriefLimitReached = (briefQuota?.remaining ?? 1) <= 0;
+  const briefCounterLabel = briefQuota
+    ? `${briefQuota.remaining}/${briefQuota.limit} left`
+    : null;
 
   const priorityTone = {
     high: "border-rose-500/60 bg-rose-500/10",
@@ -712,7 +759,7 @@ export default function TaskDetailDialog({
                     size="sm"
                     variant="outline"
                     onClick={handleGenerateBrief}
-                    disabled={isGeneratingBrief}
+                    disabled={isGeneratingBrief || isLoadingBriefQuota || isBriefLimitReached}
                   >
                     {isGeneratingBrief ? (
                       <Loader2 className="mr-2 h-4 w-4 animate-spin text-amber-500" />
@@ -720,6 +767,11 @@ export default function TaskDetailDialog({
                       <Sparkles className="mr-2 h-4 w-4 text-amber-500" />
                     )}
                     {researchBrief ? "Regenerate Brief" : "Generate Brief"}
+                    {isLoadingBriefQuota || briefCounterLabel ? (
+                      <span className="ml-1 text-xs text-muted-foreground">
+                        {isLoadingBriefQuota ? "(...)" : `(${briefCounterLabel})`}
+                      </span>
+                    ) : null}
                   </Button>
                   <Button
                     size="sm"
@@ -737,9 +789,8 @@ export default function TaskDetailDialog({
                 </div>
               </div>
             </DialogHeader>
-            <div className="grid grid-cols-1 lg:grid-cols-[1.6fr_1fr] grid-rows-[minmax(0,1fr)] flex-1 min-h-0">
-              <div className="min-h-0 flex flex-col">
-                <ScrollArea className="flex-1 min-h-0 bg-gradient-to-br from-background via-background to-muted/10">
+            <div className="grid flex-1 min-h-0 grid-cols-1 lg:grid-cols-[1.6fr_1fr]">
+              <div className="min-h-0 overflow-y-auto bg-gradient-to-br from-background via-background to-muted/10">
                   <motion.div
                     initial={{ opacity: 0, y: 10 }}
                     animate={{ opacity: 1, y: 0 }}
@@ -950,14 +1001,13 @@ export default function TaskDetailDialog({
                       </div>
                     )}
                   </motion.div>
-                </ScrollArea>
               </div>
 
               <motion.div
                 initial={{ opacity: 0, x: 10 }}
                 animate={{ opacity: 1, x: 0 }}
                 transition={{ duration: 0.5 }}
-                className="h-full min-h-0 border-l bg-gradient-to-b from-muted/30 via-muted/10 to-background flex flex-col"
+                className="min-h-0 border-t lg:border-l lg:border-t-0 bg-gradient-to-b from-muted/30 via-muted/10 to-background flex flex-col"
               >
                 <div className="flex-1 min-h-0 overflow-y-auto p-6 space-y-4">
                   <div className="rounded-xl border bg-background/80 p-4 space-y-4">
@@ -1098,18 +1148,18 @@ export default function TaskDetailDialog({
                     </div>
                   </div>
                 </div>
-                <div className="sticky bottom-0 z-10 border-t border-border/80 bg-background/80 px-6 py-4 flex justify-between">
-                  <DialogClose asChild>
-                    <Button type="button" variant="outline">
-                      Cancel
-                    </Button>
-                  </DialogClose>
-                  <Button type="button" onClick={handleSaveChanges}>
-                    Save changes
-                  </Button>
-                </div>
               </motion.div>
             </div>
+            <DialogFooter className="border-t border-border/80 bg-background/90 px-6 py-4 backdrop-blur-sm sm:justify-between">
+              <DialogClose asChild>
+                <Button type="button" variant="outline">
+                  Cancel
+                </Button>
+              </DialogClose>
+              <Button type="button" onClick={handleSaveChanges}>
+                Save changes
+              </Button>
+            </DialogFooter>
           </div>
         </div>
       </DialogContent>

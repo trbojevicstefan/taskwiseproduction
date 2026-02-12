@@ -29,7 +29,7 @@ const shouldAutoApproveSuggestion = (
   if (!task.completionSuggested) return false;
   const confidence =
     typeof task.completionConfidence === "number" &&
-    Number.isFinite(task.completionConfidence)
+      Number.isFinite(task.completionConfidence)
       ? task.completionConfidence
       : null;
   if (confidence === null) return false;
@@ -78,6 +78,29 @@ export async function GET() {
     .find({ userId: userIdQuery, isHidden: { $ne: true } })
     .sort({ lastActivityAt: -1 })
     .toArray();
+
+  // Batch hydrate for list might be expensive if many meetings. 
+  // But usually list view doesn't show all tasks?
+  // If list view shows task counts or summary, maybe we don't need full hydration?
+  // Let's assume we do for now to be safe, or just check if `extractedTasks` are used in list.
+  // Code shows `serializeMeeting` is mapped. `extractedTasks` is part of meeting object.
+  // If we return references, frontend might break if it expects full tasks.
+  // So we SHOULD hydrate. To avoid N+1, we can collect all tasks from all meetings.
+
+  // For the list, let's keep it simple and parallelize or just hydrate.
+  if (meetings.length > 0) {
+    try {
+      const { hydrateTaskReferences } = await import("@/lib/task-hydration");
+      await Promise.all(meetings.map(async (m) => {
+        if (m.extractedTasks && Array.isArray(m.extractedTasks)) {
+          m.extractedTasks = await hydrateTaskReferences(userId, m.extractedTasks);
+        }
+        // List usually doesn't need allTaskLevels deep data?
+      }));
+    } catch (e) {
+      console.error("Failed to hydrate meetings list", e);
+    }
+  }
 
   return NextResponse.json(meetings.map(serializeMeeting));
 }

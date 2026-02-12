@@ -7,9 +7,8 @@
  * rather than generating tasks or other structured data.
  */
 
-import { z } from 'zod';
 import { ai } from '@/ai/genkit';
-import { 
+import {
   TranscriptQAInputSchema,
   type TranscriptQAInput,
   TranscriptQAOutputSchema,
@@ -28,7 +27,7 @@ const qaPrompt = ai.definePrompt({
   prompt: `
 You are a Principal Analyst & Strategist. Your only job is to answer the user's question based on the provided meeting transcript.
 
-**Full Meeting Transcript:**
+**Relevant Meeting Transcript Excerpts:**
 \`\`\`
 {{{transcript}}}
 \`\`\`
@@ -40,6 +39,11 @@ You are a Principal Analyst & Strategist. Your only job is to answer the user's 
 \`\`\`
 {{/if}}
 
+{{#if previousSessionContext}}
+**Context from Previous Meeting:**
+{{{previousSessionContext}}}
+{{/if}}
+
 **User's Question:**
 "{{{question}}}"
 
@@ -49,8 +53,96 @@ You are a Principal Analyst & Strategist. Your only job is to answer the user's 
 3.  **Ground Your Answer:** Your entire answer must be based on the provided transcript. If the transcript does not contain the information to answer the question, you MUST state that clearly. For example: "The transcript does not mention the specific reason for the budget change."
 4.  **Cite Your Sources:** For every piece of information you use in your answer, you MUST populate the \`sources\` array with the corresponding \`timestamp\` and \`snippet\` from the transcript. This is mandatory for providing evidence.
 5.  **Output:** Your response must be a single JSON object containing the \`answerText\` and the \`sources\` array. Do not create tasks or any other data.
-  `,
+	  `,
 });
+
+const QA_STOPWORDS = new Set([
+  "a",
+  "an",
+  "and",
+  "are",
+  "as",
+  "at",
+  "be",
+  "by",
+  "did",
+  "do",
+  "for",
+  "from",
+  "how",
+  "in",
+  "is",
+  "it",
+  "of",
+  "on",
+  "or",
+  "the",
+  "to",
+  "was",
+  "what",
+  "when",
+  "where",
+  "who",
+  "why",
+  "with",
+]);
+
+const tokenize = (text: string) =>
+  text
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .split(/\s+/)
+    .map((token) => token.trim())
+    .filter((token) => token.length > 2 && !QA_STOPWORDS.has(token));
+
+const toRelevantTranscript = (transcript: string, question: string) => {
+  const cleanTranscript = transcript.trim();
+  if (!cleanTranscript) return cleanTranscript;
+  if (cleanTranscript.length <= 5000) return cleanTranscript;
+
+  const lines = cleanTranscript
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  if (lines.length <= 80) return cleanTranscript;
+
+  const queryTokens = new Set(tokenize(question));
+  if (!queryTokens.size) {
+    const head = lines.slice(0, 30);
+    const tail = lines.slice(-20);
+    return [...head, ...tail].join("\n");
+  }
+
+  const scored = lines
+    .map((line, index) => {
+      const lineTokens = tokenize(line);
+      if (!lineTokens.length) return { index, score: 0 };
+      let overlap = 0;
+      lineTokens.forEach((token) => {
+        if (queryTokens.has(token)) overlap += 1;
+      });
+      const score = overlap / Math.max(1, Math.min(queryTokens.size, lineTokens.length));
+      return { index, score };
+    })
+    .sort((a, b) => b.score - a.score);
+
+  const selectedIndexes = new Set<number>();
+  scored.slice(0, 24).forEach((entry) => {
+    if (entry.score <= 0) return;
+    selectedIndexes.add(entry.index);
+    if (entry.index > 0) selectedIndexes.add(entry.index - 1);
+    if (entry.index < lines.length - 1) selectedIndexes.add(entry.index + 1);
+  });
+
+  if (!selectedIndexes.size) {
+    return lines.slice(0, 50).join("\n");
+  }
+
+  return Array.from(selectedIndexes)
+    .sort((a, b) => a - b)
+    .map((index) => lines[index])
+    .join("\n");
+};
 
 // --- GENKIT FLOW ---
 
@@ -61,7 +153,18 @@ const answerFromTranscriptFlow = ai.defineFlow(
     outputSchema: TranscriptQAOutputSchema,
   },
   async (input: TranscriptQAInput) => {
-    const { output, text } = await runPromptWithFallback(qaPrompt, input);
+    const promptInput: TranscriptQAInput = {
+      ...input,
+      transcript: toRelevantTranscript(input.transcript, input.question),
+    };
+    const { output, text } = await runPromptWithFallback(
+      qaPrompt,
+      promptInput,
+      undefined,
+      {
+        endpoint: "transcriptQA.answer",
+      }
+    );
     const raw = extractJsonValue(output, text);
     const parsed = TranscriptQAOutputSchema.safeParse(raw);
     if (parsed.success) {

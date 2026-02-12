@@ -66,49 +66,73 @@ export async function PATCH(
     userId: userIdQuery,
     $or: [{ _id: idQuery }, { id }],
   };
+  // Fetch session first to get context for sync
+  const getCurrent = await db.collection<any>("chatSessions").findOne(filter);
+  const sessionTitle = getCurrent?.title || body.title || "Chat Session";
+  const sourceMeetingId = getCurrent?.sourceMeetingId;
+
+  if (normalizedTasks) {
+    try {
+      const isLinkedToMeeting = !!sourceMeetingId;
+      const targetSessionId = isLinkedToMeeting ? String(sourceMeetingId) : id;
+      const targetSessionType = isLinkedToMeeting ? "meeting" : "chat";
+      // If linked, we effectively treat these as meeting tasks (origin: meeting/chat mixed, but context is meeting tasks)
+      // Actually 'origin' tracks creation source. If created in chat, origin should be 'chat'.
+      // But 'sourceSessionId' is meeting. 
+
+      const syncResult = await syncTasksForSource(db, normalizedTasks, {
+        userId,
+        sourceSessionId: targetSessionId,
+        sourceSessionType: targetSessionType,
+        sourceSessionName: isLinkedToMeeting ? "Meeting" : sessionTitle, // Fetch meeting title? 
+        // Logic: if we are updating meeting tasks, label them as such for consistency, or keep 'chat' to know they came from chat?
+        // Let's keep 'origin' as 'chat' to know they were modified/created via Chat.
+        origin: "chat",
+        taskState: "active",
+      });
+
+      // Convert to references
+      const referencedTasks = normalizedTasks.map((task: any) => {
+        const canonicalId = syncResult.taskMap.get(task.id);
+        return canonicalId
+          ? {
+            taskId: canonicalId,
+            sourceTaskId: task.id,
+            title: task.title,
+            // Status is dynamic
+          }
+          : task;
+      });
+      update.suggestedTasks = referencedTasks;
+
+      // Update meeting if linked
+      if (sourceMeetingId) {
+        const meetingId = String(sourceMeetingId);
+        const meetingFilter = {
+          userId: userIdQuery,
+          $or: [{ _id: buildIdQuery(meetingId) }, { id: meetingId }],
+        };
+        // Update meeting with the SAME references (since they share the task list in this context)
+        await db.collection<any>("meetings").updateOne(meetingFilter, {
+          $set: { extractedTasks: referencedTasks }, // Update lastActivity? Maybe not to avoid noise
+        });
+
+        // We do NOT sync tasks for meeting again, because we just synced them for chat. 
+        // Syncing them for meeting would change 'origin' to meeting?
+        // If we want them to show up as 'meeting' tasks, we should maybe sync for meeting?
+        // But the user is editing the CHAT. So 'chat' origin is correct for the edit.
+        // The meeting view will reference the canonical tasks.
+      }
+    } catch (error) {
+      console.error("Failed to sync chat tasks after update:", error);
+    }
+  }
+
+  // Update the chat session with references
   await db.collection<any>("chatSessions").updateOne(filter, { $set: update });
 
   const session = await db.collection<any>("chatSessions").findOne(filter);
-  if (normalizedTasks && session?.sourceMeetingId) {
-    const meetingId = String(session.sourceMeetingId);
-    const meetingFilter = {
-      userId: userIdQuery,
-      $or: [{ _id: buildIdQuery(meetingId) }, { id: meetingId }],
-    };
-    await db.collection<any>("meetings").updateOne(meetingFilter, {
-      $set: { extractedTasks: normalizedTasks, lastActivityAt: new Date() },
-    });
-    const meeting = await db.collection<any>("meetings").findOne(meetingFilter);
-    if (meeting) {
-      try {
-        await syncTasksForSource(db, normalizedTasks, {
-          userId,
-          sourceSessionId: String(meeting._id ?? meetingId),
-          sourceSessionType: "meeting",
-          sourceSessionName: meeting?.title || session?.title || "Meeting",
-          origin: "meeting",
-        });
-      } catch (error) {
-        console.error("Failed to sync meeting tasks after chat update:", error);
-      }
-    }
-  }
-  // After syncing tasks, attach canonical ids to session suggestedTasks where available
-  try {
-    const sessionAfter = await db.collection<any>("chatSessions").findOne(filter);
-    if (sessionAfter && Array.isArray(sessionAfter.suggestedTasks) && sessionAfter.suggestedTasks.length) {
-      const sourceIds = sessionAfter.suggestedTasks.map((t: any) => t.id).filter(Boolean);
-      if (sourceIds.length) {
-        const userIdQuery2 = buildIdQuery(userId);
-        const tasks = await db.collection("tasks").find({ userId: userIdQuery2, sourceTaskId: { $in: sourceIds } }).project({ _id: 1, sourceTaskId: 1 }).toArray();
-        const map = new Map(tasks.map((r: any) => [String(r.sourceTaskId), String(r._id)]));
-        const augmented = sessionAfter.suggestedTasks.map((t: any) => ({ ...t, taskCanonicalId: map.get(t.id) || undefined }));
-        await db.collection("chatSessions").updateOne(filter, { $set: { suggestedTasks: augmented } });
-      }
-    }
-  } catch (error) {
-    console.error("Failed to attach canonical ids to chat session after sync:", error);
-  }
+
   if (session?.sourceMeetingId) {
     await cleanupChatTasksForSession(db, userId, session);
   }

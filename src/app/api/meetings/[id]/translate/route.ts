@@ -3,8 +3,8 @@ import { randomUUID } from "crypto";
 import { getDb } from "@/lib/db";
 import { getSessionUserId } from "@/lib/server-auth";
 import { buildIdQuery } from "@/lib/mongo-id";
-const OPENAI_CHAT_URL =
-  process.env.OPENAI_API_URL || "https://api.openai.com/v1/chat/completions";
+const OPENAI_RESPONSES_URL =
+  process.env.OPENAI_RESPONSES_URL || "https://api.openai.com/v1/responses";
 
 const buildTranslateMessages = (transcript: string, targetLanguage: string) => [
   {
@@ -27,6 +27,42 @@ const buildTranslateMessages = (transcript: string, targetLanguage: string) => [
   },
 ];
 
+const toResponsesInput = (
+  messages: Array<{ role: string; content: string }>
+) =>
+  messages.map((message) => ({
+    role: message.role,
+    content: [
+      {
+        type: "input_text",
+        text: message.content,
+      },
+    ],
+  }));
+
+const extractResponsesText = (payload: unknown): string => {
+  if (!payload || typeof payload !== "object") return "";
+  const payloadObj = payload as { output_text?: unknown; output?: unknown };
+  if (typeof payloadObj.output_text === "string") return payloadObj.output_text;
+  const output = Array.isArray(payloadObj.output) ? payloadObj.output : [];
+  for (const item of output) {
+    const message = item as { type?: unknown; content?: unknown };
+    const content = Array.isArray(message.content) ? message.content : [];
+    if (message.type === "message" && content.length) {
+      const text = content
+        .map((part) => {
+          const outputPart = part as { type?: unknown; text?: unknown };
+          return outputPart.type === "output_text" && typeof outputPart.text === "string"
+            ? outputPart.text
+            : "";
+        })
+        .join("");
+      if (text) return text;
+    }
+  }
+  return "";
+};
+
 const translateTranscriptWithOpenAI = async (
   transcript: string,
   targetLanguage: string
@@ -39,7 +75,7 @@ const translateTranscriptWithOpenAI = async (
     process.env.OPENAI_TRANSLATE_MODEL ||
     process.env.OPENAI_MODEL ||
     "gpt-4.1";
-  const response = await fetch(OPENAI_CHAT_URL, {
+  const response = await fetch(OPENAI_RESPONSES_URL, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -47,7 +83,7 @@ const translateTranscriptWithOpenAI = async (
     },
     body: JSON.stringify({
       model,
-      messages: buildTranslateMessages(transcript, targetLanguage),
+      input: toResponsesInput(buildTranslateMessages(transcript, targetLanguage)),
       temperature: 0.2,
     }),
   });
@@ -58,9 +94,7 @@ const translateTranscriptWithOpenAI = async (
       `OpenAI translation failed (HTTP ${response.status}).`;
     throw new Error(errorMessage);
   }
-  const translatedTranscript =
-    (payload as { choices?: Array<{ message?: { content?: string } }> })
-      ?.choices?.[0]?.message?.content || "";
+  const translatedTranscript = extractResponsesText(payload);
   if (!translatedTranscript.trim()) {
     throw new Error("OpenAI returned empty translation.");
   }

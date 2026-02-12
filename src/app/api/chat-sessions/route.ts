@@ -27,6 +27,19 @@ export async function GET() {
     .sort({ lastActivityAt: -1 })
     .toArray();
 
+  if (sessions.length > 0) {
+    try {
+      const { hydrateTaskReferences } = await import("@/lib/task-hydration");
+      await Promise.all(sessions.map(async (s) => {
+        if (s.suggestedTasks && Array.isArray(s.suggestedTasks)) {
+          s.suggestedTasks = await hydrateTaskReferences(userId, s.suggestedTasks);
+        }
+      }));
+    } catch (e) {
+      console.error("Failed to hydrate chat sessions list", e);
+    }
+  }
+
   return NextResponse.json(sessions.map(serializeSession));
 }
 

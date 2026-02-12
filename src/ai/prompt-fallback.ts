@@ -1,12 +1,95 @@
 import type { ExecutablePrompt, PromptGenerateOptions } from "@genkit-ai/ai";
+import { appendFile } from "fs/promises";
+import type { ZodTypeAny } from "zod";
 import { extractJsonValue } from "@/ai/flows/parse-json-output";
 
 const OPENAI_MODEL =
-  process.env.OPENAI_MODEL || process.env.OPENAI_FALLBACK_MODEL || "gpt-4.1-mini";
-const OPENAI_CHAT_URL =
-  process.env.OPENAI_API_URL || "https://api.openai.com/v1/chat/completions";
+  process.env.OPENAI_MODEL || process.env.OPENAI_FALLBACK_MODEL || "gpt-4o-mini";
 const OPENAI_RESPONSES_URL =
   process.env.OPENAI_RESPONSES_URL || "https://api.openai.com/v1/responses";
+const OPENAI_USAGE_DEBUG = process.env.OPENAI_USAGE_DEBUG === "1";
+const OPENAI_USAGE_LOG_FILE = process.env.OPENAI_USAGE_LOG_FILE?.trim() || "";
+
+type PromptUsageContext = {
+  promptName: string;
+  endpoint: string;
+  operation?: string;
+  inputChars?: number;
+};
+
+let usageFileLoggingErrorPrinted = false;
+
+const toPromptName = (prompt: ExecutablePrompt<any, any, any>): string => {
+  const promptAny = prompt as any;
+  return (
+    promptAny?.name ||
+    promptAny?.__action?.name ||
+    promptAny?.action?.name ||
+    "unknown_prompt"
+  );
+};
+
+const estimateRenderedChars = (rendered: unknown): number | undefined => {
+  try {
+    const serialized = JSON.stringify(rendered);
+    return typeof serialized === "string" ? serialized.length : undefined;
+  } catch {
+    return undefined;
+  }
+};
+
+const appendUsageLogLine = async (line: string) => {
+  if (!OPENAI_USAGE_LOG_FILE) return;
+  try {
+    await appendFile(OPENAI_USAGE_LOG_FILE, `${line}\n`, "utf8");
+  } catch (error) {
+    if (usageFileLoggingErrorPrinted) return;
+    usageFileLoggingErrorPrinted = true;
+    console.warn("Failed to append OPENAI usage log file:", error);
+  }
+};
+
+const logOpenAiUsage = (
+  api: "responses",
+  model: string,
+  usage: any,
+  context: PromptUsageContext
+) => {
+  if (!OPENAI_USAGE_DEBUG || !usage || typeof usage !== "object") return;
+  const promptTokens =
+    usage.prompt_tokens ??
+    usage.input_tokens ??
+    usage.promptTokens ??
+    usage.inputTokens ??
+    null;
+  const completionTokens =
+    usage.completion_tokens ??
+    usage.output_tokens ??
+    usage.completionTokens ??
+    usage.outputTokens ??
+    null;
+  const totalTokens =
+    usage.total_tokens ??
+    usage.totalTokens ??
+    (typeof promptTokens === "number" && typeof completionTokens === "number"
+      ? promptTokens + completionTokens
+      : null);
+  const payload = {
+    timestamp: new Date().toISOString(),
+    api,
+    model,
+    endpoint: context.endpoint,
+    promptName: context.promptName,
+    operation: context.operation,
+    inputChars: context.inputChars ?? null,
+    promptTokens,
+    completionTokens,
+    totalTokens,
+  };
+  const line = JSON.stringify(payload);
+  console.info("[openai-usage]", line);
+  void appendUsageLogLine(line);
+};
 
 const getOpenAiModel = (options?: PromptGenerateOptions<any, any>) => {
   const overrideModel = (options as { config?: { model?: string } })?.config?.model;
@@ -118,7 +201,8 @@ const runOpenAiResponses = async (
     messages?: Array<{ role?: string; content?: unknown }>;
     output?: { format?: string; schema?: unknown };
   },
-  options?: PromptGenerateOptions<any, any>
+  options: PromptGenerateOptions<any, any> | undefined,
+  usageContext: PromptUsageContext
 ) => {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) {
@@ -160,83 +244,44 @@ const runOpenAiResponses = async (
   }
 
   const payload = await response.json();
+  logOpenAiUsage("responses", model, payload?.usage, usageContext);
   const text = extractResponsesText(payload);
   const output = expectsJson ? extractJsonValue(undefined, text) : undefined;
   return { text, output, provider: "openai" as const };
 };
 
-const runOpenAiCompletion = async (
-  rendered: {
-    system?: unknown;
-    prompt?: unknown;
-    messages?: Array<{ role?: string; content?: unknown }>;
-    output?: { format?: string; schema?: unknown };
-  },
-  options?: PromptGenerateOptions<any, any>
-) => {
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) {
-    throw new Error(
-      "OPENAI_API_KEY is required to use the OpenAI fallback."
-    );
-  }
-
-  const expectsJson = Boolean(rendered.output?.schema || rendered.output?.format === "json");
-  const messages = toOpenAIMessages(rendered, expectsJson);
-  const model = getOpenAiModel(options);
-  const maxTokens =
-    typeof (options as { config?: { maxOutputTokens?: number } })?.config?.maxOutputTokens === "number"
-      ? (options as { config?: { maxOutputTokens?: number } }).config!.maxOutputTokens!
-      : 2048;
-
-  const response = await fetch(OPENAI_CHAT_URL, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({
-      model,
-      messages,
-      temperature: 0.2,
-      max_tokens: maxTokens,
-      response_format: expectsJson ? { type: "json_object" } : undefined,
-    }),
-  });
-
-  if (!response.ok) {
-    const payload = await response.text();
-    throw new Error(`OpenAI chat fallback failed: ${response.status} ${payload}`);
-  }
-
-  const payload = await response.json();
-  const text = String(payload?.choices?.[0]?.message?.content || "");
-  const output = expectsJson ? extractJsonValue(undefined, text) : undefined;
-  return { text, output, provider: "openai" as const };
-};
-
-export async function runPromptWithFallback<I, O, C>(
+export async function runPromptWithFallback<
+  I,
+  O extends ZodTypeAny,
+  C extends ZodTypeAny
+>(
   prompt: ExecutablePrompt<I, O, C>,
   input?: I,
-  options?: PromptGenerateOptions<O, C>
+  options?: PromptGenerateOptions<any, any>,
+  context?: {
+    endpoint?: string;
+    operation?: string;
+    promptName?: string;
+  }
 ): Promise<{ output?: unknown; text?: string; provider?: LlmProvider }> {
   const rendered = await prompt.render(input, options);
+  const promptName = context?.promptName || toPromptName(prompt as any);
+  const usageContext: PromptUsageContext = {
+    promptName,
+    endpoint: context?.endpoint || promptName,
+    operation: context?.operation,
+    inputChars: OPENAI_USAGE_DEBUG ? estimateRenderedChars(rendered) : undefined,
+  };
   let lastFallbackError = "";
   const toMessage = (err: unknown) =>
     String((err as { message?: string }).message || err || "Unknown error");
   try {
-    return await runOpenAiResponses(rendered, options);
+    return await runOpenAiResponses(rendered, options, usageContext);
   } catch (responsesError) {
     lastFallbackError = `OpenAI responses failed: ${toMessage(responsesError)}`;
     console.warn(lastFallbackError);
-    try {
-      return await runOpenAiCompletion(rendered, options);
-    } catch (completionError) {
-      lastFallbackError = `OpenAI chat fallback failed: ${toMessage(completionError)}`;
-      console.error(lastFallbackError);
-      throw new Error(
-        `OpenAI request failed. ${lastFallbackError || "Please try again."}`
-      );
-    }
+    throw new Error(
+      `OpenAI request failed. ${lastFallbackError || "Please try again."}`
+    );
   }
 }
