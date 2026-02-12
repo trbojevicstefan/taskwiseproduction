@@ -31,6 +31,7 @@ import {
 import { Logo } from "@/components/ui/logo";
 import AnimatedTaskHero from "@/components/landing/AnimatedTaskHero";
 import HeroParticles from "@/components/landing/HeroParticles";
+import TaskwiseGsapSection from "@/components/landing/TaskwiseGsapSection";
 
 const brandGradient =
   "bg-[radial-gradient(1200px_600px_at_10%_10%,rgba(255,86,48,0.25),transparent_60%),radial-gradient(1200px_600px_at_90%_20%,rgba(255,175,0,0.25),transparent_60%),radial-gradient(1200px_600px_at_50%_90%,rgba(255,0,128,0.25),transparent_60%)]";
@@ -152,6 +153,7 @@ export default function TaskwiseAIPage() {
           </div>
           <nav className="hidden items-center gap-6 text-sm text-white/70 md:flex">
             <a href="#features" className="hover:text-white">Features</a>
+            <a href="#workflow" className="hover:text-white">Workflow</a>
             <a href="#demo" className="hover:text-white">Live Demo</a>
             <a href="#integrations" className="hover:text-white">Integrations</a>
             <a href="#pricing" className="hover:text-white">Pricing</a>
@@ -245,6 +247,8 @@ export default function TaskwiseAIPage() {
           ))}
         </div>
       </Section>
+
+      <TaskwiseGsapSection />
 
       <Section id="demo" title={<><GradientText>Explore</GradientText> or just <GradientText>Chat</GradientText></>}>
         <ExploreTabs />
