@@ -18,6 +18,7 @@ interface MeetingHistoryContextType {
   isLoadingMeetingHistory: boolean;
   setActiveMeetingId: (sessionId: string | null) => void;
   refreshMeetings: () => Promise<void>;
+  loadMeetingById: (meetingId: string, options?: { silent?: boolean }) => Promise<Meeting | null>;
   createNewMeeting: (meetingData: Omit<Meeting, 'id' | 'userId' | 'createdAt' | 'lastActivityAt'>) => Promise<Meeting | undefined>;
   getActiveMeeting: () => Meeting | undefined;
   updateMeeting: (sessionId: string, updatedFields: Partial<Omit<Meeting, 'id' | 'userId' | 'createdAt' | 'lastActivityAt'>>) => Promise<Meeting | null>;
@@ -27,7 +28,42 @@ interface MeetingHistoryContextType {
 
 const MeetingHistoryContext = createContext<MeetingHistoryContextType | undefined>(undefined);
 
-export const MeetingHistoryProvider = ({ children }: { children: ReactNode }) => {
+const sanitizeLevels = (levels: any) =>
+  levels
+    ? {
+        light: (levels.light || []).map((task: any) =>
+          normalizeTask(task as ExtractedTaskSchema)
+        ),
+        medium: (levels.medium || []).map((task: any) =>
+          normalizeTask(task as ExtractedTaskSchema)
+        ),
+        detailed: (levels.detailed || []).map((task: any) =>
+          normalizeTask(task as ExtractedTaskSchema)
+        ),
+      }
+    : null;
+
+const sanitizeMeeting = (meeting: Meeting): Meeting => ({
+  ...meeting,
+  extractedTasks: (meeting.extractedTasks || []).map((task) =>
+    normalizeTask(task as ExtractedTaskSchema)
+  ),
+  originalAiTasks: (meeting.originalAiTasks || []).map((task) =>
+    normalizeTask(task as ExtractedTaskSchema)
+  ),
+  originalAllTaskLevels: sanitizeLevels(meeting.originalAllTaskLevels),
+  allTaskLevels: sanitizeLevels(meeting.allTaskLevels),
+  taskRevisions: meeting.taskRevisions || [],
+  attendees: meeting.attendees || [],
+});
+
+export const MeetingHistoryProvider = ({
+  children,
+  enabled = true,
+}: {
+  children: ReactNode;
+  enabled?: boolean;
+}) => {
   const { user } = useAuth();
   const { toast } = useToast();
   const [meetings, setMeetings] = useState<Meeting[]>([]);
@@ -207,6 +243,13 @@ export const MeetingHistoryProvider = ({ children }: { children: ReactNode }) =>
     }
 
     const run = (async () => {
+      if (!enabled) {
+        setMeetings([]);
+        setActiveMeetingIdState(null);
+        setIsLoadingMeetingHistory(false);
+        return;
+      }
+
       if (!user?.uid) {
         setMeetings([]);
         setActiveMeetingIdState(null);
@@ -219,29 +262,9 @@ export const MeetingHistoryProvider = ({ children }: { children: ReactNode }) =>
       }
       try {
         const loadedMeetings = await apiFetch<Meeting[]>("/api/meetings");
-        const sanitizeLevels = (levels: any) =>
-          levels
-            ? {
-                light: (levels.light || []).map((task: any) =>
-                  normalizeTask(task as ExtractedTaskSchema)
-                ),
-                medium: (levels.medium || []).map((task: any) =>
-                  normalizeTask(task as ExtractedTaskSchema)
-                ),
-                detailed: (levels.detailed || []).map((task: any) =>
-                  normalizeTask(task as ExtractedTaskSchema)
-                ),
-              }
-            : null;
-        const sanitizedMeetings = loadedMeetings.map(m => ({
-            ...m,
-            extractedTasks: (m.extractedTasks || []).map(task => normalizeTask(task as ExtractedTaskSchema)),
-            originalAiTasks: (m.originalAiTasks || []).map(task => normalizeTask(task as ExtractedTaskSchema)),
-            originalAllTaskLevels: sanitizeLevels(m.originalAllTaskLevels),
-            allTaskLevels: sanitizeLevels(m.allTaskLevels),
-            taskRevisions: m.taskRevisions || [],
-            attendees: m.attendees || [],
-        }));
+        const sanitizedMeetings = loadedMeetings.map((meeting) =>
+          sanitizeMeeting(meeting)
+        );
         maybeNotifyNewFathomMeetings(sanitizedMeetings);
         setMeetings(sanitizedMeetings);
 
@@ -269,14 +292,20 @@ export const MeetingHistoryProvider = ({ children }: { children: ReactNode }) =>
       loadMeetingsPromiseRef.current = null;
     });
     return loadMeetingsPromiseRef.current;
-  }, [maybeNotifyNewFathomMeetings, user]);
+  }, [enabled, maybeNotifyNewFathomMeetings, user]);
 
   useEffect(() => {
+    if (!enabled) {
+      setMeetings([]);
+      setActiveMeetingIdState(null);
+      setIsLoadingMeetingHistory(false);
+      return;
+    }
     loadMeetings();
-  }, [loadMeetings]);
+  }, [enabled, loadMeetings]);
 
   useEffect(() => {
-    if (!user?.uid || !user?.fathomConnected) return;
+    if (!enabled || !user?.uid || !user?.fathomConnected) return;
     let isActive = true;
     const interval = setInterval(() => {
       if (!isActive) return;
@@ -286,11 +315,42 @@ export const MeetingHistoryProvider = ({ children }: { children: ReactNode }) =>
       isActive = false;
       clearInterval(interval);
     };
-  }, [loadMeetings, user?.fathomConnected, user?.uid]);
+  }, [enabled, loadMeetings, user?.fathomConnected, user?.uid]);
 
   const refreshMeetings = useCallback(async () => {
     await loadMeetings();
   }, [loadMeetings]);
+
+  const loadMeetingById = useCallback(
+    async (meetingId: string, options?: { silent?: boolean }) => {
+      if (!enabled || !user?.uid || !meetingId) return null;
+      if (!options?.silent) {
+        setIsLoadingMeetingHistory(true);
+      }
+      try {
+        const loadedMeeting = await apiFetch<Meeting>(`/api/meetings/${meetingId}`);
+        const sanitized = sanitizeMeeting(loadedMeeting);
+        setMeetings((prev) => {
+          const next = [...prev];
+          const existingIndex = next.findIndex((meeting) => meeting.id === sanitized.id);
+          if (existingIndex === -1) {
+            return [sanitized, ...next];
+          }
+          next[existingIndex] = sanitized;
+          return next;
+        });
+        return sanitized;
+      } catch (error) {
+        console.error(`Failed to load meeting ${meetingId}`, error);
+        return null;
+      } finally {
+        if (!options?.silent) {
+          setIsLoadingMeetingHistory(false);
+        }
+      }
+    },
+    [enabled, user?.uid]
+  );
 
   const setActiveMeetingId = useCallback((sessionId: string | null) => {
     setActiveMeetingIdState(sessionId);
@@ -335,7 +395,7 @@ export const MeetingHistoryProvider = ({ children }: { children: ReactNode }) =>
             {
               id: uuidv4(),
               createdAt: Date.now(),
-              source: "ai",
+              source: "ai" as const,
               summary: "Initial AI extraction",
               tasksSnapshot: sanitizedData.extractedTasks,
             },
@@ -461,6 +521,7 @@ export const MeetingHistoryProvider = ({ children }: { children: ReactNode }) =>
       isLoadingMeetingHistory,
       setActiveMeetingId,
       refreshMeetings,
+      loadMeetingById,
       createNewMeeting,
       getActiveMeeting,
       updateMeeting,

@@ -24,7 +24,13 @@ interface TaskContextType {
 
 const TaskContext = createContext<TaskContextType | undefined>(undefined);
 
-export const TaskProvider = ({ children }: { children: ReactNode }) => {
+export const TaskProvider = ({
+  children,
+  enabled = true,
+}: {
+  children: ReactNode;
+  enabled?: boolean;
+}) => {
   const { user } = useAuth();
   const { toast } = useToast();
   const [tasks, setTasks] = useState<Task[]>([]);
@@ -33,18 +39,25 @@ export const TaskProvider = ({ children }: { children: ReactNode }) => {
   const [isLoadingProjects, setIsLoadingProjects] = useState(true);
 
   const loadTasks = useCallback(async () => {
-    if (!user) return;
+    if (!enabled || !user) return;
     const data = await apiFetch<Task[]>("/api/tasks");
     setTasks(data);
-  }, [user]);
+  }, [enabled, user]);
 
   const loadProjects = useCallback(async () => {
-    if (!user) return;
+    if (!enabled || !user) return;
     const data = await apiFetch<Project[]>("/api/projects");
     setProjects(data);
-  }, [user]);
+  }, [enabled, user]);
 
   useEffect(() => {
+    if (!enabled) {
+      setTasks([]);
+      setProjects([]);
+      setIsLoadingTasks(false);
+      setIsLoadingProjects(false);
+      return;
+    }
     if (user) {
       setIsLoadingTasks(true);
       setIsLoadingProjects(true);
@@ -59,7 +72,7 @@ export const TaskProvider = ({ children }: { children: ReactNode }) => {
       setIsLoadingTasks(false);
       setIsLoadingProjects(false);
     }
-  }, [user, loadTasks, loadProjects]);
+  }, [enabled, user, loadTasks, loadProjects]);
 
   const addTask = useCallback(async (
     taskData: Omit<Task, 'id' | 'userId' | 'createdAt' | 'order' | 'parentId'| 'subtaskCount'>

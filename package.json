@@ -11,6 +11,7 @@
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "test": "jest",
+    "db:indexes:perf": "node scripts/create-performance-indexes.js",
     "usage:openai": "node scripts/openai-usage-report.js",
     "bench:completion": "npx tsx scripts/benchmark-completion-detection.ts"
   },

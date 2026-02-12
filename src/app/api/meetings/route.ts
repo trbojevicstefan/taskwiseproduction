@@ -66,6 +66,37 @@ const serializeMeeting = (meeting: any) => {
   };
 };
 
+const MEETING_LIST_PROJECTION = {
+  _id: 1,
+  id: 1,
+  userId: 1,
+  workspaceId: 1,
+  title: 1,
+  summary: 1,
+  attendees: 1,
+  extractedTasks: 1,
+  chatSessionId: 1,
+  planningSessionId: 1,
+  createdAt: 1,
+  lastActivityAt: 1,
+  conferenceId: 1,
+  calendarEventId: 1,
+  recordingUrl: 1,
+  shareUrl: 1,
+  organizerEmail: 1,
+  startTime: 1,
+  endTime: 1,
+  state: 1,
+  ingestSource: 1,
+  fathomNotificationReadAt: 1,
+  artifacts: 1,
+  tags: 1,
+  duration: 1,
+  overallSentiment: 1,
+  speakerActivity: 1,
+  meetingMetadata: 1,
+} as const;
+
 export async function GET() {
   const userId = await getSessionUserId();
   if (!userId) {
@@ -76,28 +107,25 @@ export async function GET() {
   const db = await getDb();
   const meetings = await db
     .collection<any>("meetings")
-    .find({ userId: userIdQuery, isHidden: { $ne: true } })
+    .find(
+      { userId: userIdQuery, isHidden: { $ne: true } },
+      { projection: MEETING_LIST_PROJECTION }
+    )
     .sort({ lastActivityAt: -1 })
     .toArray();
 
-  // Batch hydrate for list might be expensive if many meetings. 
-  // But usually list view doesn't show all tasks?
-  // If list view shows task counts or summary, maybe we don't need full hydration?
-  // Let's assume we do for now to be safe, or just check if `extractedTasks` are used in list.
-  // Code shows `serializeMeeting` is mapped. `extractedTasks` is part of meeting object.
-  // If we return references, frontend might break if it expects full tasks.
-  // So we SHOULD hydrate. To avoid N+1, we can collect all tasks from all meetings.
-
-  // For the list, let's keep it simple and parallelize or just hydrate.
   if (meetings.length > 0) {
     try {
-      const { hydrateTaskReferences } = await import("@/lib/task-hydration");
-      await Promise.all(meetings.map(async (m) => {
-        if (m.extractedTasks && Array.isArray(m.extractedTasks)) {
-          m.extractedTasks = await hydrateTaskReferences(userId, m.extractedTasks);
-        }
-        // List usually doesn't need allTaskLevels deep data?
-      }));
+      const { hydrateTaskReferenceLists } = await import("@/lib/task-hydration");
+      const hydratedTaskLists = await hydrateTaskReferenceLists(
+        userId,
+        meetings.map((meeting: any) =>
+          Array.isArray(meeting.extractedTasks) ? meeting.extractedTasks : []
+        )
+      );
+      meetings.forEach((meeting: any, index: number) => {
+        meeting.extractedTasks = hydratedTaskLists[index] || [];
+      });
     } catch (e) {
       console.error("Failed to hydrate meetings list", e);
     }

@@ -5,6 +5,7 @@ import { getSessionUserId } from "@/lib/server-auth";
 import { buildIdQuery } from "@/lib/mongo-id";
 import { normalizePersonNameKey } from "@/lib/transcript-utils";
 import { getWorkspaceIdForUser } from "@/lib/workspace";
+import { TASK_LIST_PROJECTION } from "@/lib/task-projections";
 
 const serializeTask = (task: any) => ({
   ...task,
@@ -39,6 +40,7 @@ export async function GET(request: Request) {
   const tasks = await db
     .collection<any>("tasks")
     .find(filters)
+    .project(TASK_LIST_PROJECTION)
     .sort({ projectId: 1, parentId: 1, order: 1, createdAt: 1 })
     .toArray();
 

@@ -13,7 +13,7 @@ import { MeetingDetailSheet } from './MeetingsPageContent';
 
 export default function MeetingDetailPageContent({ meetingId }: { meetingId: string }) {
   const router = useRouter();
-  const { meetings, updateMeeting, refreshMeetings, isLoadingMeetingHistory } = useMeetingHistory();
+  const { meetings, updateMeeting, loadMeetingById, isLoadingMeetingHistory } = useMeetingHistory();
   const { sessions, createNewSession, setActiveSessionId } = useChatHistory();
   const { toast } = useToast();
   const [hasRefreshed, setHasRefreshed] = useState(false);
@@ -100,9 +100,9 @@ export default function MeetingDetailPageContent({ meetingId }: { meetingId: str
     const exists = meetings.some((meeting) => meeting.id === meetingId);
     if (!exists) {
       setHasRefreshed(true);
-      void refreshMeetings();
+      void loadMeetingById(meetingId);
     }
-  }, [hasRefreshed, isLoadingMeetingHistory, meetingId, meetings, refreshMeetings]);
+  }, [hasRefreshed, isLoadingMeetingHistory, loadMeetingById, meetingId, meetings]);
 
   const exists = meetings.some((meeting) => meeting.id === meetingId);
   if (!exists && (isLoadingMeetingHistory || !hasRefreshed)) {

@@ -3,6 +3,7 @@ import { randomUUID } from "crypto";
 import { getDb } from "@/lib/db";
 import { getSessionUserId } from "@/lib/server-auth";
 import { buildIdQuery } from "@/lib/mongo-id";
+import { TASK_LIST_PROJECTION } from "@/lib/task-projections";
 
 const serializeTask = (task: any) => ({
   ...task,
@@ -61,19 +62,27 @@ export async function GET(
     {
       $lookup: {
         from: "tasks",
-        localField: "taskId",
-        foreignField: "_id",
+        let: { lookupTaskId: "$taskId" },
+        pipeline: [
+          {
+            $match: {
+              $expr: { $eq: ["$_id", "$$lookupTaskId"] },
+              userId: userIdQuery,
+              taskState: { $ne: "archived" },
+            },
+          },
+          { $project: TASK_LIST_PROJECTION },
+        ],
         as: "task",
       },
     },
     { $unwind: "$task" },
-    { $match: { "task.taskState": { $ne: "archived" } } },
     { $sort: { statusId: 1, rank: 1, createdAt: 1 } },
   ];
 
   const items = await db.collection<any>("boardItems").aggregate(pipeline).toArray();
 
-  const response = items.map((item) => ({
+  const response = items.map((item: any) => ({
     ...serializeTask(item.task),
     boardItemId: item._id,
     boardStatusId: item.statusId,
@@ -89,7 +98,7 @@ export async function GET(
     return Number.isNaN(time) ? 0 : time;
   };
   const latestByTaskId = new Map<string, any>();
-  response.forEach((item) => {
+  response.forEach((item: any) => {
     const key = String(item.id);
     const existing = latestByTaskId.get(key);
     if (
@@ -101,7 +110,7 @@ export async function GET(
     }
   });
   const seen = new Set<string>();
-  const deduped = response.filter((item) => {
+  const deduped = response.filter((item: any) => {
     const key = String(item.id);
     if (seen.has(key)) return false;
     if (latestByTaskId.get(key) !== item) return false;

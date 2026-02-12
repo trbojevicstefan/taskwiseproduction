@@ -118,7 +118,7 @@ const collectDescendantTaskIds = async (
       .project({ _id: 1 })
       .toArray();
 
-    children.forEach((child) => {
+    children.forEach((child: any) => {
       const childId = String(child._id);
       if (!allIds.has(childId)) {
         allIds.add(childId);
@@ -263,15 +263,31 @@ export async function GET(
   // Hydrate tasks from canonical collection
   if (meeting.extractedTasks && Array.isArray(meeting.extractedTasks)) {
     try {
-      // Dynamic import to avoid circular dep issues if any, or just standard import
-      const { hydrateTaskReferences } = await import("@/lib/task-hydration");
-      meeting.extractedTasks = await hydrateTaskReferences(userId, meeting.extractedTasks);
+      const { hydrateTaskReferenceLists } = await import("@/lib/task-hydration");
+      const taskLists = [
+        Array.isArray(meeting.extractedTasks) ? meeting.extractedTasks : [],
+        Array.isArray(meeting.allTaskLevels?.light)
+          ? meeting.allTaskLevels.light
+          : [],
+        Array.isArray(meeting.allTaskLevels?.medium)
+          ? meeting.allTaskLevels.medium
+          : [],
+        Array.isArray(meeting.allTaskLevels?.detailed)
+          ? meeting.allTaskLevels.detailed
+          : [],
+      ];
+      const [
+        hydratedExtracted,
+        hydratedLight,
+        hydratedMedium,
+        hydratedDetailed,
+      ] = await hydrateTaskReferenceLists(userId, taskLists);
 
-      // Also hydrate hierarchy levels if they exist and contain tasks
+      meeting.extractedTasks = hydratedExtracted || [];
       if (meeting.allTaskLevels) {
-        if (meeting.allTaskLevels.light) meeting.allTaskLevels.light = await hydrateTaskReferences(userId, meeting.allTaskLevels.light);
-        if (meeting.allTaskLevels.medium) meeting.allTaskLevels.medium = await hydrateTaskReferences(userId, meeting.allTaskLevels.medium);
-        if (meeting.allTaskLevels.detailed) meeting.allTaskLevels.detailed = await hydrateTaskReferences(userId, meeting.allTaskLevels.detailed);
+        meeting.allTaskLevels.light = hydratedLight || [];
+        meeting.allTaskLevels.medium = hydratedMedium || [];
+        meeting.allTaskLevels.detailed = hydratedDetailed || [];
       }
     } catch (error) {
       console.error("Failed to hydrate meeting tasks:", error);
@@ -333,7 +349,7 @@ export async function DELETE(
       })
       .project({ _id: 1 })
       .toArray();
-    const rootTaskIds = tasksToRemove.map((task) => String(task._id));
+    const rootTaskIds = tasksToRemove.map((task: any) => String(task._id));
     const taskIds = await collectDescendantTaskIds(db, userIdQuery, rootTaskIds);
 
     await db.collection<any>("tasks").deleteMany({

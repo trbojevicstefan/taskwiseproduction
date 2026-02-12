@@ -969,7 +969,14 @@ export function MeetingDetailSheet({
   const { user } = useAuth();
   const workspaceId = user?.workspace?.id;
   const { boards } = useWorkspaceBoards(workspaceId);
-  const { meetings, isLoadingMeetingHistory, updateMeeting, deleteMeeting, refreshMeetings } = useMeetingHistory();
+  const {
+    meetings,
+    isLoadingMeetingHistory,
+    updateMeeting,
+    deleteMeeting,
+    refreshMeetings,
+    loadMeetingById,
+  } = useMeetingHistory();
   const { isSlackConnected, isGoogleTasksConnected, isTrelloConnected } = useIntegrations();
   const { updateSession } = useChatHistory();
   const [people, setPeople] = useState<Person[]>([]);
@@ -1002,6 +1009,11 @@ export function MeetingDetailSheet({
   const meeting = useMemo(() => meetings.find((m) => m.id === id) || null, [id, meetings]);
   const { toast } = useToast();
   const isPageVariant = variant === "page";
+
+  useEffect(() => {
+    if (!id) return;
+    void loadMeetingById(id, { silent: true });
+  }, [id, loadMeetingById]);
 
   const syncMeetingTasks = useCallback(
     async (tasks: ExtractedTaskSchema[]) => {
@@ -2653,8 +2665,6 @@ export default function MeetingsPageContent() {
   const [isSyncingFathom, setIsSyncingFathom] = useState(false);
   const [isRestoringFathom, setIsRestoringFathom] = useState(false);
   const [fathomSyncRange, setFathomSyncRange] = useState<FathomSyncRange>("this_week");
-  const lastMeetingIdsRef = useRef<Set<string>>(new Set());
-  const hasInitializedMeetingPoll = useRef(false);
   const [selectedMeetingIds, setSelectedMeetingIds] = useState<Set<string>>(new Set());
   const [isBulkDeleteMeetingsOpen, setIsBulkDeleteMeetingsOpen] = useState(false);
 
@@ -2683,10 +2693,6 @@ export default function MeetingsPageContent() {
   }, [searchParams, router]);
 
   useEffect(() => {
-    lastMeetingIdsRef.current = new Set(meetings.map((meeting) => meeting.id));
-  }, [meetings]);
-
-  useEffect(() => {
     setSelectedMeetingIds((prev) => {
       if (prev.size === 0) return prev;
       const next = new Set<string>();
@@ -2698,45 +2704,6 @@ export default function MeetingsPageContent() {
       return next;
     });
   }, [meetings]);
-
-  useEffect(() => {
-    if (!isFathomConnected) return;
-    let isActive = true;
-
-    const pollForNewMeetings = async () => {
-      try {
-        const latestMeetings = await apiFetch<Meeting[]>("/api/meetings");
-        if (!isActive) return;
-        const latestIds = new Set(latestMeetings.map((meeting) => meeting.id));
-
-        if (!hasInitializedMeetingPoll.current) {
-          lastMeetingIdsRef.current = latestIds;
-          hasInitializedMeetingPoll.current = true;
-          return;
-        }
-
-        const previousIds = lastMeetingIdsRef.current;
-        const newlyAdded = latestMeetings.filter((meeting) => !previousIds.has(meeting.id));
-        if (newlyAdded.length > 0) {
-          lastMeetingIdsRef.current = latestIds;
-          await refreshMeetings();
-          toast({
-            title: "New meeting imported",
-            description: `${newlyAdded.length} new meeting${newlyAdded.length === 1 ? "" : "s"} added from Fathom.`,
-          });
-        }
-      } catch (error) {
-        console.error("Failed to check for new meetings:", error);
-      }
-    };
-
-    pollForNewMeetings();
-    const interval = setInterval(pollForNewMeetings, 20000);
-    return () => {
-      isActive = false;
-      clearInterval(interval);
-    };
-  }, [isFathomConnected, refreshMeetings, toast]);
 
   const [isNavigatingToChat, setIsNavigatingToChat] = useState(false);
 

@@ -29,12 +29,16 @@ export async function GET() {
 
   if (sessions.length > 0) {
     try {
-      const { hydrateTaskReferences } = await import("@/lib/task-hydration");
-      await Promise.all(sessions.map(async (s) => {
-        if (s.suggestedTasks && Array.isArray(s.suggestedTasks)) {
-          s.suggestedTasks = await hydrateTaskReferences(userId, s.suggestedTasks);
-        }
-      }));
+      const { hydrateTaskReferenceLists } = await import("@/lib/task-hydration");
+      const hydratedTaskLists = await hydrateTaskReferenceLists(
+        userId,
+        sessions.map((session: any) =>
+          Array.isArray(session.suggestedTasks) ? session.suggestedTasks : []
+        )
+      );
+      sessions.forEach((session: any, index: number) => {
+        session.suggestedTasks = hydratedTaskLists[index] || [];
+      });
     } catch (e) {
       console.error("Failed to hydrate chat sessions list", e);
     }

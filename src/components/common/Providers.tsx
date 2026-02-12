@@ -2,6 +2,7 @@
 "use client";
 
 import { SessionProvider } from "next-auth/react";
+import { usePathname } from "next/navigation";
 import { AuthProvider } from '@/contexts/AuthContext';
 import { ChatHistoryProvider } from '@/contexts/ChatHistoryContext';
 import { PlanningHistoryProvider } from '@/contexts/PlanningHistoryContext';
@@ -15,38 +16,55 @@ import { UIStateProvider } from '@/contexts/UIStateContext';
 import { MeetingHistoryProvider } from '@/contexts/MeetingHistoryContext';
 
 export function Providers({ children }: { children: React.ReactNode }) {
-    // This provides a clear, hierarchical structure.
-    // AuthProvider is at the top, as other providers may depend on the user's auth state.
-    return (
-      <ThemeProvider
-        attribute="class"
-        defaultTheme="system"
-        enableSystem
-        disableTransitionOnChange
-      >
-        <SessionProvider>
-          <UIStateProvider>
-            <AuthProvider>
+  const pathname = usePathname();
+  const dashboardPrefixes = [
+    "/meetings",
+    "/chat",
+    "/planning",
+    "/explore",
+    "/reports",
+    "/people",
+    "/settings",
+    "/workspaces",
+  ];
+  const isDashboardRoute = dashboardPrefixes.some(
+    (prefix) => pathname === prefix || pathname?.startsWith(`${prefix}/`)
+  );
+  const needsTaskContext = pathname === "/reports" || pathname?.startsWith("/reports/");
+
+  return (
+    <ThemeProvider
+      attribute="class"
+      defaultTheme="system"
+      enableSystem
+      disableTransitionOnChange
+    >
+      <SessionProvider>
+        <UIStateProvider>
+          <AuthProvider>
+            {isDashboardRoute ? (
               <FolderProvider>
-                  <MeetingHistoryProvider>
-                    <ChatHistoryProvider>
-                      <PlanningHistoryProvider>
-                            <IntegrationsProvider>
-                               <PasteActionProvider>
-                                  <TaskProvider>
-                                    {/* GlobalPasteHandler must be INSIDE all the providers it might need to use */}
-                                    <GlobalPasteHandler />
-                                    {children}
-                                  </TaskProvider>
-                                </PasteActionProvider>
-                            </IntegrationsProvider>
-                      </PlanningHistoryProvider>
-                    </ChatHistoryProvider>
-                  </MeetingHistoryProvider>
+                <MeetingHistoryProvider>
+                  <ChatHistoryProvider>
+                    <PlanningHistoryProvider>
+                      <IntegrationsProvider>
+                        <PasteActionProvider>
+                          <TaskProvider enabled={Boolean(needsTaskContext)}>
+                            <GlobalPasteHandler />
+                            {children}
+                          </TaskProvider>
+                        </PasteActionProvider>
+                      </IntegrationsProvider>
+                    </PlanningHistoryProvider>
+                  </ChatHistoryProvider>
+                </MeetingHistoryProvider>
               </FolderProvider>
-            </AuthProvider>
-          </UIStateProvider>
-        </SessionProvider>
-      </ThemeProvider>
-    );
+            ) : (
+              children
+            )}
+          </AuthProvider>
+        </UIStateProvider>
+      </SessionProvider>
+    </ThemeProvider>
+  );
 }

@@ -31,6 +31,17 @@ export async function GET() {
   const tasks = await db
     .collection<any>("tasks")
     .find({ userId: userIdQuery })
+    .project({
+      _id: 1,
+      status: 1,
+      sourceSessionType: 1,
+      sourceSessionId: 1,
+      assignee: 1,
+      assigneeId: 1,
+      assigneeEmail: 1,
+      assigneeName: 1,
+      assigneeNameKey: 1,
+    })
     .toArray();
   const meetings = await db
     .collection<any>("meetings")
@@ -57,7 +68,7 @@ export async function GET() {
   const emailToId = new Map<string, string>();
   const nameToId = new Map<string, string>();
 
-  people.forEach((person) => {
+  people.forEach((person: any) => {
     const personId = String(person._id);
     statusCounts.set(personId, emptyCounts());
     if (person.email) {
@@ -152,7 +163,7 @@ export async function GET() {
   const meetingSessionsWithTasks = new Set<string>();
   const chatSessionsWithTasks = new Set<string>();
 
-  tasks.forEach((task) => {
+  tasks.forEach((task: any) => {
     if (task?.sourceSessionType === "meeting" && task.sourceSessionId) {
       meetingSessionsWithTasks.add(String(task.sourceSessionId));
     }
@@ -162,21 +173,21 @@ export async function GET() {
     matchTaskToPerson(task);
   });
 
-  meetings.forEach((meeting) => {
+  meetings.forEach((meeting: any) => {
     const meetingId = String(meeting._id ?? meeting.id);
     if (meetingSessionsWithTasks.has(meetingId)) return;
     const flattened = flattenExtractedTasks(meeting.extractedTasks || []);
     flattened.forEach(matchTaskToPerson);
   });
 
-  chatSessions.forEach((session) => {
+  chatSessions.forEach((session: any) => {
     const sessionId = String(session._id ?? session.id);
     if (chatSessionsWithTasks.has(sessionId)) return;
     const flattened = flattenExtractedTasks(session.suggestedTasks || []);
     flattened.forEach(matchTaskToPerson);
   });
 
-  const peopleWithCounts = people.map((person) => {
+  const peopleWithCounts = people.map((person: any) => {
     const counts = statusCounts.get(String(person._id)) || emptyCounts();
     return {
       ...serializePerson(person),
