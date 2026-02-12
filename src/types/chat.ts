@@ -12,6 +12,13 @@ export interface TaskEvidence {
   timestamp?: string | null;
 }
 
+export interface TaskReferenceSchema {
+  taskId: string;
+  sourceTaskId: string;
+  title: string;
+  // Dynamic status/properties fetched from canonical task
+}
+
 export interface TaskComment {
   id: string;
   text: string;
@@ -50,17 +57,17 @@ export interface ExtractedTaskSchema {
   sourceEvidence?: TaskEvidence[] | null;
   aiProvider?: "openai" | null;
   comments?: TaskComment[] | null;
-  
+
   // UI/Client-side state fields
   addedToProjectId?: string | null;
   addedToProjectName?: string | null;
   addedToBoardId?: string | null;
   addedToBoardName?: string | null;
-  
+
   // AI-generated content
   researchBrief?: string | null;
   aiAssistanceText?: string | null;
-  
+
   // Provenance
   sourceSessionId?: string; // Links back to the session it originated from
   sourceSessionName?: string | null;
@@ -86,16 +93,18 @@ export interface Message {
 }
 
 export interface BaseSession {
-    id: string;
-    userId?: string;
-    title: string;
-    createdAt: any;
-    lastActivityAt: any;
-    folderId?: string | null;
+  _id?: unknown; // MongoDB ObjectId, kept as unknown for flexibility
+  id: string;
+  userId?: string;
+  workspaceId?: string | null;
+  title: string;
+  createdAt: any;
+  lastActivityAt: any;
+  folderId?: string | null;
 }
 
 export interface ChatSession extends BaseSession {
-  messages: Message[]; 
+  messages: Message[];
   suggestedTasks: ExtractedTaskSchema[];
   people?: AIPersonSchema[];
   sourceMeetingId?: string | null;
@@ -115,7 +124,7 @@ export interface ChatSession extends BaseSession {
 
 export interface PlanningSession extends BaseSession {
   inputText: string;
-  extractedTasks: ExtractedTaskSchema[]; 
+  extractedTasks: ExtractedTaskSchema[];
   projectId?: string;
   sourceMeetingId?: string | null;
   originalAiTasks?: ExtractedTaskSchema[] | null;
@@ -134,7 +143,7 @@ export interface PlanningSession extends BaseSession {
 
 export interface ExploreSession extends BaseSession {
   inputText: string;
-  exploredTasks: ExtractedTaskSchema[]; 
+  exploredTasks: ExtractedTaskSchema[];
 }
 
 export interface Meeting extends BaseSession {

@@ -10,7 +10,9 @@
     "start": "next start",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
-    "test": "jest"
+    "test": "jest",
+    "usage:openai": "node scripts/openai-usage-report.js",
+    "bench:completion": "npx tsx scripts/benchmark-completion-detection.ts"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",

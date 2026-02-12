@@ -7,10 +7,8 @@ import { normalizeTask } from "@/lib/data";
 import { normalizeTitleKey } from "@/lib/ai-utils";
 import { normalizePersonNameKey } from "@/lib/transcript-utils";
 import {
-  buildCompletionSuggestions,
   filterTasksForSessionSync,
   mergeCompletionSuggestions,
-  type CompletionDebugInfo,
 } from "@/lib/task-completion";
 import { syncTasksForSource } from "@/lib/task-sync";
 import { ensureDefaultBoard } from "@/lib/boards";
@@ -432,7 +430,9 @@ export async function POST(
   const mode: RescanMode =
     body?.mode === "completed" || body?.mode === "new" || body?.mode === "both"
       ? body.mode
-      : "both";
+      : body?.fullReanalysis
+        ? "both"
+        : "completed";
   const shouldScanNew = mode === "new" || mode === "both";
   const shouldScanCompleted = mode === "completed" || mode === "both";
 
@@ -471,28 +471,12 @@ export async function POST(
     Number.isFinite(user.completionMatchThreshold)
       ? Math.min(0.95, Math.max(0.4, user.completionMatchThreshold))
       : 0.6;
-  const completionDebugEnabled = process.env.TASK_COMPLETION_DEBUG === "1";
-  let completionDebug: CompletionDebugInfo | null = null;
-  const [analysisResult, completionSuggestions] = await Promise.all([
-    shouldScanNew
-      ? analyzeMeeting({ transcript, requestedDetailLevel: detailLevel })
-      : Promise.resolve(null),
-    shouldScanCompleted
-      ? buildCompletionSuggestions({
-          userId,
-          transcript,
-          summary: meeting.summary,
-          attendees: [],
-          requireAttendeeMatch: false,
-          minMatchRatio: completionMatchThreshold,
-          debug: completionDebugEnabled
-            ? (info) => {
-                completionDebug = info;
-              }
-            : undefined,
-        })
-      : Promise.resolve([] as ExtractedTaskSchema[]),
-  ]);
+  const analysisResult = shouldScanNew
+    ? await analyzeMeeting({ transcript, requestedDetailLevel: detailLevel })
+    : null;
+  // Completion detection is intentionally creation-only.
+  // Meeting rescans should not re-run completion detection.
+  const completionSuggestions: ExtractedTaskSchema[] = [];
 
   let updatedTasks: ExtractedTaskSchema[] = Array.isArray(meeting.extractedTasks)
     ? meeting.extractedTasks.map((task: any) => normalizeTask(task))
@@ -886,6 +870,6 @@ export async function POST(
       completionUpdates: appliedCompletionIds.size || completionUpdates.size,
       autoApproved: shouldAutoApprove,
     },
-    debug: completionDebugEnabled ? completionDebug : null,
+    debug: null,
   });
 }

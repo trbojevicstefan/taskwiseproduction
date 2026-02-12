@@ -67,6 +67,17 @@ const resolveCompletionMatchThreshold = (user: DbUser): number => {
   return 0.6;
 };
 
+const resolveCompletionAuditModel = () =>
+  process.env.COMPLETION_AUDIT_MODEL ||
+  process.env.OPENAI_COMPLETION_AUDIT_MODEL ||
+  process.env.OPENAI_MODEL ||
+  "gpt-4o-mini";
+
+const DUPLICATE_REANALYZE_MAX_AGE_MS = Math.max(
+  0,
+  Number(process.env.FATHOM_DUPLICATE_REANALYZE_MAX_AGE_MS || 1000 * 60 * 60 * 24)
+);
+
 const resolveSummaryText = (payload: any, summaryPayload: any) => {
   const payloadSummary =
     payload?.default_summary?.markdown_formatted ||
@@ -258,11 +269,20 @@ export const ingestFathomMeeting = async ({
     );
 
     const workspaceId = existing.workspaceId || user.workspace?.id || null;
+    const hasExistingExtractedTasks =
+      Array.isArray(existing.extractedTasks) && existing.extractedTasks.length > 0;
+    const hasAlreadyBeenAnalyzed =
+      Boolean(existing.analysisAttemptedAt) || existing.state === "tasks_ready";
+    const createdAtMs = new Date(existing.createdAt || 0).getTime();
+    const isStaleDuplicateMeeting =
+      Number.isFinite(createdAtMs) &&
+      createdAtMs > 0 &&
+      Date.now() - createdAtMs > DUPLICATE_REANALYZE_MAX_AGE_MS;
     const shouldReanalyze =
-      !existing.extractedTasks?.length ||
       !existingTranscript ||
-      !existing.allTaskLevels ||
-      !existing.planningSessionId;
+      (!isStaleDuplicateMeeting &&
+        !hasAlreadyBeenAnalyzed &&
+        (!hasExistingExtractedTasks || !existing.allTaskLevels || !existing.planningSessionId));
 
     if (shouldReanalyze) {
       if (!transcriptText) {
@@ -305,19 +325,9 @@ export const ingestFathomMeeting = async ({
       );
 
       const completionMatchThreshold = resolveCompletionMatchThreshold(user);
-      const completionSummary =
-        typeof update.summary === "string" && update.summary.trim()
-          ? update.summary.trim()
-          : existingSummary;
-      const completionSuggestions = await buildCompletionSuggestions({
-        userId,
-        transcript: transcriptText,
-        summary: completionSummary,
-        attendees: uniquePeople,
-        workspaceId,
-        requireAttendeeMatch: false,
-        minMatchRatio: completionMatchThreshold,
-      });
+      // Completion detection is intentionally creation-only.
+      // Reanalysis of an existing (duplicate) meeting should not trigger it.
+      const completionSuggestions: ExtractedTaskSchema[] = [];
 
       const shouldAutoApprove = Boolean(user.autoApproveCompletedTasks);
       if (shouldAutoApprove && completionSuggestions.length) {
@@ -393,6 +403,7 @@ export const ingestFathomMeeting = async ({
         lastActivityAt: now,
         title: meetingTitle,
         summary: meetingSummary,
+        analysisAttemptedAt: now,
         attendees: uniquePeople,
         extractedTasks: finalizedTasks,
         allTaskLevels: sanitizedTaskLevels,
@@ -767,6 +778,10 @@ export const ingestFathomMeeting = async ({
     ),
     duration: payload.duration || payload.duration_seconds || payload?.recording?.duration,
     state: "tasks_ready",
+    analysisAttemptedAt: now,
+    completionAuditAttemptedAt: now,
+    completionAuditModel: resolveCompletionAuditModel(),
+    completionAuditSuggestionCount: completionSuggestions.length,
     createdAt: now,
     lastActivityAt: now,
   };

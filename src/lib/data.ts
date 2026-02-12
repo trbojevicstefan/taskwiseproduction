@@ -9,18 +9,23 @@ export const onPeopleSnapshot = (
   callback: (people: PersonWithTaskCount[]) => void
 ): (() => void) => {
   let active = true;
+  let inFlight = false;
 
   const fetchPeople = async () => {
+    if (inFlight) return;
+    inFlight = true;
     try {
       const people = await apiFetch<PersonWithTaskCount[]>("/api/people");
       if (active) callback(people);
     } catch (error) {
       console.error("Error fetching people:", error);
+    } finally {
+      inFlight = false;
     }
   };
 
   fetchPeople();
-  const interval = setInterval(fetchPeople, 30000);
+  const interval = setInterval(fetchPeople, 60000);
 
   return () => {
     active = false;
@@ -95,19 +100,24 @@ export const onTasksForPersonSnapshot = (
   callback: (tasks: Task[]) => void
 ): (() => void) => {
   let active = true;
+  let inFlight = false;
 
   const fetchTasks = async () => {
+    if (inFlight) return;
+    inFlight = true;
     try {
       const tasks = await apiFetch<Task[]>(`/api/people/${personId}/tasks`);
       if (active) callback(tasks);
     } catch (error) {
       console.error("Error fetching tasks for person:", error);
       if (active) callback([]);
+    } finally {
+      inFlight = false;
     }
   };
 
   fetchTasks();
-  const interval = setInterval(fetchTasks, 30000);
+  const interval = setInterval(fetchTasks, 60000);
 
   return () => {
     active = false;

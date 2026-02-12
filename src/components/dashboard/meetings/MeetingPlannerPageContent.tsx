@@ -173,11 +173,11 @@ export default function MeetingPlannerPageContent() {
         if (events.length > 0 && !selectedEventId) {
           setSelectedEventId(events[0].id);
         }
-      } catch (error: any) {
+      } catch (error) {
         console.error("Calendar fetch failed:", error);
         toast({
           title: "Google Calendar Sync Failed",
-          description: error.message || "Could not load upcoming meetings.",
+          description: error instanceof Error ? error.message : "Could not load upcoming meetings.",
           variant: "destructive",
         });
       } finally {
@@ -231,13 +231,13 @@ export default function MeetingPlannerPageContent() {
       const selected = isSchedulingNew
         ? people.filter((person) => scheduleSelectedPeople.has(person.id))
         : dedupePeopleById(
-            attendeeMatches
-              .filter(({ attendee, match }) => {
-                const key = getAttendeeKey(attendee);
-                return key && selectedAttendees.has(key) && match?.person?.id;
-              })
-              .map(({ match }) => match!.person)
-          );
+          attendeeMatches
+            .filter(({ attendee, match }) => {
+              const key = getAttendeeKey(attendee);
+              return key && selectedAttendees.has(key) && match?.person?.id;
+            })
+            .map(({ match }) => match!.person)
+        );
 
       if (selected.length === 0) {
         setPersonTasks({});
@@ -428,7 +428,7 @@ export default function MeetingPlannerPageContent() {
     dueAt: task.dueAt ?? null,
     assignee: task.assignee ?? null,
     assigneeName: task.assigneeName ?? null,
-    subtasks: (task as any).subtasks ?? undefined,
+    subtasks: (task as Task & { subtasks?: Task[] }).subtasks?.map(mapTaskToExtracted) ?? undefined,
     comments: task.comments ?? null,
     researchBrief: task.researchBrief ?? null,
     aiAssistanceText: task.aiAssistanceText ?? null,
@@ -472,16 +472,16 @@ export default function MeetingPlannerPageContent() {
         next[taskDetailContext.personId] = tasksForPerson.map((task) =>
           task.id === taskDetailContext.taskId
             ? {
-                ...task,
-                title: updatedTask.title,
-                description: updatedTask.description ?? "",
-                priority: updatedTask.priority,
-                dueAt: updatedTask.dueAt ?? null,
-                status: updatedTask.status || "todo",
-                comments: updatedTask.comments ?? null,
-                researchBrief: updatedTask.researchBrief ?? null,
-                aiAssistanceText: updatedTask.aiAssistanceText ?? null,
-              }
+              ...task,
+              title: updatedTask.title,
+              description: updatedTask.description ?? "",
+              priority: updatedTask.priority,
+              dueAt: updatedTask.dueAt ?? null,
+              status: updatedTask.status || "todo",
+              comments: updatedTask.comments ?? null,
+              researchBrief: updatedTask.researchBrief ?? null,
+              aiAssistanceText: updatedTask.aiAssistanceText ?? null,
+            }
             : task
         );
         return next;
@@ -637,11 +637,11 @@ export default function MeetingPlannerPageContent() {
           organizer: event.organizer?.email || null,
           description: event.description || null,
           attendees: Array.isArray(event.attendees)
-            ? event.attendees.map((attendee: any) => ({
-                email: attendee.email,
-                name: attendee.displayName || null,
-                responseStatus: attendee.responseStatus || null,
-              }))
+            ? event.attendees.map((attendee: { email: string; displayName?: string; responseStatus?: string }) => ({
+              email: attendee.email,
+              name: attendee.displayName || null,
+              responseStatus: attendee.responseStatus || null,
+            }))
             : [],
         };
 
@@ -660,11 +660,11 @@ export default function MeetingPlannerPageContent() {
       if (payload.event?.id) {
         setSelectedEventId(payload.event.id);
       }
-    } catch (error: any) {
+    } catch (error) {
       console.error("Failed to schedule meeting:", error);
       toast({
         title: "Scheduling failed",
-        description: error.message || "Could not create meeting.",
+        description: error instanceof Error ? error.message : "Could not create meeting.",
         variant: "destructive",
       });
     } finally {
@@ -696,11 +696,11 @@ export default function MeetingPlannerPageContent() {
         throw new Error(payload.error || "Failed to update meeting description.");
       }
       toast({ title: "Meeting description updated." });
-    } catch (error: any) {
+    } catch (error) {
       console.error("Update description failed:", error);
       toast({
-        title: "Update Failed",
-        description: error.message || "Could not update meeting description.",
+        title: "Update failed",
+        description: error instanceof Error ? error.message : "Could not update description.",
         variant: "destructive",
       });
     } finally {
@@ -752,9 +752,8 @@ export default function MeetingPlannerPageContent() {
                     return (
                       <button
                         key={event.id}
-                        className={`w-full rounded-lg border p-3 text-left transition overflow-hidden ${
-                          isSelected ? "border-primary bg-primary/10" : "border-border"
-                        }`}
+                        className={`w-full rounded-lg border p-3 text-left transition overflow-hidden ${isSelected ? "border-primary bg-primary/10" : "border-border"
+                          }`}
                         onClick={() => {
                           setSelectedEventId(event.id);
                           setIsSchedulingNew(false);
@@ -777,7 +776,12 @@ export default function MeetingPlannerPageContent() {
                     );
                   })}
                   {calendarEvents.length === 0 && (
-                    <p className="text-sm text-muted-foreground">No upcoming meetings with video links.</p>
+                    <div className="flex flex-col items-center justify-center py-8 text-center px-4">
+                      <p className="text-sm text-muted-foreground mb-2">No upcoming meetings found.</p>
+                      <Button variant="link" size="sm" onClick={() => setIsSchedulingNew(true)} className="h-auto p-0">
+                        Schedule one now
+                      </Button>
+                    </div>
                   )}
                 </div>
               </ScrollArea>
@@ -1148,10 +1152,10 @@ export default function MeetingPlannerPageContent() {
                       <p className="text-xs text-muted-foreground line-clamp-2">{meeting.summary}</p>
                     </div>
                   ))}
-              </div>
-            )}
-          </CardContent>
-        </Card>
+                </div>
+              )}
+            </CardContent>
+          </Card>
         </div>
       </div>
       <TaskDetailDialog

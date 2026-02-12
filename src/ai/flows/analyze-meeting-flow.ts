@@ -347,6 +347,84 @@ const toTranscriptPreview = (transcript: string, wordLimit = 2000) => {
   return words.slice(0, wordLimit).join(" ");
 };
 
+const ROUTER_KEYWORDS: Record<MeetingType, string[]> = {
+  SALES_DISCOVERY: [
+    "budget",
+    "pricing",
+    "contract",
+    "demo",
+    "pain point",
+    "competitor",
+    "procurement",
+    "security review",
+    "renewal",
+  ],
+  ENGINEERING_SCRUM: [
+    "pr",
+    "pull request",
+    "ticket",
+    "blocker",
+    "deploy",
+    "branch",
+    "bug",
+    "sprint",
+    "standup",
+    "retro",
+  ],
+  GENERAL_INTERNAL: [
+    "hiring",
+    "operations",
+    "roadmap",
+    "planning",
+    "campaign",
+    "q1",
+    "q2",
+    "q3",
+    "q4",
+    "okrs",
+  ],
+};
+
+const inferMeetingType = (
+  transcript: string
+): { type: MeetingType; confidence: number; reasoning: string; usedHeuristic: boolean } => {
+  const normalized = transcript.toLowerCase();
+  const scoreType = (type: MeetingType) =>
+    ROUTER_KEYWORDS[type].reduce((score, keyword) => {
+      const pattern = new RegExp(`\\b${keyword.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "g");
+      const matches = normalized.match(pattern);
+      return score + (matches?.length || 0);
+    }, 0);
+
+  const meetingTypes: MeetingType[] = [
+    "SALES_DISCOVERY",
+    "ENGINEERING_SCRUM",
+    "GENERAL_INTERNAL",
+  ];
+  const scores = meetingTypes
+    .map((type) => ({ type, score: scoreType(type) }))
+    .sort((a, b) => b.score - a.score);
+
+  const top = scores[0];
+  const second = scores[1];
+  if (!top || top.score <= 0) {
+    return {
+      type: "GENERAL_INTERNAL",
+      confidence: 0,
+      reasoning: "Heuristic router found no strong keyword signals.",
+      usedHeuristic: false,
+    };
+  }
+  const margin = Math.max(0, top.score - (second?.score || 0));
+  const confidence = Math.min(0.95, 0.58 + margin * 0.08 + Math.min(0.18, top.score * 0.03));
+  return {
+    type: top.type,
+    confidence,
+    reasoning: `Heuristic router matched ${top.score} ${top.type} keyword signals.`,
+    usedHeuristic: confidence >= 0.78,
+  };
+};
+
 const buildActionItems = (items: unknown[]): TaskType[] => {
   const normalizeStatus = (value: string | undefined): TaskType["status"] | undefined => {
     if (!value) return undefined;
@@ -516,24 +594,44 @@ const analyzeMeetingFlow = ai.defineFlow(
     const requestedDetailLevel = input.requestedDetailLevel || "medium";
     const currentDate = new Date().toISOString().slice(0, 10);
     const openItemsTrigger = OPEN_ITEMS_TRIGGER_REGEX.test(transcriptText);
+    let routerProvider: string | undefined;
+    let confidence: number | undefined;
+    let reasoning: string | undefined;
+    let meetingType: MeetingType = "GENERAL_INTERNAL";
 
-    const routerInput = {
-      transcript: toTranscriptPreview(transcriptText, 2000),
-      currentDate,
-    };
+    if (openItemsTrigger) {
+      meetingType = "GENERAL_INTERNAL";
+      confidence = 0.95;
+      reasoning = "Detected open-items review pattern; bypassed router.";
+    } else {
+      const routerPreview = toTranscriptPreview(transcriptText, 2000);
+      const heuristicRoute = inferMeetingType(routerPreview);
+      meetingType = heuristicRoute.type;
+      confidence = heuristicRoute.confidence;
+      reasoning = heuristicRoute.reasoning;
 
-    const { output: routerOutput, text: routerText, provider: routerProvider } =
-      await runPromptWithFallback(routerPrompt, routerInput);
-    const routerRaw = extractJsonValue(routerOutput, routerText);
-    const routerObj = getObject(routerRaw) || {};
-
-    const rawType = getString(routerObj.meeting_type) as MeetingType | undefined;
-    const confidence = getNumber(routerObj.confidence);
-    const reasoning = getString(routerObj.reasoning);
-    let meetingType: MeetingType =
-      rawType && MeetingTypeSchema.safeParse(rawType).success
-        ? rawType
-        : "GENERAL_INTERNAL";
+      if (!heuristicRoute.usedHeuristic) {
+        const routerInput = {
+          transcript: routerPreview,
+          currentDate,
+        };
+        const { output: routerOutput, text: routerText, provider } =
+          await runPromptWithFallback(routerPrompt, routerInput, undefined, {
+            endpoint: "analyzeMeeting.router",
+          });
+        routerProvider = provider;
+        const routerRaw = extractJsonValue(routerOutput, routerText);
+        const routerObj = getObject(routerRaw) || {};
+        const rawType = getString(routerObj.meeting_type) as MeetingType | undefined;
+        const routerConfidence = getNumber(routerObj.confidence);
+        const routerReasoning = getString(routerObj.reasoning);
+        if (rawType && MeetingTypeSchema.safeParse(rawType).success) {
+          meetingType = rawType;
+        }
+        confidence = routerConfidence ?? confidence;
+        reasoning = routerReasoning || reasoning;
+      }
+    }
 
     if (confidence !== undefined && confidence < 0.7) {
       meetingType = "GENERAL_INTERNAL";
@@ -555,7 +653,14 @@ const analyzeMeetingFlow = ai.defineFlow(
     };
 
     const runSpecialist = async (prompt: typeof salesPrompt) => {
-      const { output, text, provider } = await runPromptWithFallback(prompt, specialistInput);
+      const { output, text, provider } = await runPromptWithFallback(
+        prompt,
+        specialistInput,
+        undefined,
+        {
+          endpoint: "analyzeMeeting.specialist",
+        }
+      );
       specialistProvider = provider;
       const raw = extractJsonValue(output, text);
       return (getObject(raw) || {}) as Record<string, unknown>;
@@ -608,16 +713,22 @@ const analyzeMeetingFlow = ai.defineFlow(
 
     let auditorProvider: string | undefined;
     let auditedTasks = actionItems;
-    if (!openItemsTrigger) {
+    const shouldRunAuditor =
+      !openItemsTrigger && (confidence === undefined || confidence < 0.78);
+    if (shouldRunAuditor) {
       const actionItemsJson = JSON.stringify(actionItems);
       const { output: auditOutput, text: auditText, provider } =
         await runPromptWithFallback(
-        auditorPrompt,
-        {
-          transcript: transcriptText,
-          currentDate,
-          actionItemsJson,
-        }
+          auditorPrompt,
+          {
+            transcript: transcriptText,
+            currentDate,
+            actionItemsJson,
+          },
+          undefined,
+          {
+            endpoint: "analyzeMeeting.auditor",
+          }
         );
       auditorProvider = provider;
       const auditRaw = extractJsonValue(auditOutput, auditText);

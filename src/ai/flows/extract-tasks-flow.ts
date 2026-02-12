@@ -16,7 +16,7 @@ import {
   type ExtractTasksFromMessageOutput,
   type TaskType,
 } from './schemas';
-import { alignTasksToLight, annotateTasksWithProvider, applyTaskMetadata, normalizeAiTasks } from '@/lib/ai-utils';
+import { alignTasksToLight, annotateTasksWithProvider, applyTaskMetadata, normalizeAiTasks, normalizeTitleKey } from '@/lib/ai-utils';
 import { extractJsonValue } from './parse-json-output';
 import { rewriteTaskTitles } from './rewrite-task-titles';
 import { runPromptWithFallback } from '@/ai/prompt-fallback';
@@ -26,6 +26,8 @@ import { runPromptWithFallback } from '@/ai/prompt-fallback';
 // A helper schema to stringify the JSON task list for the prompt
 const PromptInputSchema = ExtractTasksFromMessageInputSchema.extend({
     existingTasksJSON: z.string().optional(),
+    existingTasksScoped: z.boolean().optional(),
+    existingTaskCount: z.number().optional(),
 });
 
 const extractTasksPrompt = ai.definePrompt({
@@ -45,6 +47,9 @@ You are an expert AI assistant focused on creating and managing tasks.
 {{#if existingTasks}}
 **Scenario: Modifying an Existing Task List**
 The user wants to add, remove, or change their current tasks.
+{{#if existingTasksScoped}}
+-   **Scope Note:** The JSON below is a relevance-filtered subset of a larger list ({{existingTaskCount}} tasks total). Only modify tasks in this subset and return the updated subset.
+{{/if}}
 -   **Current Task List (JSON):** \`\`\`json
 {{{existingTasksJSON}}}
 \`\`\`
@@ -52,7 +57,7 @@ The user wants to add, remove, or change their current tasks.
 -   **Instructions:**
     1.  Analyze the user's request. It may refer to specific tasks by title. The request **only applies to the tasks it explicitly mentions**.
     2.  Apply the changes (add, remove, merge, reword, etc.) **only to the mentioned tasks**.
-    3.  **CRITICAL**: Return the **complete, final, and updated** list of tasks in the \`tasks\` field. This list MUST include **all of the original tasks that were NOT mentioned** in the user's request. Do NOT omit any unmentioned tasks.
+    3.  **CRITICAL**: Return the **complete, final, and updated** list of tasks in the \`tasks\` field for the provided list.
     4.  **CRITICAL**: Preserve all existing task properties and IDs unless the user explicitly asks to change them for a specific task.
     5.  Formulate a concise \`chatResponseText\` confirming the action. Example: "Done. I've updated the task list as you requested."
 
@@ -74,9 +79,165 @@ The user provides a general request, a topic, or raw text.
     4.  {{#if isFirstMessage}}**Session Title:** Generate a short, descriptive \`sessionTitle\` for this new session.{{/if}}
 {{/if}}
 
-**Output Requirement:** Your final output MUST be a single, valid JSON object that strictly adheres to the provided output schema.
-  `,
+	**Output Requirement:** Your final output MUST be a single, valid JSON object that strictly adheres to the provided output schema.
+	  `,
 });
+
+const EXISTING_TASK_CONTEXT_CAP = Math.max(
+  6,
+  Math.min(20, Number(process.env.EXISTING_TASK_CONTEXT_CAP || 12))
+);
+const CONTEXT_STOPWORDS = new Set([
+  "a",
+  "an",
+  "and",
+  "for",
+  "from",
+  "in",
+  "into",
+  "it",
+  "its",
+  "my",
+  "of",
+  "on",
+  "or",
+  "task",
+  "tasks",
+  "the",
+  "to",
+  "update",
+  "with",
+]);
+
+const flattenTaskList = (tasks: TaskType[]): TaskType[] => {
+  const flat: TaskType[] = [];
+  const walk = (items: TaskType[]) => {
+    items.forEach((task) => {
+      flat.push(task);
+      if (task.subtasks?.length) {
+        walk(task.subtasks);
+      }
+    });
+  };
+  walk(tasks);
+  return flat;
+};
+
+const tokenizeMessage = (text: string): string[] =>
+  text
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .split(/\s+/)
+    .map((token) => token.trim())
+    .filter((token) => token.length > 2 && !CONTEXT_STOPWORDS.has(token));
+
+const taskLookupKey = (task: TaskType) => {
+  if (task.id) return `id:${task.id}`;
+  const title = normalizeTitleKey(task.title);
+  return title ? `title:${title}` : "";
+};
+
+const scoreTaskRelevance = (task: TaskType, queryTokens: string[]) => {
+  if (!queryTokens.length) return 0;
+  const haystack = normalizeTitleKey(`${task.title} ${task.description || ""}`);
+  if (!haystack) return 0;
+  let matched = 0;
+  queryTokens.forEach((token) => {
+    if (haystack.includes(token)) matched += 1;
+  });
+  return matched / queryTokens.length;
+};
+
+const selectPromptTaskContext = (tasks: TaskType[], message: string) => {
+  if (!tasks.length) {
+    return {
+      scopedTasks: [] as TaskType[],
+      scopedKeys: new Set<string>(),
+      wasTrimmed: false,
+    };
+  }
+  const flat = flattenTaskList(tasks);
+  if (flat.length <= EXISTING_TASK_CONTEXT_CAP) {
+    return {
+      scopedTasks: tasks,
+      scopedKeys: new Set(tasks.map(taskLookupKey).filter(Boolean)),
+      wasTrimmed: false,
+    };
+  }
+  const queryTokens = tokenizeMessage(message);
+  const scored = flat
+    .map((task, index) => ({
+      task,
+      index,
+      score: scoreTaskRelevance(task, queryTokens),
+    }))
+    .sort((a, b) => b.score - a.score || a.index - b.index);
+
+  const selected = scored
+    .slice(0, EXISTING_TASK_CONTEXT_CAP)
+    .map((entry) => entry.task);
+  const deduped = Array.from(
+    new Map(selected.map((task) => [taskLookupKey(task), task])).values()
+  ).filter((task) => taskLookupKey(task));
+  return {
+    scopedTasks: deduped,
+    scopedKeys: new Set(deduped.map(taskLookupKey).filter(Boolean)),
+    wasTrimmed: deduped.length < tasks.length,
+  };
+};
+
+const mergeScopedTaskUpdates = (
+  fullTasks: TaskType[],
+  scopedUpdates: TaskType[],
+  scopedKeys: Set<string>,
+  message: string
+): TaskType[] => {
+  if (!fullTasks.length) return scopedUpdates;
+  if (!scopedUpdates.length) return fullTasks;
+  const isDeleteIntent = /\b(delete|remove|archive)\b/i.test(message);
+  const updateByKey = new Map(
+    scopedUpdates
+      .map((task) => [taskLookupKey(task), task] as const)
+      .filter(([key]) => Boolean(key))
+  );
+  const consumed = new Set<string>();
+  const walk = (items: TaskType[]): TaskType[] =>
+    items.reduce<TaskType[]>((acc, task) => {
+      const key = taskLookupKey(task);
+      const nextSubtasks = task.subtasks?.length ? walk(task.subtasks) : task.subtasks;
+      const hasScopedKey = Boolean(key && scopedKeys.has(key));
+      if (hasScopedKey && key) {
+        const updated = updateByKey.get(key);
+        if (!updated) {
+          if (!isDeleteIntent) {
+            acc.push(nextSubtasks !== task.subtasks ? { ...task, subtasks: nextSubtasks } : task);
+          }
+          return acc;
+        }
+        consumed.add(key);
+        acc.push({
+          ...task,
+          ...updated,
+          id: task.id || updated.id,
+          subtasks: updated.subtasks ?? nextSubtasks,
+        });
+        return acc;
+      }
+      if (nextSubtasks !== task.subtasks) {
+        acc.push({ ...task, subtasks: nextSubtasks });
+      } else {
+        acc.push(task);
+      }
+      return acc;
+    }, []);
+
+  const merged = walk(fullTasks);
+  const append = scopedUpdates.filter((task) => {
+    const key = taskLookupKey(task);
+    return key ? !consumed.has(key) : true;
+  });
+  return append.length ? [...merged, ...append] : merged;
+};
 
 // --- GENKIT FLOW ---
 
@@ -114,13 +275,26 @@ const extractTasksFromMessageFlow = ai.defineFlow(
     const effectiveMessage = shouldForceBreakdown
       ? `Break this down into concrete, step-by-step tasks that complete the goal: ${input.message}`
       : input.message;
+    const existingTasks = input.existingTasks || [];
+    const scopedContext = selectPromptTaskContext(existingTasks, effectiveMessage);
+    const tasksForPrompt = existingTasks.length ? scopedContext.scopedTasks : undefined;
 
     const promptInput = {
         ...input,
         message: effectiveMessage,
-        existingTasksJSON: input.existingTasks ? JSON.stringify(input.existingTasks, null, 2) : undefined,
+        existingTasks: tasksForPrompt,
+        existingTasksJSON: tasksForPrompt ? JSON.stringify(tasksForPrompt, null, 2) : undefined,
+        existingTasksScoped: scopedContext.wasTrimmed || undefined,
+        existingTaskCount: existingTasks.length || undefined,
     };
-    const { output, text, provider } = await runPromptWithFallback(extractTasksPrompt, promptInput);
+    const { output, text, provider } = await runPromptWithFallback(
+      extractTasksPrompt,
+      promptInput,
+      undefined,
+      {
+        endpoint: "extractTasksFromMessage",
+      }
+    );
     const raw = extractJsonValue(output, text);
     const rawObject =
       raw && typeof raw === 'object' && !Array.isArray(raw)
@@ -189,6 +363,14 @@ const extractTasksFromMessageFlow = ai.defineFlow(
         messageFallback.length > 0
           ? messageFallback
           : normalizeAiTasks([{ title: 'Define next steps' }], 'Next step');
+    }
+    if (scopedContext.wasTrimmed && existingTasks.length) {
+      tasks = mergeScopedTaskUpdates(
+        existingTasks,
+        tasks,
+        scopedContext.scopedKeys,
+        effectiveMessage
+      );
     }
 
     const tagProvider = (items: TaskType[]) =>

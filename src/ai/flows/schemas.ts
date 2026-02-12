@@ -46,9 +46,9 @@ export const TaskSchema: z.ZodType<TaskType> = BaseTaskSchema.extend({
 });
 
 export const PersonSchema = z.object({
-    name: z.string().describe("The full name of the person identified."),
-    email: z.string().optional().describe("The person's email address, if mentioned."),
-    title: z.string().optional().describe("The person's job title or role, if mentioned."),
+  name: z.string().describe("The full name of the person identified."),
+  email: z.string().optional().describe("The person's email address, if mentioned."),
+  title: z.string().optional().describe("The person's job title or role, if mentioned."),
 });
 export type PersonSchemaType = z.infer<typeof PersonSchema>;
 
@@ -85,20 +85,20 @@ export type AnalyzeMeetingInput = z.infer<typeof AnalyzeMeetingInputSchema>;
 export const AnalyzeMeetingOutputSchema = z.object({
   chatResponseText: z.string().describe('A concise textual response summarizing the action taken.'),
   sessionTitle: z.string().optional().describe('A short, descriptive title for the session based on the meeting content.'),
-  
+
   allTaskLevels: z.object({
     light: z.array(TaskSchema).describe("A 'light' version with only high-level macro tasks. Task descriptions should be more detailed if only a few tasks are generated."),
     medium: z.array(TaskSchema).describe("A 'medium' detail version with main tasks and one level of important sub-tasks."),
     detailed: z.array(TaskSchema).describe("A 'detailed' version with a deep, hierarchical breakdown and multiple levels of granular sub-tasks."),
   }),
-  
+
   attendees: z.array(PersonSchema).optional().describe("An array of people who actively participated (i.e., have dialogue) in the transcript."),
   mentionedPeople: z.array(PersonSchema).optional().describe("An array of people who were mentioned by name in the transcript but did not speak."),
 
   meetingSummary: z.string().optional().describe("A concise summary of the meeting's key points, decisions, and outcomes."),
   keyMoments: z.array(z.object({
-      timestamp: z.string().describe("The timestamp from the transcript (e.g., '03:12') where the moment occurred."),
-      description: z.string().describe("A brief description of the key moment, decision, or action item.")
+    timestamp: z.string().describe("The timestamp from the transcript (e.g., '03:12') where the moment occurred."),
+    description: z.string().describe("A brief description of the key moment, decision, or action item.")
   })).optional().describe("A list of key moments identified from the meeting transcript."),
   overallSentiment: z.number().optional().describe("Overall sentiment of the meeting from 0.0 (very negative) to 1.0 (very positive)."),
   speakerActivity: z.array(z.object({ name: z.string(), wordCount: z.number() })).optional().describe("An array of speakers and their total word count."),
@@ -121,9 +121,9 @@ export type ExtractTasksFromMessageInput = z.infer<typeof ExtractTasksFromMessag
 export const ExtractTasksFromMessageOutputSchema = z.object({
   chatResponseText: z.string().describe('A concise textual response for the chat interface.'),
   sessionTitle: z.string().optional().describe('A short, descriptive title for the session (only if `isFirstMessage` was true).'),
-  
+
   tasks: z.array(TaskSchema),
-  
+
   allTaskLevels: z.object({
     light: z.array(TaskSchema),
     medium: z.array(TaskSchema),
@@ -139,14 +139,15 @@ export const OrchestratorInputSchema = z.object({
   message: z.string().describe('The user\'s chat message or command.'),
   isFirstMessage: z.boolean().optional().describe('Set to true for the first message of a new session.'),
   requestedDetailLevel: z.enum(['light', 'medium', 'detailed']).default('medium').describe("The desired level of task breakdown detail."),
-  
+
   contextTaskTitle: z.string().optional().describe('The title of an existing task to break down further.'),
   contextTaskDescription: z.string().optional().describe('The description of an existing task to break down further.'),
-  
+
   existingTasks: z.array(TaskSchema).optional().describe('The full, current list of tasks in the session.'),
-  
+
   sourceMeetingTranscript: z.string().optional().describe('The full transcript of a source meeting.'),
-  
+  previousMeetingId: z.string().optional().describe('The ID of the previous meeting in the series, if any.'),
+
   selectedTasks: z.array(TaskSchema).optional().describe('A specific subset of tasks the user has selected for an operation.'),
 });
 export type OrchestratorInput = z.infer<typeof OrchestratorInputSchema>;
@@ -154,10 +155,10 @@ export type OrchestratorInput = z.infer<typeof OrchestratorInputSchema>;
 export const OrchestratorOutputSchema = z.object({
   chatResponseText: z.string().describe('A concise textual response for the chat interface.'),
   sessionTitle: z.string().optional().describe('A short, descriptive title for the session.'),
-  
+
   tasks: z.array(TaskSchema).describe("The complete, final, and updated list of tasks for the session."),
-  
-  people: z.array(PersonSchema.extend({ role: z.enum(['attendee', 'mentioned'])})).optional().describe("A unified array of unique people identified, with a role indicating their participation."),
+
+  people: z.array(PersonSchema.extend({ role: z.enum(['attendee', 'mentioned']) })).optional().describe("A unified array of unique people identified, with a role indicating their participation."),
   meetingSummary: z.string().optional().describe("A concise summary of a meeting."),
   keyMoments: z.array(z.object({ timestamp: z.string(), description: z.string() })).optional(),
   overallSentiment: z.number().optional(),
@@ -171,8 +172,8 @@ export const OrchestratorOutputSchema = z.object({
   }).optional(),
 
   qaAnswer: z.object({
-      answerText: z.string(),
-      sources: z.array(z.object({ timestamp: z.string(), snippet: z.string() })).optional(),
+    answerText: z.string(),
+    sources: z.array(z.object({ timestamp: z.string(), snippet: z.string() })).optional(),
   }).optional(),
 });
 export type OrchestratorOutput = z.infer<typeof OrchestratorOutputSchema>;
@@ -182,7 +183,7 @@ export type OrchestratorOutput = z.infer<typeof OrchestratorOutputSchema>;
 
 export const RefineTasksInputSchema = z.object({
   instruction: z.string().describe("The user's instruction, e.g., 'Break this down' or 'Merge these'."),
-  
+
   fullTaskList: z.array(TaskSchema).describe("The entire current list of tasks for context."),
 
   contextTask: TaskSchema.optional().describe("A single task to be refined or broken down."),
@@ -204,6 +205,7 @@ export const TranscriptQAInputSchema = z.object({
   question: z.string().describe("The user's question about the transcript."),
   transcript: z.string().describe("The full meeting transcript to be queried."),
   tasks: z.array(TaskSchema).optional().describe("The current list of tasks for additional context."),
+  previousSessionContext: z.string().optional().describe("Context from previous sessions."),
 });
 export type TranscriptQAInput = z.infer<typeof TranscriptQAInputSchema>;
 
@@ -219,31 +221,31 @@ export type TranscriptQAOutput = z.infer<typeof TranscriptQAOutputSchema>;
 
 // --- ProcessPastedContentFlow Schemas ---
 export const ProcessPastedContentInputSchema = z.object({
-    pastedText: z.string().describe('The text content pasted by the user.'),
-    requestedDetailLevel: z.enum(['light', 'medium', 'detailed']).default('medium').describe("The user's desired level of task breakdown detail."),
+  pastedText: z.string().describe('The text content pasted by the user.'),
+  requestedDetailLevel: z.enum(['light', 'medium', 'detailed']).default('medium').describe("The user's desired level of task breakdown detail."),
 });
 export type ProcessPastedContentInput = z.infer<typeof ProcessPastedContentInputSchema>;
 
 export const ProcessPastedContentOutputSchema = z.object({
   isMeeting: z.boolean().describe('Indicates if the content was processed as a meeting transcript.'),
   tasks: z.array(TaskSchema).optional().describe('The tasks extracted from general text.'),
-  people: z.array(PersonSchema.extend({ role: z.enum(['attendee', 'mentioned'])})).optional().describe("A unified array of unique people identified, with a role indicating their participation."),
+  people: z.array(PersonSchema.extend({ role: z.enum(['attendee', 'mentioned']) })).optional().describe("A unified array of unique people identified, with a role indicating their participation."),
   titleSuggestion: z.string().describe('A suggested title for the new session/plan based on the content.'),
   meeting: z.object({
-      originalTranscript: z.string(),
-      summary: z.string().describe("A concise summary of the meeting's key points, decisions, and outcomes."),
-      attendees: z.array(PersonSchema.extend({ role: z.enum(['attendee', 'mentioned'])})),
-      extractedTasks: z.array(TaskSchema),
-      title: z.string(),
-      meetingMetadata: MeetingMetadataSchema.optional(),
-      allTaskLevels: z.object({
-        light: z.array(TaskSchema),
-        medium: z.array(TaskSchema),
-        detailed: z.array(TaskSchema),
-      }).optional(),
-      keyMoments: AnalyzeMeetingOutputSchema.shape.keyMoments,
-      overallSentiment: AnalyzeMeetingOutputSchema.shape.overallSentiment,
-      speakerActivity: AnalyzeMeetingOutputSchema.shape.speakerActivity,
+    originalTranscript: z.string(),
+    summary: z.string().describe("A concise summary of the meeting's key points, decisions, and outcomes."),
+    attendees: z.array(PersonSchema.extend({ role: z.enum(['attendee', 'mentioned']) })),
+    extractedTasks: z.array(TaskSchema),
+    title: z.string(),
+    meetingMetadata: MeetingMetadataSchema.optional(),
+    allTaskLevels: z.object({
+      light: z.array(TaskSchema),
+      medium: z.array(TaskSchema),
+      detailed: z.array(TaskSchema),
+    }).optional(),
+    keyMoments: AnalyzeMeetingOutputSchema.shape.keyMoments,
+    overallSentiment: AnalyzeMeetingOutputSchema.shape.overallSentiment,
+    speakerActivity: AnalyzeMeetingOutputSchema.shape.speakerActivity,
   }).optional().describe('A structured meeting object, returned ONLY if the content is identified as a meeting transcript.'),
   allTaskLevels: z.object({
     light: z.array(TaskSchema),

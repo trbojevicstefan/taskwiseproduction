@@ -37,48 +37,58 @@ export default function MeetingDetailPageContent({ meetingId }: { meetingId: str
     [meetings, updateMeeting]
   );
 
+  const [isNavigating, setIsNavigating] = useState(false);
+
   const handleNavigateToChat = useCallback(
     async (meeting: Meeting) => {
-      const sessionFromMeeting = meeting.chatSessionId
-        ? sessions.find((session) => session.id === meeting.chatSessionId)
-        : undefined;
-      const sessionFromLookup = sessions.find(
-        (session) => session.sourceMeetingId === meeting.id
-      );
-      const existingSession = sessionFromMeeting || sessionFromLookup;
+      if (isNavigating) return;
+      setIsNavigating(true);
+      try {
+        const sessionFromMeeting = meeting.chatSessionId
+          ? sessions.find((session) => session.id === meeting.chatSessionId)
+          : undefined;
+        const sessionFromLookup = sessions.find(
+          (session) => session.sourceMeetingId === meeting.id
+        );
+        const existingSession = sessionFromMeeting || sessionFromLookup;
 
-      if (existingSession) {
-        await clearDuplicateChatLinks(existingSession.id, meeting.id);
-        if (meeting.chatSessionId !== existingSession.id) {
-          await updateMeeting(meeting.id, { chatSessionId: existingSession.id });
+        if (existingSession) {
+          await clearDuplicateChatLinks(existingSession.id, meeting.id);
+          if (meeting.chatSessionId !== existingSession.id) {
+            await updateMeeting(meeting.id, { chatSessionId: existingSession.id });
+          }
+          setActiveSessionId(existingSession.id);
+          router.push('/chat');
+          return;
         }
-        setActiveSessionId(existingSession.id);
-        router.push('/chat');
-        return;
-      }
 
-      toast({ title: 'Creating Chat Session...' });
-      const newSession = await createNewSession({
-        title: `Chat about "${meeting.title}"`,
-        sourceMeetingId: meeting.id,
-        initialTasks: meeting.extractedTasks,
-        initialPeople: meeting.attendees,
-      });
-
-      if (newSession) {
-        await clearDuplicateChatLinks(newSession.id, meeting.id);
-        await updateMeeting(meeting.id, { chatSessionId: newSession.id });
-        setActiveSessionId(newSession.id);
-        router.push('/chat');
-      } else {
-        toast({
-          title: 'Error',
-          description: 'Could not create chat session.',
-          variant: 'destructive',
+        toast({ title: 'Creating Chat Session...' });
+        const newSession = await createNewSession({
+          title: `Chat about "${meeting.title}"`,
+          sourceMeetingId: meeting.id,
+          initialTasks: (meeting.extractedTasks as import('@/types/chat').ExtractedTaskSchema[] | undefined),
+          initialPeople: meeting.attendees,
         });
+
+        if (newSession) {
+          await clearDuplicateChatLinks(newSession.id, meeting.id);
+          await updateMeeting(meeting.id, { chatSessionId: newSession.id });
+          setActiveSessionId(newSession.id);
+          router.push('/chat');
+        } else {
+          toast({
+            title: 'Error',
+            description: 'Could not create chat session.',
+            variant: 'destructive',
+          });
+          setIsNavigating(false);
+        }
+      } catch (error) {
+        console.error("Navigation error:", error);
+        setIsNavigating(false);
       }
     },
-    [sessions, updateMeeting, setActiveSessionId, router, toast, createNewSession]
+    [sessions, updateMeeting, setActiveSessionId, router, toast, createNewSession, isNavigating]
   );
 
   const handleClose = useCallback(() => {

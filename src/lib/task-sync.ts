@@ -20,6 +20,7 @@ export interface TaskSyncOptions {
 export interface TaskSyncResult {
   upserted: number;
   deleted: number;
+  taskMap: Map<string, string>;
 }
 
 const buildTaskRecords = (
@@ -126,6 +127,13 @@ export const syncTasksForSource = async (
     existingBySourceTaskId
   );
 
+  const taskMap = new Map<string, string>();
+  records.forEach((rec) => {
+    if (rec.sourceTaskId) {
+      taskMap.set(rec.sourceTaskId, String(rec._id));
+    }
+  });
+
   if (records.length) {
     await db.collection("tasks").bulkWrite(
       records.map((rec) => {
@@ -170,5 +178,5 @@ export const syncTasksForSource = async (
     .collection("tasks")
     .deleteMany(deleteFilter);
 
-  return { upserted: records.length, deleted: deleteResult.deletedCount || 0 };
+  return { upserted: records.length, deleted: deleteResult.deletedCount || 0, taskMap };
 };

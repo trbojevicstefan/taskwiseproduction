@@ -1,0 +1,56 @@
+[
+  {
+    "id": "explicit_done",
+    "transcript": "00:14 - Alex: I finished drafting the enterprise contract last night and sent it to legal.",
+    "candidates": [
+      { "groupId": "cand_1", "title": "Draft enterprise contract", "assigneeKey": "name:alex" },
+      { "groupId": "cand_2", "title": "Book follow-up call with legal", "assigneeKey": "name:alex" }
+    ],
+    "expectedCompleted": ["cand_1"]
+  },
+  {
+    "id": "purchase_complete_signal",
+    "transcript": "12:03 - Maya: Quick update, we bought the Zoom webinar add-on yesterday, so that item is handled.",
+    "candidates": [
+      { "groupId": "cand_1", "title": "Purchase Zoom webinar add-on", "assigneeKey": "name:maya" },
+      { "groupId": "cand_2", "title": "Create webinar launch checklist", "assigneeKey": "name:maya" }
+    ],
+    "expectedCompleted": ["cand_1"]
+  },
+  {
+    "id": "in_progress_not_done",
+    "transcript": "08:20 - Jordan: I started the analytics dashboard and should finish next week.",
+    "candidates": [
+      { "groupId": "cand_1", "title": "Build analytics dashboard", "assigneeKey": "name:jordan" }
+    ],
+    "expectedCompleted": []
+  },
+  {
+    "id": "negation_case",
+    "transcript": "03:09 - Priya: The migration is not done yet. We still need to validate the data backfill.",
+    "candidates": [
+      { "groupId": "cand_1", "title": "Complete migration", "assigneeKey": "name:priya" },
+      { "groupId": "cand_2", "title": "Validate backfill data", "assigneeKey": "name:priya" }
+    ],
+    "expectedCompleted": []
+  },
+  {
+    "id": "pronoun_resolution_single_match",
+    "transcript": "17:44 - Sam: The onboarding checklist is done. I already closed it this morning.",
+    "candidates": [
+      { "groupId": "cand_1", "title": "Finalize onboarding checklist", "assigneeKey": "name:sam" },
+      { "groupId": "cand_2", "title": "Draft Q2 onboarding survey", "assigneeKey": "name:sam" }
+    ],
+    "expectedCompleted": ["cand_1"]
+  },
+  {
+    "id": "multi_complete_same_snippet",
+    "transcript": "22:01 - Elena: We shipped the API patch and deployed the hotfix to production. Both are complete.",
+    "candidates": [
+      { "groupId": "cand_1", "title": "Ship API patch", "assigneeKey": "name:elena" },
+      { "groupId": "cand_2", "title": "Deploy production hotfix", "assigneeKey": "name:elena" },
+      { "groupId": "cand_3", "title": "Write postmortem notes", "assigneeKey": "name:elena" }
+    ],
+    "expectedCompleted": ["cand_1", "cand_2"]
+  }
+]

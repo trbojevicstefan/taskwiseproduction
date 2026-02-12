@@ -4,34 +4,82 @@ import { getSessionUserId } from "@/lib/server-auth";
 import { buildIdQuery } from "@/lib/mongo-id";
 import { normalizePersonNameKey } from "@/lib/transcript-utils";
 import type { ExtractedTaskSchema } from "@/types/chat";
+import type { ObjectId, Db, WithId, Document } from "mongodb";
 
-const serializeTask = (task: any) => ({
+interface TaskDocument {
+  _id?: ObjectId | string;
+  id?: string;
+  title?: string;
+  status?: string;
+  priority?: string;
+  createdAt?: Date | string;
+  lastUpdated?: Date | string;
+  researchBrief?: string;
+  aiAssistanceText?: string;
+  sourceSessionType?: string;
+  sourceSessionId?: string | null;
+  sourceSessionName?: string | null;
+  sourceTaskId?: string;
+  origin?: string;
+  assignee?: { uid?: string; email?: string; name?: string };
+  assigneeName?: string;
+  assigneeNameKey?: string;
+}
+
+interface MeetingDocument extends Document {
+  _id?: ObjectId | string;
+  id?: string;
+  title?: string;
+  extractedTasks?: ExtractedTaskSchema[];
+}
+
+interface ChatSessionDocument extends Document {
+  _id?: ObjectId | string;
+  id?: string;
+  title?: string;
+  suggestedTasks?: ExtractedTaskSchema[];
+  sourceMeetingId?: string | null;
+}
+
+interface PersonDocument extends Document {
+  _id?: ObjectId | string;
+  id?: string;
+  name?: string;
+  email?: string;
+  aliases?: string[];
+  slackId?: string;
+}
+
+const serializeTask = (task: TaskDocument) => ({
   ...task,
   id: task._id,
   _id: undefined,
-  createdAt: task.createdAt?.toISOString?.() || task.createdAt,
-  lastUpdated: task.lastUpdated?.toISOString?.() || task.lastUpdated,
+  createdAt: (task.createdAt as Date & { toISOString?: () => string })?.toISOString?.() || task.createdAt,
+  lastUpdated: (task.lastUpdated as Date & { toISOString?: () => string })?.toISOString?.() || task.lastUpdated,
 });
 
-const normalizeId = (value: any) => {
+const normalizeId = (value: unknown): string => {
   if (!value) return "";
   if (typeof value === "string") return value;
-  if (typeof value.toString === "function") return value.toString();
+  if (typeof (value as { toString?: () => string }).toString === "function") return (value as { toString: () => string }).toString();
   return String(value);
 };
 
-const hasText = (value: any) =>
+const hasText = (value: unknown): boolean =>
   typeof value === "string" && value.trim().length > 0;
 
-const toTime = (value: any) => {
+const toTime = (value: unknown): number => {
   if (!value) return 0;
   if (typeof value === "number") return value;
-  const date = value instanceof Date ? value : new Date(value);
+  const date = value instanceof Date ? value : new Date(value as string | number);
   const time = date.getTime();
   return Number.isNaN(time) ? 0 : time;
 };
 
-const buildTaskKey = (task: any) => {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type AnyTask = Record<string, any>;
+
+const buildTaskKey = (task: AnyTask): string => {
   const sessionId = normalizeId(task?.sourceSessionId);
   const sourceTaskId = normalizeId(task?.sourceTaskId);
   const taskId = normalizeId(task?.id ?? task?._id);
@@ -41,7 +89,7 @@ const buildTaskKey = (task: any) => {
   return taskId;
 };
 
-const pickPreferredTask = (current: any, candidate: any) => {
+const pickPreferredTask = (current: AnyTask | undefined, candidate: AnyTask | undefined): AnyTask | undefined => {
   if (!current) return candidate;
   if (!candidate) return current;
 
@@ -128,10 +176,10 @@ export async function GET(
   const userIdQuery = buildIdQuery(userId);
   const assigneeQuery = buildIdQuery(id);
 
-  const person = await db.collection<any>("people").findOne({
+  const person = await (db as Db).collection<PersonDocument>("people").findOne({
     userId: userIdQuery,
     $or: [{ _id: assigneeQuery }, { id }, { slackId: id }],
-  });
+  } as import("mongodb").Filter<PersonDocument>);
 
   if (!person) {
     return NextResponse.json({ error: "Person not found" }, { status: 404 });
@@ -165,8 +213,8 @@ export async function GET(
   const nameKeyList = Array.from(nameKeys).filter(Boolean);
   const nameVariantList = Array.from(nameVariants).filter(Boolean);
 
-  const tasks = await db
-    .collection<any>("tasks")
+  const tasks = await (db as Db)
+    .collection<TaskDocument>("tasks")
     .find({
       userId: userIdQuery,
       $or: [
@@ -177,18 +225,18 @@ export async function GET(
           : []),
         ...(nameVariantList.length
           ? [
-              { assigneeName: { $in: nameVariantList } },
-              { "assignee.name": { $in: nameVariantList } },
-            ]
+            { assigneeName: { $in: nameVariantList } },
+            { "assignee.name": { $in: nameVariantList } },
+          ]
           : []),
       ],
-    })
+    } as import("mongodb").Filter<TaskDocument>)
     .sort({ createdAt: -1 })
     .toArray();
 
   const meetingSessionsWithTasks = new Set<string>();
   const chatSessionsWithTasks = new Set<string>();
-  tasks.forEach((task) => {
+  tasks.forEach((task: WithId<TaskDocument>) => {
     const sourceType = task?.sourceSessionType || task?.origin;
     const sessionId = normalizeId(task?.sourceSessionId);
     if (sourceType === "meeting" && sessionId) {
@@ -199,19 +247,19 @@ export async function GET(
     }
   });
 
-  const meetings = await db
-    .collection<any>("meetings")
-    .find({ userId: userIdQuery, isHidden: { $ne: true } })
+  const meetings = await (db as Db)
+    .collection<MeetingDocument>("meetings")
+    .find({ userId: userIdQuery, isHidden: { $ne: true } } as import("mongodb").Filter<MeetingDocument>)
     .project({ _id: 1, title: 1, extractedTasks: 1 })
     .toArray();
 
-  const chatSessions = await db
-    .collection<any>("chatSessions")
-    .find({ userId: userIdQuery })
-    .project({ _id: 1, title: 1, suggestedTasks: 1 })
+  const chatSessions = await (db as Db)
+    .collection<ChatSessionDocument>("chatSessions")
+    .find({ userId: userIdQuery } as import("mongodb").Filter<ChatSessionDocument>)
+    .project({ _id: 1, title: 1, suggestedTasks: 1, sourceMeetingId: 1 })
     .toArray();
 
-  const meetingTasks = meetings.flatMap((meeting) => {
+  const meetingTasks = (meetings as WithId<MeetingDocument>[]).flatMap((meeting: WithId<MeetingDocument>) => {
     const meetingId = String(meeting._id ?? meeting.id);
     if (meetingSessionsWithTasks.has(meetingId)) return [];
     const extracted = flattenExtractedTasks(meeting.extractedTasks || []);
@@ -220,23 +268,25 @@ export async function GET(
       .map((task) =>
         toTaskShape(task, {
           id: meetingId,
-          title: meeting.title,
+          title: meeting.title || "",
           userId,
           sourceType: "meeting",
         })
       );
   });
 
-  const chatTasks = chatSessions.flatMap((session) => {
+  const chatTasks = (chatSessions as WithId<ChatSessionDocument>[]).flatMap((session: WithId<ChatSessionDocument>) => {
     const sessionId = String(session._id ?? session.id);
     if (chatSessionsWithTasks.has(sessionId)) return [];
+    // Skip chat sessions that are linked to a meeting - their tasks already exist in the meeting
+    if (session.sourceMeetingId) return [];
     const extracted = flattenExtractedTasks(session.suggestedTasks || []);
     return extracted
       .filter(matchesTaskAssignee)
       .map((task) =>
         toTaskShape(task, {
           id: sessionId,
-          title: session.title,
+          title: session.title || "",
           userId,
           sourceType: "chat",
         })
@@ -244,7 +294,7 @@ export async function GET(
   });
 
   const normalizedTasks = [
-    ...tasks.map((task) => ({
+    ...tasks.map((task: WithId<TaskDocument>) => ({
       ...serializeTask(task),
       sourceSessionType: task.sourceSessionType || task.origin || "task",
       sourceSessionId: task.sourceSessionId ?? null,
@@ -255,12 +305,12 @@ export async function GET(
     ...chatTasks,
   ];
 
-  const dedupedMap = new Map<string, any>();
+  const dedupedMap = new Map<string, AnyTask>();
   normalizedTasks.forEach((task) => {
     const key = buildTaskKey(task);
     if (!key) return;
     const existing = dedupedMap.get(key);
-    dedupedMap.set(key, pickPreferredTask(existing, task));
+    dedupedMap.set(key, pickPreferredTask(existing, task)!);
   });
 
   return NextResponse.json(Array.from(dedupedMap.values()));
