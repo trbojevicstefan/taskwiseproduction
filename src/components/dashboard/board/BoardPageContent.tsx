@@ -17,6 +17,7 @@ import {
   Palette,
   Plus,
   Search,
+  Sparkles,
 } from "lucide-react";
 import {
   endOfWeek,
@@ -77,6 +78,11 @@ import PushToGoogleTasksDialog from "@/components/dashboard/common/PushToGoogleT
 import PushToTrelloDialog from "@/components/dashboard/common/PushToTrelloDialog";
 import AssignPersonDialog from "@/components/dashboard/planning/AssignPersonDialog";
 import SetDueDateDialog from "@/components/dashboard/planning/SetDueDateDialog";
+import TaskSweepDialog, {
+  type TaskSweepAction,
+  type TaskSweepCandidate,
+  type TaskSweepDiscardReason,
+} from "@/components/dashboard/board/TaskSweepDialog";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 import { apiFetch } from "@/lib/api";
@@ -119,6 +125,39 @@ const priorityLabel: Record<TaskPriority, string> = {
 };
 
 type DueFilter = "all" | "today" | "overdue" | "this_week";
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+const toTimestamp = (value: unknown) => {
+  if (!value) return null;
+  if (value instanceof Date) {
+    const time = value.getTime();
+    return Number.isNaN(time) ? null : time;
+  }
+  if (typeof value === "string" || typeof value === "number") {
+    const parsed = new Date(value).getTime();
+    return Number.isNaN(parsed) ? null : parsed;
+  }
+  return null;
+};
+
+const vagueTaskTitleTokens = new Set([
+  "email",
+  "follow up",
+  "follow-up",
+  "fix this",
+  "task",
+  "todo",
+  "update",
+  "check",
+]);
+
+const isVagueTaskTitle = (title: string) => {
+  const normalized = title.trim().toLowerCase();
+  if (!normalized) return true;
+  if (normalized.length <= 12) return true;
+  return vagueTaskTitleTokens.has(normalized);
+};
 
 const normalizeDateInput = (value: string) => {
   if (!value) return null;
@@ -442,6 +481,7 @@ function AssigneeDropdown({
   const [includeUnassigned, setIncludeUnassigned] = useState(false);
     const [isTaskDialogOpen, setIsTaskDialogOpen] = useState(false);
     const [isTaskDetailDialogOpen, setIsTaskDetailDialogOpen] = useState(false);
+    const [isTaskSweepOpen, setIsTaskSweepOpen] = useState(false);
     const [taskForDetailView, setTaskForDetailView] = useState<ExtractedTaskSchema | null>(null);
     const [detailTaskBoardItem, setDetailTaskBoardItem] = useState<BoardTaskItem | null>(null);
     const [isBoardDialogOpen, setIsBoardDialogOpen] = useState(false);
@@ -1543,6 +1583,147 @@ function AssigneeDropdown({
       [selectedTasks, mapTaskToExtracted]
     );
 
+    const taskSweepCandidates = useMemo<TaskSweepCandidate[]>(() => {
+      const now = Date.now();
+      const enriched = tasks
+        .filter((task: any) => (task.taskState || "active") !== "archived")
+        .map((task: any) => {
+          const createdAtTs =
+            toTimestamp(task.createdAt) ??
+            toTimestamp(task.lastUpdated) ??
+            now;
+          const lastUpdatedTs = toTimestamp(task.lastUpdated) ?? createdAtTs;
+          const dueAtTs = toTimestamp(task.dueAt);
+          const ageDays = Math.max(0, Math.floor((now - createdAtTs) / DAY_MS));
+          const inactiveDays = Math.max(
+            0,
+            Math.floor((now - lastUpdatedTs) / DAY_MS)
+          );
+          const title = String(task.title || "").trim();
+          const description = String(task.description || "").trim();
+          const overdue = dueAtTs != null && dueAtTs < now;
+          const snoozeCount = Number(
+            task.sweepSnoozeCount ?? task.taskSweep?.snoozeCount ?? 0
+          );
+          const oldTimer = ageDays >= 30 && inactiveDays >= 21;
+          const vague = isVagueTaskTitle(title) && description.length === 0;
+          const overdueLoop = overdue && snoozeCount >= 3;
+          const inactive = inactiveDays >= 30;
+          const flags = [
+            ...(oldTimer ? (["old_timer"] as const) : []),
+            ...(vague ? (["vague"] as const) : []),
+            ...(overdueLoop ? (["overdue_loop"] as const) : []),
+            ...(overdue && !overdueLoop ? (["overdue"] as const) : []),
+            ...(inactive && !oldTimer ? (["inactive"] as const) : []),
+          ];
+          const score =
+            (oldTimer ? 5 : 0) +
+            (vague ? 3 : 0) +
+            (overdueLoop ? 3 : 0) +
+            (overdue ? 1 : 0) +
+            Math.min(2, ageDays / 45);
+
+          return {
+            ...task,
+            taskAgeDays: ageDays,
+            inactiveDays,
+            sweepFlags: flags,
+            sweepScore: score,
+          } as TaskSweepCandidate;
+        });
+
+      return [...enriched].sort((a, b) => {
+        const aCreatedAtTs = toTimestamp((a as any).createdAt) ?? 0;
+        const bCreatedAtTs = toTimestamp((b as any).createdAt) ?? 0;
+        if (aCreatedAtTs !== bCreatedAtTs) {
+          return aCreatedAtTs - bCreatedAtTs;
+        }
+        if (a.sweepScore !== b.sweepScore) {
+          return b.sweepScore - a.sweepScore;
+        }
+        return a.title.localeCompare(b.title);
+      });
+    }, [tasks]);
+
+    const handleTaskSweepAction = useCallback(
+      async (
+        task: TaskSweepCandidate,
+        action: TaskSweepAction,
+        options?: { reason?: TaskSweepDiscardReason }
+      ) => {
+        const nowIso = new Date().toISOString();
+        const currentSweep = (task as any).taskSweep || {};
+        const patch: Record<string, any> = {
+          taskSweep: {
+            ...currentSweep,
+            lastAction: action,
+            lastActionAt: nowIso,
+            lastDiscardReason:
+              action === "discard" ? options?.reason || "unspecified" : null,
+            keepCount: Number(currentSweep.keepCount || 0) + (action === "keep" ? 1 : 0),
+            discardCount:
+              Number(currentSweep.discardCount || 0) + (action === "discard" ? 1 : 0),
+            snoozeCount:
+              Number(currentSweep.snoozeCount || 0) + (action === "snooze" ? 1 : 0),
+          },
+        };
+
+        if (action === "discard") {
+          patch.taskState = "archived";
+        }
+
+        if (action === "snooze") {
+          const nowTs = Date.now();
+          const dueAtTs = toTimestamp(task.dueAt);
+          const baseDueAt = dueAtTs && dueAtTs > nowTs ? new Date(dueAtTs) : new Date(nowTs);
+          baseDueAt.setDate(baseDueAt.getDate() + 14);
+          patch.dueAt = baseDueAt.toISOString();
+          patch.priority = "low";
+          patch.sweepSnoozeCount = Number((task as any).sweepSnoozeCount || 0) + 1;
+        }
+
+        try {
+          await apiFetch(`/api/tasks/${task.id}`, {
+            method: "PATCH",
+            body: JSON.stringify(patch),
+          });
+
+          if (action === "discard") {
+            setTasks((prev) => prev.filter((item: any) => item.id !== task.id));
+            setSelectedTaskIds((prev) => {
+              if (!prev.has(task.id)) return prev;
+              const next = new Set(prev);
+              next.delete(task.id);
+              return next;
+            });
+            return;
+          }
+
+          setTasks((prev) =>
+            prev.map((item: any) =>
+              item.id === task.id
+                ? {
+                    ...item,
+                    ...patch,
+                    lastUpdated: nowIso,
+                  }
+                : item
+            )
+          );
+        } catch (error) {
+          console.error("Task Sweep action failed:", error);
+          toast({
+            title: "Task Sweep update failed",
+            description:
+              error instanceof Error ? error.message : "Could not apply this action.",
+            variant: "destructive",
+          });
+          throw error;
+        }
+      },
+      [toast]
+    );
+
   const toggleTaskSelection = useCallback((taskId: string, checked: boolean) => {
     setSelectedTaskIds((prev) => {
       const next = new Set(prev);
@@ -2278,6 +2459,16 @@ function AssigneeDropdown({
             </DropdownMenuContent>
           </DropdownMenu>
 
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setIsTaskSweepOpen(true)}
+            disabled={!taskSweepCandidates.length}
+          >
+            <Sparkles className="mr-2 h-4 w-4" />
+            Task Sweep
+          </Button>
+
           <Button size="sm" onClick={() => openNewTask()}>
             <Plus className="mr-2 h-4 w-4" />
             New task
@@ -2305,6 +2496,13 @@ function AssigneeDropdown({
           onPushToTrello={handlePushToTrello}
           isTrelloConnected={isTrelloConnected}
         />
+
+      <TaskSweepDialog
+        open={isTaskSweepOpen}
+        onOpenChange={setIsTaskSweepOpen}
+        candidates={taskSweepCandidates}
+        onApplyAction={handleTaskSweepAction}
+      />
 
       <Dialog open={isBoardDialogOpen} onOpenChange={setIsBoardDialogOpen}>
         <DialogContent className="sm:max-w-[520px]">
