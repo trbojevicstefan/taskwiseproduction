@@ -486,7 +486,7 @@ export default function SidebarNav() {
                     : "hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
                   )}
                 >
-                  <Link href={item.href}>
+                  <Link href={item.href} prefetch={false}>
                     <item.icon className={cn(!isCollapsed && "mr-3")} />
                     {!isCollapsed && <span>{item.label}</span>}
                   </Link>

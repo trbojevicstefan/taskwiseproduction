@@ -17,6 +17,10 @@ export const maxDuration = 300;
 const POLL_INTERVAL_MS = 2000;
 const HEARTBEAT_INTERVAL_MS = 25000;
 const MAX_BATCH_SIZE = 200;
+const MAX_STREAM_LIFETIME_MS = Math.min(
+  295000,
+  Math.max(10000, Number(process.env.REALTIME_STREAM_MAX_LIFETIME_MS || 285000))
+);
 
 const encoder = new TextEncoder();
 
@@ -71,6 +75,7 @@ export async function GET(request: Request) {
       let closed = false;
       let pollTimer: ReturnType<typeof setInterval> | null = null;
       let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
+      let maxLifetimeTimer: ReturnType<typeof setTimeout> | null = null;
       let inFlight = false;
       let deliveredUpdates = 0;
       const connectedAtMs = Date.now();
@@ -80,6 +85,7 @@ export async function GET(request: Request) {
         closed = true;
         if (pollTimer) clearInterval(pollTimer);
         if (heartbeatTimer) clearInterval(heartbeatTimer);
+        if (maxLifetimeTimer) clearTimeout(maxLifetimeTimer);
         request.signal.removeEventListener("abort", closeStream as () => void);
         void recordRouteMetric({
           correlationId,
@@ -185,6 +191,10 @@ export async function GET(request: Request) {
       heartbeatTimer = setInterval(() => {
         sendSse("ping", { ts: Date.now() });
       }, HEARTBEAT_INTERVAL_MS);
+
+      maxLifetimeTimer = setTimeout(() => {
+        closeStream?.();
+      }, MAX_STREAM_LIFETIME_MS);
 
       request.signal.addEventListener("abort", closeStream);
     },
