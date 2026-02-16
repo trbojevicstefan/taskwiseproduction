@@ -39,7 +39,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
       enableSystem
       disableTransitionOnChange
     >
-      <SessionProvider>
+      <SessionProvider refetchOnWindowFocus={false} refetchInterval={0}>
         <UIStateProvider>
           <AuthProvider>
             {isDashboardRoute ? (

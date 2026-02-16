@@ -286,6 +286,7 @@ export default function TaskwiseGsapSection() {
                     <p className="text-lg font-normal leading-relaxed text-slate-300">{section.description}</p>
                     <Link
                       href="/signup"
+                      prefetch={false}
                       className={`inline-flex rounded-full px-8 py-3.5 text-xs font-bold uppercase tracking-widest transition-all hover:brightness-110 active:scale-95 ${section.buttonClass}`}
                     >
                       Start with Taskwise

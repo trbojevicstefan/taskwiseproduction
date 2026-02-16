@@ -160,10 +160,10 @@ export default function TaskwiseAIPage() {
           </nav>
           <div className="flex items-center gap-3">
             <Button variant="secondary" className="hidden sm:inline-flex bg-white/10 text-white hover:bg-white/20" asChild>
-                <Link href="/login">Sign in</Link>
+                <Link href="/login" prefetch={false}>Sign in</Link>
             </Button>
             <Button className="gem-button bg-gradient-to-r from-[#FF4D4D] via-[#FF9900] to-[#FF2E97] text-white" asChild>
-              <Link href="/signup">Get started</Link>
+              <Link href="/signup" prefetch={false}>Get started</Link>
             </Button>
           </div>
         </div>
@@ -187,7 +187,7 @@ export default function TaskwiseAIPage() {
             </p>
             <div className="flex flex-wrap items-center justify-center lg:justify-start gap-3">
               <Button size="lg" className="gem-button bg-gradient-to-r from-[#FF4D4D] via-[#FF9900] to-[#FF2E97] text-white" asChild>
-                <Link href="/signup">Try it free</Link>
+                <Link href="/signup" prefetch={false}>Try it free</Link>
               </Button>
               <Button size="lg" variant="secondary" className="bg-white/10 text-white hover:bg-white/20">
                 Watch demo <ChevronRight className="ml-1 h-4 w-4" />
