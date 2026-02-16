@@ -1119,7 +1119,7 @@ export function MeetingDetailSheet({
       });
       return () => unsubscribe();
     }
-  }, [user]);
+  }, [user?.uid]);
 
   const peopleByName = useMemo(() => {
     return new Map(people.map((person: any) => [person.name.toLowerCase(), person]));

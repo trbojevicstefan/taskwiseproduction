@@ -247,7 +247,7 @@ export default function PlanningPageContent() {
       });
       return () => unsubscribe();
     }
-  }, [user]);
+  }, [user?.uid]);
 
   useEffect(() => {
     if (user?.taskGranularityPreference) {

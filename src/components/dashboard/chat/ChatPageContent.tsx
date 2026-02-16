@@ -558,7 +558,7 @@ export default function ChatPageContent() {
       });
       return () => unsubscribe();
     }
-  }, [user]);
+  }, [user?.uid]);
 
   const handleShowFullText = (text: string) => {
     setTextForViewer(text);

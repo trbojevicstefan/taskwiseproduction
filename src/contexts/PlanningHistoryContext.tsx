@@ -89,7 +89,7 @@ export const PlanningHistoryProvider = ({ children }: { children: ReactNode }) =
       setActivePlanningSessionIdState(null);
       setIsLoadingPlanningHistory(false);
     }
-  }, [user]);
+  }, [user?.uid]);
 
   const setActivePlanningSessionId = useCallback((sessionId: string | null) => {
     setActivePlanningSessionIdState(sessionId);

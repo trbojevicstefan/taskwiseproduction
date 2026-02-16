@@ -85,7 +85,7 @@ export default function ExplorePageContent() {
             });
             return () => unsubscribe();
         }
-    }, [user]);
+    }, [user?.uid]);
 
   useEffect(() => {
     const fetchCalendarEvents = async () => {

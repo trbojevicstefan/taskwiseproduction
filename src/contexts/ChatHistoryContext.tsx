@@ -94,7 +94,7 @@ export const ChatHistoryProvider = ({ children }: { children: ReactNode }) => {
       setActiveSessionIdState(null);
       setIsLoadingHistory(false);
     }
-  }, [user]);
+  }, [user?.uid]);
 
   const setActiveSessionId = useCallback((sessionId: string | null) => {
     setActiveSessionIdState(sessionId);

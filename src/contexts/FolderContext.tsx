@@ -33,7 +33,7 @@ export const FolderProvider = ({ children }: { children: ReactNode }) => {
       setFolders([]);
       setIsLoadingFolders(false);
     }
-  }, [user]);
+  }, [user?.uid]);
 
   const addFolder = useCallback(async (folderData: Omit<Folder, 'id' | 'userId' | 'createdAt'>) => {
     if (!user?.uid) {

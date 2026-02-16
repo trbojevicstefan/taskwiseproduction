@@ -112,7 +112,7 @@ export default function PeoplePageContent() {
       setPeople([]);
       setIsLoading(false);
     }
-  }, [user]);
+  }, [user?.uid]);
 
   useEffect(() => {
     if (!isMatchDialogOpen) {
