@@ -143,7 +143,7 @@ const STOP_WORDS = new Set([
 const splitMetaParts = (input: string): { email?: string; title?: string } => {
   const parts = input
     .split(",")
-    .map((part) => part.trim())
+    .map((part: any) => part.trim())
     .filter(Boolean);
   let email: string | undefined;
   let title: string | undefined;
@@ -160,12 +160,12 @@ const splitMetaParts = (input: string): { email?: string; title?: string } => {
 const splitIntoSentences = (text: string): string[] =>
   text
     .split(/(?<=[.!?])\s+/)
-    .map((sentence) => sentence.trim())
+    .map((sentence: any) => sentence.trim())
     .filter(Boolean);
 
 const containsActionVerb = (phrase: string): boolean => {
   const lowered = phrase.toLowerCase();
-  return ACTION_VERBS.some((verb) => lowered.includes(verb));
+  return ACTION_VERBS.some((verb: any) => lowered.includes(verb));
 };
 
 const normalizeNameKey = (value: string): string =>
@@ -194,14 +194,14 @@ const isValidPersonName = (value: string | undefined): boolean => {
   if (!words.length) return false;
   if (words.length > 4) return false;
   if (words.every((word) => INVALID_NAME_WORDS.has(word))) return false;
-  if (words.some((word) => INVALID_NAME_WORDS.has(word)) && words.length === 1) return false;
+  if (words.some((word: any) => INVALID_NAME_WORDS.has(word)) && words.length === 1) return false;
   return true;
 };
 
 const normalizeAssigneeName = (value: string): string | undefined => {
   const cleaned = value
     .split(/\s+/)
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .map((part: any) => part.charAt(0).toUpperCase() + part.slice(1))
     .join(" ")
     .trim();
   return isValidPersonName(cleaned) ? cleaned : undefined;
@@ -355,7 +355,9 @@ const extractTaskFromSentence = (
     const assigneeRaw =
       pattern.assigneeFrom === "speaker"
         ? speaker
-        : match[pattern.assigneeFrom];
+        : pattern.assigneeFrom !== undefined
+          ? match[pattern.assigneeFrom]
+          : undefined;
     const assigneeName = assigneeRaw ? normalizeAssigneeName(assigneeRaw) : undefined;
     return {
       title,
@@ -396,7 +398,7 @@ const parseSpeakerLine = (line: string): TranscriptLine | null => {
 const extractLines = (transcript: string): TranscriptLine[] => {
   const lines = transcript
     .split(/\r?\n/)
-    .map((line) => line.trim())
+    .map((line: any) => line.trim())
     .filter(Boolean);
 
   const output: TranscriptLine[] = [];
@@ -441,7 +443,7 @@ export const extractTranscriptAttendees = (transcript: string): PersonSchemaType
 export const extractTranscriptEmails = (transcript: string): string[] => {
   const emails = new Set<string>();
   const matches = transcript.match(EMAIL_REGEX) || [];
-  matches.forEach((email) => emails.add(email.trim().toLowerCase()));
+  matches.forEach((email: any) => emails.add(email.trim().toLowerCase()));
   return Array.from(emails);
 };
 
@@ -456,7 +458,7 @@ export const extractTranscriptMentionNames = (
   speakerNames: string[] = []
 ): string[] => {
   const mentioned = new Set<string>();
-  const speakerSet = new Set(speakerNames.map((name) => normalizePersonNameKey(name)));
+  const speakerSet = new Set(speakerNames.map((name: any) => normalizePersonNameKey(name)));
   const lines = extractLines(transcript);
 
   for (const line of lines) {
@@ -521,7 +523,7 @@ const normalizeNameFromTask = (task: TaskType): string | undefined => {
 const normalizeAssigneeMap = (tasks: TaskType[]): Map<string, string> => {
   const map = new Map<string, string>();
   const walk = (items: TaskType[]) => {
-    items.forEach((task) => {
+    items.forEach((task: any) => {
       const key = normalizeTitleKey(task.title);
       const assignee = normalizeNameFromTask(task);
       if (key && assignee && !map.has(key)) {
@@ -548,7 +550,7 @@ export const assignAssigneesFromTranscript = (
 
   const assigneeMap = normalizeAssigneeMap(transcriptTasks);
   const assign = (items: TaskType[]): TaskType[] =>
-    items.map((task) => {
+    items.map((task: any) => {
       const key = normalizeTitleKey(task.title);
       const currentAssignee = normalizeNameFromTask(task);
       const fallbackAssignee = key ? assigneeMap.get(key) : undefined;
@@ -575,7 +577,7 @@ export const sanitizeTaskAssignees = (
 ): TaskType[] => {
   const hasValidNames = validNames.size > 0;
   const sanitize = (items: TaskType[]): TaskType[] =>
-    items.map((task) => {
+    items.map((task: any) => {
       const assignee = normalizeNameFromTask(task);
       const assigneeKey = assignee ? normalizePersonNameKey(assignee) : "";
       const validAssignee =
@@ -593,7 +595,7 @@ export const sanitizeTaskAssignees = (
 
 export const sanitizeTaskDescriptions = (tasks: TaskType[]): TaskType[] => {
   const sanitize = (items: TaskType[]): TaskType[] =>
-    items.map((task) => ({
+    items.map((task: any) => ({
       ...task,
       description: task.description ? cleanDescription(task.description, task.title) : task.description,
       subtasks: task.subtasks ? sanitize(task.subtasks) : task.subtasks,
@@ -619,8 +621,8 @@ export const attachEvidenceToTasks = (
     const title = task.title || "";
     const keywords = title
       .split(/\s+/)
-      .map((word) => word.replace(/[^a-zA-Z]/g, "").toLowerCase())
-      .filter((word) => word.length > 2 && !STOP_WORDS.has(word));
+      .map((word: any) => word.replace(/[^a-zA-Z]/g, "").toLowerCase())
+      .filter((word: any) => word.length > 2 && !STOP_WORDS.has(word));
 
     if (!keywords.length) {
       return {
@@ -629,9 +631,9 @@ export const attachEvidenceToTasks = (
       };
     }
 
-    const matched = lines.find((line) => {
+    const matched = lines.find((line: any) => {
       const text = line.text.toLowerCase();
-      return keywords.some((keyword) => text.includes(keyword));
+      return keywords.some((keyword: any) => text.includes(keyword));
     });
 
     if (!matched) {
@@ -655,3 +657,4 @@ export const attachEvidenceToTasks = (
 
   return tasks.map(attachToTask);
 };
+

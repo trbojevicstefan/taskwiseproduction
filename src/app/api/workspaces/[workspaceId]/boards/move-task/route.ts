@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
+import { apiError } from "@/lib/api-route";
 import { randomUUID } from "crypto";
 import { getDb } from "@/lib/db";
 import { getSessionUserId } from "@/lib/server-auth";
-import { buildIdQuery } from "@/lib/mongo-id";
 
 const serializeTask = (task: any) => ({
   ...task,
@@ -14,13 +14,20 @@ const serializeTask = (task: any) => ({
 
 const getNextRank = async (db: any, filter: Record<string, any>) => {
   const lastItem = await db
-    .collection<any>("boardItems")
+    .collection("boardItems")
     .find(filter)
     .sort({ rank: -1 })
     .limit(1)
     .toArray();
   const lastRank = typeof lastItem[0]?.rank === "number" ? lastItem[0].rank : 0;
   return lastRank + 1000;
+};
+
+const isDuplicateKeyError = (error: any) => {
+  if (!error) return false;
+  if (error.code === 11000) return true;
+  const message = String(error.message || "");
+  return message.includes("E11000 duplicate key error");
 };
 
 export async function POST(
@@ -36,7 +43,7 @@ export async function POST(
   const { workspaceId } = await Promise.resolve(params);
   const userId = await getSessionUserId();
   if (!userId) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return apiError(401, "request_error", "Unauthorized");
   }
 
   const body = await request.json().catch(() => ({}));
@@ -45,45 +52,42 @@ export async function POST(
   const statusId = typeof body.statusId === "string" ? body.statusId : null;
 
   if (!workspaceId || !boardId || !taskId) {
-    return NextResponse.json(
-      { error: "Workspace ID, board ID, and task ID are required." },
-      { status: 400 }
-    );
+    return apiError(400, "request_error", "Workspace ID, board ID, and task ID are required.");
   }
 
   const db = await getDb();
-  const userIdQuery = buildIdQuery(userId);
-  const taskIdQuery = buildIdQuery(taskId);
+  const userIdQuery = userId;
+  const taskIdQuery = taskId;
 
   const normalizedTaskId = taskId && taskId.includes(":") ? taskId.split(":").slice(1).join(":") : null;
-  const normalizedTaskIdQuery = normalizedTaskId ? buildIdQuery(normalizedTaskId) : null;
+  const normalizedTaskIdQuery = normalizedTaskId || null;
 
-  const task = await db.collection<any>("tasks").findOne({
+  const task = await db.collection("tasks").findOne({
     userId: userIdQuery,
     $or: [{ _id: taskIdQuery }, { id: taskId }],
   });
   if (!task) {
-    return NextResponse.json({ error: "Task not found." }, { status: 404 });
+    return apiError(404, "request_error", "Task not found.");
   }
 
   const statuses = await db
-    .collection<any>("boardStatuses")
+    .collection("boardStatuses")
     .find({ userId: userIdQuery, workspaceId, boardId })
     .sort({ order: 1 })
     .toArray();
   if (!statuses.length) {
-    return NextResponse.json({ error: "Board status not found." }, { status: 404 });
+    return apiError(404, "request_error", "Board status not found.");
   }
 
   let status =
     statusId &&
-    statuses.find((item) => {
+    statuses.find((item: any) => {
       const id = item._id?.toString?.() || item._id;
       return id === statusId || item.id === statusId;
     });
 
   if (!status && task.status) {
-    status = statuses.find((item) => item.category === task.status);
+    status = statuses.find((item: any) => item.category === task.status);
   }
 
   if (!status) {
@@ -97,13 +101,13 @@ export async function POST(
   if (normalizedTaskIdQuery) orConds.push({ taskId: normalizedTaskIdQuery });
   orConds.push({ taskCanonicalId: taskIdQuery });
   if (normalizedTaskIdQuery) orConds.push({ taskCanonicalId: normalizedTaskIdQuery });
-  await db.collection<any>("boardItems").deleteMany({
+  await db.collection("boardItems").deleteMany({
     userId: userIdQuery,
     workspaceId,
     $or: orConds,
   });
 
-  await db.collection<any>("tasks").updateOne(
+  await db.collection("tasks").updateOne(
     { userId: userIdQuery, _id: task._id },
     {
       $set: {
@@ -115,7 +119,7 @@ export async function POST(
     }
   );
 
-  const updatedTask = await db.collection<any>("tasks").findOne({
+  const updatedTask = await db.collection("tasks").findOne({
     userId: userIdQuery,
     _id: task._id,
   });
@@ -133,13 +137,20 @@ export async function POST(
     workspaceId,
     boardId,
     taskId: task._id?.toString?.() || task._id,
+    taskCanonicalId: task._id?.toString?.() || task._id,
     statusId: statusIdValue,
     rank,
     createdAt: now,
     updatedAt: now,
   };
 
-  await db.collection<any>("boardItems").insertOne(item);
+  try {
+    await db.collection("boardItems").insertOne(item);
+  } catch (error: any) {
+    if (!isDuplicateKeyError(error)) {
+      throw error;
+    }
+  }
 
   return NextResponse.json({
     ...serializeTask(updatedTask || task),

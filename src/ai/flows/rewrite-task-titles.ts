@@ -175,7 +175,7 @@ export async function rewriteTaskTitles(
   if (!tasks.length) return tasks;
   const flattened = flattenTasks(tasks);
   if (!flattened.length) return tasks;
-  const lowQualityItems = flattened.filter((item) => scoreTitleQuality(item) < 0.72);
+  const lowQualityItems = flattened.filter((item: any) => scoreTitleQuality(item) < 0.72);
   if (!lowQualityItems.length) {
     return tasks;
   }
@@ -193,7 +193,7 @@ export async function rewriteTaskTitles(
   }
 
   const updates = new Map<string, { title?: string; description?: string }>();
-  parsed.data.items.forEach((item) => {
+  parsed.data.items.forEach((item: any) => {
     updates.set(item.path, {
       title: item.title,
       description: item.description,
@@ -202,3 +202,4 @@ export async function rewriteTaskTitles(
 
   return applyRewrites(tasks, updates);
 }
+

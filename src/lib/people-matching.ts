@@ -25,13 +25,13 @@ const tokenize = (value: string) =>
   new Set(
     value
       .split(" ")
-      .map((token) => token.trim())
+      .map((token: any) => token.trim())
       .filter(Boolean)
   );
 
 const intersectionSize = (a: Set<string>, b: Set<string>) => {
   let count = 0;
-  a.forEach((token) => {
+  a.forEach((token: any) => {
     if (b.has(token)) count += 1;
   });
   return count;
@@ -99,11 +99,11 @@ const hasAliasMatch = (source: CandidatePerson, target: Person) => {
   if (!sourceName && !sourceEmail) return false;
 
   const toTokens = (value: string) =>
-    value.split(" ").map((token) => token.trim()).filter(Boolean);
+    value.split(" ").map((token: any) => token.trim()).filter(Boolean);
   const isSubset = (subset: string[], container: Set<string>) =>
     subset.every((token) => container.has(token));
 
-  return (target.aliases || []).some((alias) => {
+  return (target.aliases || []).some((alias: any) => {
     const trimmed = alias?.trim();
     if (!trimmed) return false;
     const aliasEmail = normalizeEmail(trimmed);
@@ -135,30 +135,30 @@ export const getRankedPersonMatches = (
   const candidateName = candidate.name ? candidate.name.trim() : "";
   const ranked: CandidateMatch[] = [];
 
-  existing.forEach((person) => {
-    if (person.isBlocked) return;
-    if (!person.name) return;
+  for (const person of existing) {
+    if (person.isBlocked) continue;
+    if (!person.name) continue;
 
     const personEmail = normalizeEmail(person.email);
     if (candidateEmail && personEmail && candidateEmail === personEmail) {
       ranked.push({ person, confidence: 1, reason: "email" });
-      return;
+      continue;
     }
 
     if (hasAliasMatch(candidate, person)) {
       ranked.push({ person, confidence: 0.92, reason: "alias" });
-      return;
+      continue;
     }
 
     if (candidateName) {
       const score = nameSimilarity(candidateName, person.name);
       ranked.push({ person, confidence: score, reason: "name" });
     }
-  });
+  }
 
   return ranked
-    .filter((match) => match.confidence > 0)
-    .sort((a, b) => b.confidence - a.confidence)
+    .filter((match: any) => match.confidence > 0)
+    .sort((a: any, b: any) => b.confidence - a.confidence)
     .slice(0, limit);
 };
 
@@ -173,14 +173,14 @@ export const getBestPersonMatch = (
   let best: { person: Person; confidence: number; reason: PersonMatchReason } | null =
     null;
 
-  existing.forEach((person) => {
-    if (person.isBlocked) return;
-    if (!person.name) return;
+  for (const person of existing) {
+    if (person.isBlocked) continue;
+    if (!person.name) continue;
 
     const personEmail = normalizeEmail(person.email);
     if (candidateEmail && personEmail && candidateEmail === personEmail) {
       best = { person, confidence: 1, reason: "email" };
-      return;
+      continue;
     }
 
     if (hasAliasMatch(candidate, person)) {
@@ -188,7 +188,7 @@ export const getBestPersonMatch = (
       if (!best || confidence > best.confidence) {
         best = { person, confidence, reason: "alias" };
       }
-      return;
+      continue;
     }
 
     if (candidateName) {
@@ -197,7 +197,7 @@ export const getBestPersonMatch = (
         best = { person, confidence: score, reason: "name" };
       }
     }
-  });
+  }
 
   if (!best || best.confidence < threshold) return null;
   return best;
@@ -207,27 +207,27 @@ export const getPotentialPersonMatches = (
   people: Person[],
   threshold = 0.78
 ): PersonMatch[] => {
-  const candidates = people.filter((person) => !person.isBlocked);
-  const withSlack = candidates.filter((person) => person.slackId || person.email);
-  const withoutSlack = candidates.filter((person) => !person.slackId);
+  const candidates = people.filter((person: any) => !person.isBlocked);
+  const withSlack = candidates.filter((person: any) => person.slackId || person.email);
+  const withoutSlack = candidates.filter((person: any) => !person.slackId);
 
   const matches: PersonMatch[] = [];
-  withoutSlack.forEach((source) => {
+  for (const source of withoutSlack) {
     let best: PersonMatch | null = null;
-    withSlack.forEach((target) => {
-      if (source.id === target.id) return;
+    for (const target of withSlack) {
+      if (source.id === target.id) continue;
       const emailMatch =
         source.email && target.email && source.email.toLowerCase() === target.email.toLowerCase();
       if (emailMatch) {
         best = { source, target, confidence: 1, reason: "email" };
-        return;
+        continue;
       }
       if (hasAliasMatch(source, target)) {
         const confidence = 0.92;
         if (!best || confidence > best.confidence) {
           best = { source, target, confidence, reason: "alias" };
         }
-        return;
+        continue;
       }
       if (source.name && target.name) {
         const score = nameSimilarity(source.name, target.name);
@@ -235,12 +235,14 @@ export const getPotentialPersonMatches = (
           best = { source, target, confidence: score, reason: "name" };
         }
       }
-    });
+    }
 
     if (best && best.confidence >= threshold) {
       matches.push(best);
     }
-  });
+  }
 
-  return matches.sort((a, b) => b.confidence - a.confidence);
+  return matches.sort((a: any, b: any) => b.confidence - a.confidence);
 };
+
+

@@ -1,6 +1,6 @@
-import { NextResponse } from "next/server";
 import { z } from "zod";
 import { createUser, findUserByEmail } from "@/lib/db/users";
+import { apiError, apiSuccess, mapApiError, parseJsonBody } from "@/lib/api-route";
 
 const registerSchema = z.object({
   email: z.string().email(),
@@ -9,29 +9,27 @@ const registerSchema = z.object({
 });
 
 export async function POST(request: Request) {
-  const body = await request.json().catch(() => null);
-  const parsed = registerSchema.safeParse(body);
-
-  if (!parsed.success) {
-    return NextResponse.json(
-      { error: "Invalid registration data." },
-      { status: 400 }
+  try {
+    const { email, password, displayName } = await parseJsonBody(
+      request,
+      registerSchema,
+      "Invalid registration data."
     );
+
+    const existing = await findUserByEmail(email);
+    if (existing) {
+      return apiError(409, "email_in_use", "Email already in use.");
+    }
+
+    const user = await createUser({ email, password, displayName });
+
+    return apiSuccess({
+      id: user._id.toString(),
+      email: user.email,
+      name: user.name,
+    });
+  } catch (error) {
+    return mapApiError(error, "Failed to register user.");
   }
-
-  const { email, password, displayName } = parsed.data;
-
-  const existing = await findUserByEmail(email);
-  if (existing) {
-    return NextResponse.json({ error: "Email already in use." }, { status: 409 });
-  }
-
-  const user = await createUser({ email, password, displayName });
-
-  return NextResponse.json({
-    id: user._id.toString(),
-    email: user.email,
-    name: user.name,
-  });
 }
 

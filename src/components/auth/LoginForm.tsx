@@ -10,12 +10,15 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import Link from 'next/link';
 import { Loader2 } from 'lucide-react';
 import { signIn } from "next-auth/react";
+import { useSearchParams } from "next/navigation";
 
 export default function LoginForm() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const { login, loading } = useAuth();
   const [error, setError] = useState<string | null>(null);
+  const searchParams = useSearchParams();
+  const callbackUrl = searchParams?.get("callbackUrl") || "/meetings";
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -73,7 +76,7 @@ export default function LoginForm() {
             type="button"
             variant="outline"
             className="w-full border-white/20 text-white hover:bg-white/10"
-            onClick={() => signIn("google", { callbackUrl: "/meetings" })}
+            onClick={() => signIn("google", { callbackUrl })}
           >
             Continue with Google
           </Button>
@@ -82,7 +85,14 @@ export default function LoginForm() {
       <CardFooter className="flex justify-center">
         <p className="text-sm text-white/60">
           Don't have an account?{' '}
-          <Link href="/signup" className="font-medium text-primary hover:text-primary/80">
+          <Link
+            href={
+              callbackUrl
+                ? `/signup?callbackUrl=${encodeURIComponent(callbackUrl)}`
+                : "/signup"
+            }
+            className="font-medium text-primary hover:text-primary/80"
+          >
             Sign up
           </Link>
         </p>

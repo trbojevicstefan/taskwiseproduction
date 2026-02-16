@@ -112,7 +112,7 @@ const CONTEXT_STOPWORDS = new Set([
 const flattenTaskList = (tasks: TaskType[]): TaskType[] => {
   const flat: TaskType[] = [];
   const walk = (items: TaskType[]) => {
-    items.forEach((task) => {
+    items.forEach((task: any) => {
       flat.push(task);
       if (task.subtasks?.length) {
         walk(task.subtasks);
@@ -128,8 +128,8 @@ const tokenizeMessage = (text: string): string[] =>
     .toLowerCase()
     .replace(/[^a-z0-9\s]/g, " ")
     .split(/\s+/)
-    .map((token) => token.trim())
-    .filter((token) => token.length > 2 && !CONTEXT_STOPWORDS.has(token));
+    .map((token: any) => token.trim())
+    .filter((token: any) => token.length > 2 && !CONTEXT_STOPWORDS.has(token));
 
 const taskLookupKey = (task: TaskType) => {
   if (task.id) return `id:${task.id}`;
@@ -142,7 +142,7 @@ const scoreTaskRelevance = (task: TaskType, queryTokens: string[]) => {
   const haystack = normalizeTitleKey(`${task.title} ${task.description || ""}`);
   if (!haystack) return 0;
   let matched = 0;
-  queryTokens.forEach((token) => {
+  queryTokens.forEach((token: any) => {
     if (haystack.includes(token)) matched += 1;
   });
   return matched / queryTokens.length;
@@ -171,14 +171,14 @@ const selectPromptTaskContext = (tasks: TaskType[], message: string) => {
       index,
       score: scoreTaskRelevance(task, queryTokens),
     }))
-    .sort((a, b) => b.score - a.score || a.index - b.index);
+    .sort((a: any, b: any) => b.score - a.score || a.index - b.index);
 
   const selected = scored
     .slice(0, EXISTING_TASK_CONTEXT_CAP)
-    .map((entry) => entry.task);
+    .map((entry: any) => entry.task);
   const deduped = Array.from(
-    new Map(selected.map((task) => [taskLookupKey(task), task])).values()
-  ).filter((task) => taskLookupKey(task));
+    new Map(selected.map((task: any) => [taskLookupKey(task), task])).values()
+  ).filter((task: any) => taskLookupKey(task));
   return {
     scopedTasks: deduped,
     scopedKeys: new Set(deduped.map(taskLookupKey).filter(Boolean)),
@@ -197,7 +197,7 @@ const mergeScopedTaskUpdates = (
   const isDeleteIntent = /\b(delete|remove|archive)\b/i.test(message);
   const updateByKey = new Map(
     scopedUpdates
-      .map((task) => [taskLookupKey(task), task] as const)
+      .map((task: any) => [taskLookupKey(task), task] as const)
       .filter(([key]) => Boolean(key))
   );
   const consumed = new Set<string>();
@@ -232,7 +232,7 @@ const mergeScopedTaskUpdates = (
     }, []);
 
   const merged = walk(fullTasks);
-  const append = scopedUpdates.filter((task) => {
+  const append = scopedUpdates.filter((task: any) => {
     const key = taskLookupKey(task);
     return key ? !consumed.has(key) : true;
   });
@@ -271,7 +271,7 @@ const extractTasksFromMessageFlow = ai.defineFlow(
       (!input.existingTasks || input.existingTasks.length === 0) &&
       wordCount > 0 &&
       wordCount <= 10 &&
-      multiStepTriggers.some((trigger) => normalizedMessage.toLowerCase().includes(trigger));
+      multiStepTriggers.some((trigger: any) => normalizedMessage.toLowerCase().includes(trigger));
     const effectiveMessage = shouldForceBreakdown
       ? `Break this down into concrete, step-by-step tasks that complete the goal: ${input.message}`
       : input.message;
@@ -409,3 +409,5 @@ const extractTasksFromMessageFlow = ai.defineFlow(
 export async function extractTasksFromMessage(input: ExtractTasksFromMessageInput): Promise<ExtractTasksFromMessageOutput> {
   return await extractTasksFromMessageFlow(input);
 }
+
+

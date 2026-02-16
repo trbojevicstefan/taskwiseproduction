@@ -4,7 +4,7 @@ import { getDb } from "@/lib/db";
 import { detectCompletedTasks } from "@/ai/flows/detect-completed-tasks-flow";
 import { normalizePersonNameKey } from "@/lib/transcript-utils";
 import { normalizeTitleKey, isPlaceholderTitle, isValidTitle } from "@/lib/ai-utils";
-import { buildIdQuery } from "@/lib/mongo-id";
+import { recordExternalApiFailure } from "@/lib/observability-metrics";
 
 export type CompletionTarget = {
   sourceType: "task" | "meeting" | "chat";
@@ -174,7 +174,7 @@ const chunkCandidates = <T,>(items: T[], size: number): T[][] => {
 const splitSentences = (text: string): string[] =>
   text
     .split(/(?:[.!?])\s+/)
-    .map((sentence) => sentence.trim())
+    .map((sentence: any) => sentence.trim())
     .filter(Boolean);
 
 const parseTranscriptLine = (
@@ -203,7 +203,7 @@ const isGenericCompletion = (text: string) => {
 const extractCompletionSnippets = (transcript: string): CompletionSnippet[] => {
   const lines = transcript
     .split(/\r?\n/)
-    .map((line) => line.trim())
+    .map((line: any) => line.trim())
     .filter(Boolean);
   const snippets: CompletionSnippet[] = [];
   const seen = new Set<string>();
@@ -251,7 +251,7 @@ const extractCompletionSnippets = (transcript: string): CompletionSnippet[] => {
 const dedupeCompletionSnippets = (snippets: CompletionSnippet[]) => {
   const seen = new Set<string>();
   const deduped: CompletionSnippet[] = [];
-  snippets.forEach((snippet) => {
+  snippets.forEach((snippet: any) => {
     const key = normalizeTitleKey(snippet.text);
     if (!key || seen.has(key)) return;
     seen.add(key);
@@ -304,12 +304,22 @@ const embedTexts = async (texts: string[]): Promise<number[][]> => {
   if (!texts.length) return [];
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) {
+    void recordExternalApiFailure({
+      provider: "openai",
+      operation: "embeddings.create",
+      error: "OPENAI_API_KEY is required for embeddings.",
+      metadata: {
+        model: EMBEDDING_MODEL,
+        inputs: texts.length,
+      },
+    });
     console.error("OPENAI_API_KEY is required for embeddings.");
     return [];
   }
   const batches = chunkCandidates(texts, 40);
   const output: number[][] = [];
   for (const batch of batches) {
+    const requestStartedAtMs = Date.now();
     try {
       const response = await fetch(OPENAI_EMBEDDINGS_URL, {
         method: "POST",
@@ -324,6 +334,17 @@ const embedTexts = async (texts: string[]): Promise<number[][]> => {
       });
       if (!response.ok) {
         const payload = await response.text();
+        void recordExternalApiFailure({
+          provider: "openai",
+          operation: "embeddings.create",
+          statusCode: response.status,
+          durationMs: Date.now() - requestStartedAtMs,
+          error: payload || response.statusText,
+          metadata: {
+            model: EMBEDDING_MODEL,
+            batchSize: batch.length,
+          },
+        });
         console.error(
           `OpenAI embeddings failed: ${response.status} ${payload}`
         );
@@ -344,6 +365,16 @@ const embedTexts = async (texts: string[]): Promise<number[][]> => {
       }
       output.push(...data.map((item: any) => item.embedding || []));
     } catch (error) {
+      void recordExternalApiFailure({
+        provider: "openai",
+        operation: "embeddings.create",
+        durationMs: Date.now() - requestStartedAtMs,
+        error,
+        metadata: {
+          model: EMBEDDING_MODEL,
+          batchSize: batch.length,
+        },
+      });
       console.error("Embedding failed:", error);
       return [];
     }
@@ -448,17 +479,16 @@ export const buildCompletionSuggestions = async ({
   void excludeMeetingId;
 
   const attendeeNames = new Set(
-    attendees.map((person) => normalizeAssigneeName(person.name)).filter(Boolean)
+    attendees.map((person: any) => normalizeAssigneeName(person.name)).filter(Boolean)
   );
   const attendeeEmails = new Set(
-    attendees.map((person) => normalizeEmail(person.email)).filter(Boolean)
+    attendees.map((person: any) => normalizeEmail(person.email)).filter(Boolean)
   );
   const hasAttendees =
     requireAttendeeMatch && (attendeeNames.size > 0 || attendeeEmails.size > 0);
 
   let allowUnassigned = !hasAttendees || !requireAttendeeMatch;
   const db = await getDb();
-  const userIdQuery = buildIdQuery(userId);
   const shouldIncludeAssignee = (
     assigneeName?: string | null,
     assigneeEmail?: string | null,
@@ -487,14 +517,14 @@ export const buildCompletionSuggestions = async ({
       : null;
 
   const taskFilters: Record<string, any> = {
-    userId: userIdQuery,
+    userId,
     status: { $ne: "done" },
   };
   if (workspaceFilter) {
     taskFilters.$and = [workspaceFilter];
   }
   const tasks = await db
-    .collection<any>("tasks")
+    .collection("tasks")
     .find(taskFilters)
     .toArray();
 
@@ -550,7 +580,7 @@ export const buildCompletionSuggestions = async ({
       chats: { total: 0, added: 0 },
     };
 
-    tasks.forEach((task) => {
+    tasks.forEach((task: any) => {
       stats.tasks.total += 1;
       const assigneeName = task.assignee?.name || task.assigneeName || null;
       const assigneeEmail = task.assignee?.email || task.assigneeEmail || null;
@@ -650,7 +680,7 @@ export const buildCompletionSuggestions = async ({
 
   const taskEmbeddingById = new Map<string, number[]>();
   const tasksNeedingEmbedding: Array<{ id: string; text: string }> = [];
-  tasks.forEach((task) => {
+  tasks.forEach((task: any) => {
     const rawId = task._id?.toString?.() || task._id || task.id;
     const taskId = rawId ? String(rawId) : "";
     if (!taskId || !task.title) return;
@@ -669,13 +699,13 @@ export const buildCompletionSuggestions = async ({
 
   if (tasksNeedingEmbedding.length) {
     const embeddings = await embedTexts(
-      tasksNeedingEmbedding.map((item) => item.text)
+      tasksNeedingEmbedding.map((item: any) => item.text)
     );
     if (embeddings.length === tasksNeedingEmbedding.length) {
       const updates = tasksNeedingEmbedding.map((item, index) => ({
         updateOne: {
           filter: {
-            $or: [{ _id: buildIdQuery(item.id) }, { id: item.id }],
+            $or: [{ _id: item.id }, { id: item.id }],
           },
           update: {
             $set: {
@@ -687,7 +717,7 @@ export const buildCompletionSuggestions = async ({
         },
       }));
       if (updates.length) {
-        await db.collection<any>("tasks").bulkWrite(updates, { ordered: false });
+        await db.collection("tasks").bulkWrite(updates, { ordered: false });
       }
       tasksNeedingEmbedding.forEach((item, index) => {
         taskEmbeddingById.set(item.id, embeddings[index]);
@@ -706,11 +736,11 @@ export const buildCompletionSuggestions = async ({
   const candidateTokens = new Map<string, Set<string>>();
   const candidatesNeedingEmbedding: Array<{ id: string; text: string }> = [];
 
-  candidateList.forEach((candidate) => {
+  candidateList.forEach((candidate: any) => {
     const text = buildEmbeddingText(candidate.title, candidate.description);
     candidateTokens.set(candidate.groupId, text ? toTokenSet(text) : new Set());
     const taskTarget = candidate.targets.find(
-      (target) => target.sourceType === "task"
+      (target: any) => target.sourceType === "task"
     );
     if (taskTarget?.taskId) {
       const taskEmbedding = taskEmbeddingById.get(String(taskTarget.taskId));
@@ -726,7 +756,7 @@ export const buildCompletionSuggestions = async ({
 
   if (candidatesNeedingEmbedding.length) {
     const embeddings = await embedTexts(
-      candidatesNeedingEmbedding.map((item) => item.text)
+      candidatesNeedingEmbedding.map((item: any) => item.text)
     );
     if (embeddings.length === candidatesNeedingEmbedding.length) {
       candidatesNeedingEmbedding.forEach((item, index) => {
@@ -735,7 +765,7 @@ export const buildCompletionSuggestions = async ({
     }
   }
 
-  const snippetTexts = completionSnippets.map((snippet) => snippet.text);
+  const snippetTexts = completionSnippets.map((snippet: any) => snippet.text);
   const snippetEmbeddings = completionSnippets.length
     ? await embedTexts(snippetTexts)
     : [];
@@ -774,7 +804,7 @@ export const buildCompletionSuggestions = async ({
   completionSnippets.forEach((snippet, index) => {
     const snippetTokens = toTokenSet(snippet.text);
     const scored = candidateList
-      .map((candidate) => {
+      .map((candidate: any) => {
         const tokenScore = jaccardSimilarity(
           snippetTokens,
           candidateTokens.get(candidate.groupId) || new Set()
@@ -795,18 +825,18 @@ export const buildCompletionSuggestions = async ({
           embeddingScore,
         };
       })
-      .sort((a, b) => b.score - a.score);
+      .sort((a: any, b: any) => b.score - a.score);
     rankedBySnippet.push({ snippet, scored });
 
-    scored.slice(0, 8).forEach((item) => {
+    scored.slice(0, 8).forEach((item: any) => {
       if (item.score >= minimumCandidateScore) {
         selectedCandidateIds.add(item.id);
       }
     });
     scored
-      .filter((item) => item.score >= selectionThreshold)
-      .forEach((item) => selectedCandidateIds.add(item.id));
-    scored.slice(0, 4).forEach((item) => {
+      .filter((item: any) => item.score >= selectionThreshold)
+      .forEach((item: any) => selectedCandidateIds.add(item.id));
+    scored.slice(0, 4).forEach((item: any) => {
       if (item.score >= 0.2) {
         shortlistCandidateIds.add(item.id);
       }
@@ -815,10 +845,10 @@ export const buildCompletionSuggestions = async ({
 
   const filteredCandidates =
     selectedCandidateIds.size > 0
-      ? candidateList.filter((candidate) =>
+      ? candidateList.filter((candidate: any) =>
         selectedCandidateIds.has(candidate.groupId)
       )
-      : candidateList.filter((candidate) =>
+      : candidateList.filter((candidate: any) =>
         shortlistCandidateIds.has(candidate.groupId)
       );
 
@@ -839,10 +869,10 @@ export const buildCompletionSuggestions = async ({
 
   const limitedCandidates = filteredCandidates;
   const limitedCandidateIds = new Set(
-    limitedCandidates.map((candidate) => candidate.groupId)
+    limitedCandidates.map((candidate: any) => candidate.groupId)
   );
   const candidateById = new Map(
-    limitedCandidates.map((candidate) => [candidate.groupId, candidate])
+    limitedCandidates.map((candidate: any) => [candidate.groupId, candidate])
   );
   const llmCandidateCountPerSnippet = 4;
   const llmSnippetCap = TASK_COMPLETION_LLM_SNIPPET_CAP;
@@ -883,7 +913,7 @@ export const buildCompletionSuggestions = async ({
 
   let directMatches = 0;
   rankedBySnippet.forEach(({ snippet, scored }) => {
-    const scopedScores = scored.filter((item) =>
+    const scopedScores = scored.filter((item: any) =>
       limitedCandidateIds.has(item.id)
     );
     if (!scopedScores.length) return;
@@ -910,9 +940,9 @@ export const buildCompletionSuggestions = async ({
     }
 
     const llmCandidates = scopedScores
-      .filter((item) => item.score >= llmCandidateScoreFloor)
+      .filter((item: any) => item.score >= llmCandidateScoreFloor)
       .slice(0, llmCandidateCountPerSnippet)
-      .map((item) => candidateById.get(item.id))
+      .map((item: any) => candidateById.get(item.id))
       .filter((candidate): candidate is CompletionCandidate => Boolean(candidate));
     if (!llmCandidates.length) {
       if (top.score >= minimumCandidateScore && margin >= directMatchMargin + 0.05) {
@@ -935,7 +965,7 @@ export const buildCompletionSuggestions = async ({
   let llmReviewCalls = 0;
   let llmMatches = 0;
   const snippetsForModel = snippetReviewQueue
-    .sort((a, b) => b.topScore - a.topScore)
+    .sort((a: any, b: any) => b.topScore - a.topScore)
     .slice(0, llmSnippetCap);
   for (const review of snippetsForModel) {
     const prefix = [review.snippet.timestamp, review.snippet.speaker]
@@ -946,7 +976,7 @@ export const buildCompletionSuggestions = async ({
       : review.snippet.text;
     const completionResponse = await detectCompletedTasks({
       transcript: snippetTranscript,
-      candidates: review.candidates.map((candidate) => ({
+      candidates: review.candidates.map((candidate: any) => ({
         groupId: candidate.groupId,
         title: toCompactCandidateTitle(candidate.title),
         assigneeKey: buildAssigneeKey(
@@ -973,7 +1003,7 @@ export const buildCompletionSuggestions = async ({
       }
       continue;
     }
-    completedItems.forEach((item) => {
+    completedItems.forEach((item: any) => {
       mergeCompletion({
         groupId: item.groupId,
         confidence: item.confidence ?? review.topScore,
@@ -1002,13 +1032,13 @@ export const buildCompletionSuggestions = async ({
   }
 
   const candidateMap = new Map(
-    limitedCandidates.map((candidate) => [candidate.groupId, candidate])
+    limitedCandidates.map((candidate: any) => [candidate.groupId, candidate])
   );
 
   const normalizeGroupId = (value: string) =>
     value.trim().toLowerCase().replace(/[^a-z0-9_]/g, "");
   const candidateAliasMap = new Map(
-    limitedCandidates.map((candidate) => [
+    limitedCandidates.map((candidate: any) => [
       normalizeGroupId(candidate.groupId),
       candidate,
     ])
@@ -1020,7 +1050,7 @@ export const buildCompletionSuggestions = async ({
     item: { groupId: string; confidence?: number; evidence: TaskEvidence };
   }> = [];
 
-  Array.from(completedById.values()).forEach((item) => {
+  Array.from(completedById.values()).forEach((item: any) => {
     const rawGroupId = String(item.groupId || "");
     const normalizedGroupId = normalizeGroupId(rawGroupId);
     const candidate =
@@ -1056,7 +1086,7 @@ export const buildCompletionSuggestions = async ({
   const resolveFallbackCandidates = async () => {
     if (!unmatched.length || matchedCandidates.size >= limitedCandidates.length) return;
     const evidenceTexts = unmatched
-      .map((entry) => entry.item.evidence?.snippet || "")
+      .map((entry: any) => entry.item.evidence?.snippet || "")
       .filter(Boolean);
     if (!evidenceTexts.length) return;
     const evidenceEmbeddings =
@@ -1148,14 +1178,14 @@ export const mergeCompletionSuggestions = (
   };
 
   const suggestionByKey = new Map<string, ExtractedTaskSchema>();
-  suggestions.forEach((suggestion) => {
+  suggestions.forEach((suggestion: any) => {
     const key = matchKey(suggestion);
     if (!key) return;
     suggestionByKey.set(key, suggestion);
   });
 
   const applySuggestions = (items: ExtractedTaskSchema[]): ExtractedTaskSchema[] =>
-    items.map((task) => {
+    items.map((task: any) => {
       const key = matchKey(task);
       const suggestion = suggestionByKey.get(key);
       if (suggestion) {
@@ -1176,7 +1206,7 @@ export const mergeCompletionSuggestions = (
     });
 
   const updated = applySuggestions(tasks);
-  const remaining = Array.from(suggestionByKey.values()).map((suggestion) => ({
+  const remaining = Array.from(suggestionByKey.values()).map((suggestion: any) => ({
     ...suggestion,
     status: suggestion.status && suggestion.status !== "done" ? suggestion.status : "todo",
     completionSuggested: true,
@@ -1189,8 +1219,6 @@ export const applyCompletionTargets = async (
   userId: string,
   suggestions: ExtractedTaskSchema[]
 ) => {
-  const userIdQuery = buildIdQuery(userId);
-
   for (const suggestion of suggestions) {
     if (!suggestion.completionTargets?.length) continue;
 
@@ -1203,8 +1231,8 @@ export const applyCompletionTargets = async (
       const taskIds = directTaskTargets.map(t => t.taskId);
       await db.collection("tasks").updateMany(
         {
-          userId: userIdQuery,
-          $or: [{ _id: { $in: taskIds.map(id => buildIdQuery(id)) } }, { id: { $in: taskIds } }],
+          userId,
+          $or: [{ _id: { $in: taskIds } }, { id: { $in: taskIds } }],
         },
         {
           $set: {
@@ -1219,25 +1247,21 @@ export const applyCompletionTargets = async (
     // 2. Update tasks targeted by Session/Source ID
     const sessionTargets = targets.filter(t => t.sourceType !== "task");
     for (const target of sessionTargets) {
-      const sessionIdQuery = buildIdQuery(target.sourceSessionId);
-      const taskIdQuery = buildIdQuery(target.taskId);
-
       await db.collection("tasks").updateMany(
         {
-          userId: userIdQuery,
+          userId,
           sourceSessionType: target.sourceType,
           $and: [
             {
               $or: [
-                { sourceSessionId: sessionIdQuery },
                 { sourceSessionId: target.sourceSessionId },
               ],
             },
             {
               $or: [
-                { _id: taskIdQuery },
+                { _id: target.taskId },
                 { sourceTaskId: target.taskId },
-                { sourceTaskId: taskIdQuery },
+                { id: target.taskId },
               ],
             },
           ],
@@ -1267,7 +1291,7 @@ export const filterTasksForSessionSync = (
     const targets = task.completionTargets || [];
     if (!targets.length) return true;
     return targets.some(
-      (target) =>
+      (target: any) =>
         target.sourceType === sessionType &&
         String(target.sourceSessionId) === sessionKey
     );

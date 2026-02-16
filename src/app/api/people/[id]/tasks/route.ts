@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
 import { getSessionUserId } from "@/lib/server-auth";
-import { buildIdQuery } from "@/lib/mongo-id";
 import { normalizePersonNameKey } from "@/lib/transcript-utils";
 import type { ExtractedTaskSchema } from "@/types/chat";
 import type { ObjectId, Db, WithId, Document } from "mongodb";
@@ -127,7 +126,7 @@ const flattenExtractedTasks = (
 ): ExtractedTaskSchema[] => {
   const result: ExtractedTaskSchema[] = [];
   const walk = (items: ExtractedTaskSchema[]) => {
-    items.forEach((task) => {
+    items.forEach((task: any) => {
       result.push(task);
       if (task.subtasks && task.subtasks.length) {
         walk(task.subtasks);
@@ -173,11 +172,10 @@ export async function GET(
   }
 
   const db = await getDb();
-  const userIdQuery = buildIdQuery(userId);
-  const assigneeQuery = buildIdQuery(id);
+  const assigneeQuery = id;
 
   const person = await (db as Db).collection<PersonDocument>("people").findOne({
-    userId: userIdQuery,
+    userId,
     $or: [{ _id: assigneeQuery }, { id }, { slackId: id }],
   } as import("mongodb").Filter<PersonDocument>);
 
@@ -216,7 +214,7 @@ export async function GET(
   const tasks = await (db as Db)
     .collection<TaskDocument>("tasks")
     .find({
-      userId: userIdQuery,
+      userId,
       $or: [
         { "assignee.uid": assigneeQuery },
         ...(person.email ? [{ "assignee.email": person.email }] : []),
@@ -249,13 +247,13 @@ export async function GET(
 
   const meetings = await (db as Db)
     .collection<MeetingDocument>("meetings")
-    .find({ userId: userIdQuery, isHidden: { $ne: true } } as import("mongodb").Filter<MeetingDocument>)
+    .find({ userId, isHidden: { $ne: true } } as import("mongodb").Filter<MeetingDocument>)
     .project({ _id: 1, title: 1, extractedTasks: 1 })
     .toArray();
 
   const chatSessions = await (db as Db)
     .collection<ChatSessionDocument>("chatSessions")
-    .find({ userId: userIdQuery } as import("mongodb").Filter<ChatSessionDocument>)
+    .find({ userId } as import("mongodb").Filter<ChatSessionDocument>)
     .project({ _id: 1, title: 1, suggestedTasks: 1, sourceMeetingId: 1 })
     .toArray();
 
@@ -265,7 +263,7 @@ export async function GET(
     const extracted = flattenExtractedTasks(meeting.extractedTasks || []);
     return extracted
       .filter(matchesTaskAssignee)
-      .map((task) =>
+      .map((task: any) =>
         toTaskShape(task, {
           id: meetingId,
           title: meeting.title || "",
@@ -283,7 +281,7 @@ export async function GET(
     const extracted = flattenExtractedTasks(session.suggestedTasks || []);
     return extracted
       .filter(matchesTaskAssignee)
-      .map((task) =>
+      .map((task: any) =>
         toTaskShape(task, {
           id: sessionId,
           title: session.title || "",
@@ -306,7 +304,7 @@ export async function GET(
   ];
 
   const dedupedMap = new Map<string, AnyTask>();
-  normalizedTasks.forEach((task) => {
+  normalizedTasks.forEach((task: any) => {
     const key = buildTaskKey(task);
     if (!key) return;
     const existing = dedupedMap.get(key);
@@ -315,3 +313,5 @@ export async function GET(
 
   return NextResponse.json(Array.from(dedupedMap.values()));
 }
+
+

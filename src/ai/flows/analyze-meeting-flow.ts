@@ -402,8 +402,8 @@ const inferMeetingType = (
     "GENERAL_INTERNAL",
   ];
   const scores = meetingTypes
-    .map((type) => ({ type, score: scoreType(type) }))
-    .sort((a, b) => b.score - a.score);
+    .map((type: any) => ({ type, score: scoreType(type) }))
+    .sort((a: any, b: any) => b.score - a.score);
 
   const top = scores[0];
   const second = scores[1];
@@ -429,23 +429,23 @@ const buildActionItems = (items: unknown[]): TaskType[] => {
   const normalizeStatus = (value: string | undefined): TaskType["status"] | undefined => {
     if (!value) return undefined;
     const lowered = value.toLowerCase();
-    if (["done", "complete", "completed", "finished", "resolved"].some((word) => lowered.includes(word))) {
+    if (["done", "complete", "completed", "finished", "resolved"].some((word: any) => lowered.includes(word))) {
       return "done";
     }
-    if (["in progress", "in-progress", "progress", "working"].some((word) => lowered.includes(word))) {
+    if (["in progress", "in-progress", "progress", "working"].some((word: any) => lowered.includes(word))) {
       return "inprogress";
     }
-    if (["recurring", "repeat"].some((word) => lowered.includes(word))) {
+    if (["recurring", "repeat"].some((word: any) => lowered.includes(word))) {
       return "recurring";
     }
-    if (["todo", "to do", "pending", "not done", "postpone", "delayed"].some((word) => lowered.includes(word))) {
+    if (["todo", "to do", "pending", "not done", "postpone", "delayed"].some((word: any) => lowered.includes(word))) {
       return "todo";
     }
     return undefined;
   };
 
   const mapped = items
-    .map((item) => {
+    .map((item: any) => {
       const obj = getObject(item);
       if (!obj) return null;
       const title =
@@ -568,7 +568,7 @@ const finalizeTasks = (tasks: TaskType[]) => {
 
 const applyCompletionReviewFlags = (tasks: TaskType[]): TaskType[] => {
   const apply = (items: TaskType[]): TaskType[] =>
-    items.map((task) => {
+    items.map((task: any) => {
       const nextSubtasks = task.subtasks ? apply(task.subtasks) : task.subtasks;
       if (task.status === "done") {
         return {
@@ -679,7 +679,7 @@ const analyzeMeetingFlow = ai.defineFlow(
         dealIntelligence: dealIntelligence
           ? {
               painPoints: getArray(dealIntelligence.pain_points)
-                .map((item) => getString(item))
+                .map((item: any) => getString(item))
                 .filter(Boolean) as string[],
               economicBuyer: getString(dealIntelligence.economic_buyer),
               timeline: getString(dealIntelligence.timeline),
@@ -697,7 +697,7 @@ const analyzeMeetingFlow = ai.defineFlow(
           | "AT_RISK"
           | undefined,
         blockers: getArray(specialistRaw.blockers)
-          .map((item) => getString(item))
+          .map((item: any) => getString(item))
           .filter(Boolean) as string[],
       };
       meetingSummary = getString(specialistRaw.summary);
@@ -757,11 +757,11 @@ const analyzeMeetingFlow = ai.defineFlow(
     const transcriptEmails = new Set(extractTranscriptEmails(transcriptText));
     const transcriptMentionNames = extractTranscriptMentionNames(
       transcriptText,
-      transcriptAttendees.map((person) => person.name)
+      transcriptAttendees.map((person: any) => person.name)
     );
     const normalizeName = (name: string): string => normalizePersonNameKey(name);
     const transcriptSpeakerNameSet = new Set(
-      transcriptAttendees.map((person) => normalizeName(person.name)).filter(Boolean)
+      transcriptAttendees.map((person: any) => normalizeName(person.name)).filter(Boolean)
     );
     const hasTranscriptSpeakers = transcriptSpeakerNameSet.size > 0;
     const transcriptLower = transcriptText.toLowerCase();
@@ -769,11 +769,11 @@ const analyzeMeetingFlow = ai.defineFlow(
       Boolean(name && transcriptLower.includes(name.toLowerCase()));
 
     const transcriptMentionNameSet = new Set(
-      transcriptMentionNames.map((name) => normalizeName(name)).filter(Boolean)
+      transcriptMentionNames.map((name: any) => normalizeName(name)).filter(Boolean)
     );
     const aiMentionNameSet = new Set(
       getArray(specialistRaw.mentionedPeople)
-        .map((person) => {
+        .map((person: any) => {
           const obj = getObject(person);
           return obj ? normalizeName(getString(obj.name) || "") : "";
         })
@@ -782,14 +782,14 @@ const analyzeMeetingFlow = ai.defineFlow(
     const validMentionNameSet = transcriptMentionNameSet.size
       ? transcriptMentionNameSet
       : new Set(
-          Array.from(aiMentionNameSet).filter((name) => name && transcriptLower.includes(name))
+          Array.from(aiMentionNameSet).filter((name: any) => name && transcriptLower.includes(name))
         );
     const validNameSet = new Set(
       [...transcriptSpeakerNameSet, ...validMentionNameSet].filter(Boolean)
     );
 
     const ensureTaskDescriptions = (tasks: TaskType[]): TaskType[] =>
-      tasks.map((task) => ({
+      tasks.map((task: any) => ({
         ...task,
         description: (() => {
           const description = task.description?.trim();
@@ -862,14 +862,14 @@ const analyzeMeetingFlow = ai.defineFlow(
     };
 
     const attendees = mergePeople([], transcriptAttendees as any)
-      .filter((person) => {
+      .filter((person: any) => {
         const key = normalizeName(person.name);
         if (!key) return false;
         return hasTranscriptSpeakers
           ? transcriptSpeakerNameSet.has(key)
           : nameAppearsInTranscript(person.name);
       })
-      .map((person) => {
+      .map((person: any) => {
         const email = person.email?.toLowerCase();
         const emailAllowed = email ? transcriptEmails.has(email) : false;
         return {
@@ -887,25 +887,25 @@ const analyzeMeetingFlow = ai.defineFlow(
 
     const assigneeNames = new Set(
       tasksForAssigneeScan
-        .map((task) => task.assigneeName)
+        .map((task: any) => task.assigneeName)
         .filter((name): name is string => Boolean(name))
-        .map((name) => normalizeName(name))
+        .map((name: any) => normalizeName(name))
         .filter(Boolean)
     );
 
     const attendeeNameSet = new Set(
-      attendees.map((person) => normalizeName(person.name)).filter(Boolean)
+      attendees.map((person: any) => normalizeName(person.name)).filter(Boolean)
     );
     const mentionedFromTasks = Array.from(assigneeNames)
-      .filter((name) => validMentionNameSet.has(name) && !attendeeNameSet.has(name))
-      .map((name) => ({
+      .filter((name: any) => validMentionNameSet.has(name) && !attendeeNameSet.has(name))
+      .map((name: any) => ({
         name: name
           .split(/\s+/)
-          .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+          .map((part: any) => part.charAt(0).toUpperCase() + part.slice(1))
           .join(" "),
       }));
 
-    const mentionedPeople = mergePeople([], mentionedFromTasks as any).filter((person) => {
+    const mentionedPeople = mergePeople([], mentionedFromTasks as any).filter((person: any) => {
       const nameKey = normalizeName(person.name);
       if (!nameKey) return false;
       if (validMentionNameSet.has(nameKey)) return true;
@@ -939,3 +939,5 @@ export async function analyzeMeeting(
 ): Promise<AnalyzeMeetingOutput> {
   return await analyzeMeetingFlow(input);
 }
+
+

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
+import { apiError } from "@/lib/api-route";
 import { getDb } from "@/lib/db";
 import { getSessionUserId } from "@/lib/server-auth";
-import { buildIdQuery } from "@/lib/mongo-id";
 
 const serializePerson = (person: any) => ({
   ...person,
@@ -14,7 +14,7 @@ const serializePerson = (person: any) => ({
 export async function POST(request: Request) {
   const userId = await getSessionUserId();
   if (!userId) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return apiError(401, "request_error", "Unauthorized");
   }
 
   const body = await request.json().catch(() => ({}));
@@ -22,32 +22,25 @@ export async function POST(request: Request) {
   const targetId = typeof body.targetId === "string" ? body.targetId : "";
 
   if (!sourceId || !targetId) {
-    return NextResponse.json(
-      { error: "sourceId and targetId are required." },
-      { status: 400 }
-    );
+    return apiError(400, "request_error", "sourceId and targetId are required.");
   }
 
   const db = await getDb();
-  const userIdQuery = buildIdQuery(userId);
 
-  const sourceQuery = buildIdQuery(sourceId);
-  const targetQuery = buildIdQuery(targetId);
-
-  const source = await db.collection<any>("people").findOne({
-    userId: userIdQuery,
-    $or: [{ _id: sourceQuery }, { id: sourceId }, { slackId: sourceId }],
+  const source = await db.collection("people").findOne({
+    userId,
+    $or: [{ _id: sourceId }, { id: sourceId }, { slackId: sourceId }],
   });
-  const target = await db.collection<any>("people").findOne({
-    userId: userIdQuery,
-    $or: [{ _id: targetQuery }, { id: targetId }, { slackId: targetId }],
+  const target = await db.collection("people").findOne({
+    userId,
+    $or: [{ _id: targetId }, { id: targetId }, { slackId: targetId }],
   });
 
   if (!source || !target) {
-    return NextResponse.json({ error: "Person not found." }, { status: 404 });
+    return apiError(404, "request_error", "Person not found.");
   }
   if (String(source._id) === String(target._id)) {
-    return NextResponse.json({ error: "Cannot merge the same person." }, { status: 400 });
+    return apiError(400, "request_error", "Cannot merge the same person.");
   }
 
   const aliasSet = new Set<string>([
@@ -70,9 +63,16 @@ export async function POST(request: Request) {
   if (!target.avatarUrl && source.avatarUrl) update.avatarUrl = source.avatarUrl;
   if (!target.slackId && source.slackId) update.slackId = source.slackId;
 
-  await db.collection<any>("people").updateOne({ _id: target._id }, { $set: update });
+  await db.collection("people").updateOne({ _id: target._id }, { $set: update });
 
-  const sourceAssignee = buildIdQuery(String(source._id || source.id || sourceId));
+  const sourceAssigneeIds = Array.from(
+    new Set([
+      String(source._id || ""),
+      String(source.id || ""),
+      String(sourceId || ""),
+      String(source.slackId || ""),
+    ].filter(Boolean))
+  );
   const targetAssignee = {
     uid: String(target._id || target.id || targetId),
     name: target.name,
@@ -80,13 +80,16 @@ export async function POST(request: Request) {
     photoURL: target.avatarUrl ?? update.avatarUrl ?? null,
   };
 
-  await db.collection<any>("tasks").updateMany(
-    { userId: userIdQuery, "assignee.uid": sourceAssignee },
+  await db.collection("tasks").updateMany(
+    { userId, "assignee.uid": { $in: sourceAssigneeIds } },
     { $set: { assignee: targetAssignee, assigneeName: targetAssignee.name } }
   );
 
-  await db.collection<any>("people").deleteOne({ _id: source._id });
+  await db.collection("people").deleteOne({ _id: source._id });
 
-  const refreshed = await db.collection<any>("people").findOne({ _id: target._id });
+  const refreshed = await db.collection("people").findOne({ _id: target._id });
   return NextResponse.json({ ok: true, person: serializePerson(refreshed) });
 }
+
+
+

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
+import { apiError } from "@/lib/api-route";
 import { getDb } from "@/lib/db";
 import { getSessionUserId } from "@/lib/server-auth";
-import { buildIdQuery } from "@/lib/mongo-id";
 
 const serializeBoard = (board: any) => ({
   ...board,
@@ -24,11 +24,11 @@ export async function PATCH(
   const { workspaceId, boardId } = await Promise.resolve(params);
   const userId = await getSessionUserId();
   if (!userId) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return apiError(401, "request_error", "Unauthorized");
   }
 
   if (!workspaceId || !boardId) {
-    return NextResponse.json({ error: "Workspace ID and board ID are required." }, { status: 400 });
+    return apiError(400, "request_error", "Workspace ID and board ID are required.");
   }
 
   const body = await request.json().catch(() => ({}));
@@ -37,7 +37,7 @@ export async function PATCH(
   if (typeof body.name === "string") {
     const name = body.name.trim();
     if (!name) {
-      return NextResponse.json({ error: "Board name is required." }, { status: 400 });
+      return apiError(400, "request_error", "Board name is required.");
     }
     update.name = name;
   }
@@ -55,18 +55,18 @@ export async function PATCH(
   }
 
   const db = await getDb();
-  const userIdQuery = buildIdQuery(userId);
-  const boardIdQuery = buildIdQuery(boardId);
+  const userIdQuery = userId;
+  const boardIdQuery = boardId;
   const filter = {
     userId: userIdQuery,
     workspaceId,
     $or: [{ _id: boardIdQuery }, { id: boardId }],
   };
 
-  await db.collection<any>("boards").updateOne(filter, { $set: update });
-  const board = await db.collection<any>("boards").findOne(filter);
+  await db.collection("boards").updateOne(filter, { $set: update });
+  const board = await db.collection("boards").findOne(filter);
   if (!board) {
-    return NextResponse.json({ error: "Board not found." }, { status: 404 });
+    return apiError(404, "request_error", "Board not found.");
   }
 
   return NextResponse.json(serializeBoard(board));
@@ -85,33 +85,33 @@ export async function DELETE(
   const { workspaceId, boardId } = await Promise.resolve(params);
   const userId = await getSessionUserId();
   if (!userId) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return apiError(401, "request_error", "Unauthorized");
   }
 
   if (!workspaceId || !boardId) {
-    return NextResponse.json({ error: "Workspace ID and board ID are required." }, { status: 400 });
+    return apiError(400, "request_error", "Workspace ID and board ID are required.");
   }
 
   const db = await getDb();
-  const userIdQuery = buildIdQuery(userId);
-  const boardIdQuery = buildIdQuery(boardId);
+  const userIdQuery = userId;
+  const boardIdQuery = boardId;
   const filter = {
     userId: userIdQuery,
     workspaceId,
     $or: [{ _id: boardIdQuery }, { id: boardId }],
   };
 
-  const result = await db.collection<any>("boards").deleteOne(filter);
+  const result = await db.collection("boards").deleteOne(filter);
   if (!result.deletedCount) {
-    return NextResponse.json({ error: "Board not found." }, { status: 404 });
+    return apiError(404, "request_error", "Board not found.");
   }
 
-  await db.collection<any>("boardStatuses").deleteMany({
+  await db.collection("boardStatuses").deleteMany({
     userId: userIdQuery,
     workspaceId,
     boardId,
   });
-  await db.collection<any>("boardItems").deleteMany({
+  await db.collection("boardItems").deleteMany({
     userId: userIdQuery,
     workspaceId,
     boardId,
@@ -119,3 +119,6 @@ export async function DELETE(
 
   return NextResponse.json({ ok: true });
 }
+
+
+

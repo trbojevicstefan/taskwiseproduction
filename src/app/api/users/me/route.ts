@@ -1,9 +1,9 @@
-import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { randomUUID } from "crypto";
 import { z } from "zod";
 import { authOptions } from "@/lib/auth";
 import { findUserById, updateUserById } from "@/lib/db/users";
+import { apiError, apiSuccess, mapApiError, parseJsonBody } from "@/lib/api-route";
 
 const updateSchema = z.object({
   name: z.string().min(1).optional(),
@@ -63,97 +63,108 @@ const toAppUser = (user: Awaited<ReturnType<typeof findUserById>>) => {
 };
 
 export async function GET() {
-  const session = await getServerSession(authOptions);
-  const userId = session?.user?.id;
+  try {
+    const session = await getServerSession(authOptions);
+    const userId = session?.user?.id;
 
-  if (!userId) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    if (!userId) {
+      return apiError(401, "unauthorized", "Unauthorized");
+    }
+
+    let user = await findUserById(userId);
+    if (!user) {
+      return apiError(404, "not_found", "User not found");
+    }
+
+    if (!user.workspace?.id) {
+      const workspaceName =
+        user.workspace?.name || `${user.name || "Workspace"}'s Workspace`;
+      const workspace = { id: randomUUID(), name: workspaceName };
+      await updateUserById(userId, { workspace });
+      user = { ...user, workspace };
+    }
+
+    const appUser = toAppUser(user);
+    if (!appUser) {
+      return apiError(404, "not_found", "User not found");
+    }
+
+    return apiSuccess(appUser);
+  } catch (error) {
+    return mapApiError(error, "Failed to fetch user profile.");
   }
-
-  let user = await findUserById(userId);
-  if (!user) {
-    return NextResponse.json({ error: "User not found" }, { status: 404 });
-  }
-
-  if (!user.workspace?.id) {
-    const workspaceName =
-      user.workspace?.name || `${user.name || "Workspace"}'s Workspace`;
-    const workspace = { id: randomUUID(), name: workspaceName };
-    await updateUserById(userId, { workspace });
-    user = { ...user, workspace };
-  }
-
-  return NextResponse.json(toAppUser(user));
 }
 
 export async function PATCH(request: Request) {
-  const session = await getServerSession(authOptions);
-  const userId = session?.user?.id;
+  try {
+    const session = await getServerSession(authOptions);
+    const userId = session?.user?.id;
 
-  if (!userId) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    if (!userId) {
+      return apiError(401, "unauthorized", "Unauthorized");
+    }
+
+    const update = await parseJsonBody(request, updateSchema, "Invalid update payload.");
+    const name = update.displayName || update.name;
+    const avatarUrl = update.photoURL || update.avatarUrl;
+
+    const existingUser = await findUserById(userId);
+    if (!existingUser) {
+      return apiError(404, "not_found", "User not found");
+    }
+
+    const workspace =
+      update.workspace
+        ? {
+            id: update.workspace.id || existingUser.workspace?.id || randomUUID(),
+            name: update.workspace.name,
+          }
+        : undefined;
+
+    await updateUserById(userId, {
+      ...(name ? { name } : {}),
+      ...(avatarUrl !== undefined ? { avatarUrl } : {}),
+      ...(workspace ? { workspace } : {}),
+      ...(update.onboardingCompleted !== undefined
+        ? { onboardingCompleted: update.onboardingCompleted }
+        : {}),
+      ...(update.firefliesWebhookToken !== undefined
+        ? { firefliesWebhookToken: update.firefliesWebhookToken }
+        : {}),
+      ...(update.slackTeamId !== undefined ? { slackTeamId: update.slackTeamId } : {}),
+      ...(update.fathomWebhookToken !== undefined
+        ? { fathomWebhookToken: update.fathomWebhookToken }
+        : {}),
+      ...(update.fathomConnected !== undefined
+        ? { fathomConnected: update.fathomConnected }
+        : {}),
+      ...(update.fathomUserId !== undefined ? { fathomUserId: update.fathomUserId } : {}),
+      ...(update.taskGranularityPreference !== undefined
+        ? { taskGranularityPreference: update.taskGranularityPreference }
+        : {}),
+      ...(update.autoApproveCompletedTasks !== undefined
+        ? { autoApproveCompletedTasks: update.autoApproveCompletedTasks }
+        : {}),
+      ...(update.completionMatchThreshold !== undefined
+        ? { completionMatchThreshold: update.completionMatchThreshold }
+        : {}),
+      ...(update.slackAutoShareEnabled !== undefined
+        ? { slackAutoShareEnabled: update.slackAutoShareEnabled }
+        : {}),
+      ...(update.slackAutoShareChannelId !== undefined
+        ? { slackAutoShareChannelId: update.slackAutoShareChannelId }
+        : {}),
+    });
+
+    const user = await findUserById(userId);
+    const appUser = toAppUser(user);
+    if (!appUser) {
+      return apiError(404, "not_found", "User not found");
+    }
+
+    return apiSuccess(appUser);
+  } catch (error) {
+    return mapApiError(error, "Failed to update user profile.");
   }
-
-  const body = await request.json().catch(() => null);
-  const parsed = updateSchema.safeParse(body);
-
-  if (!parsed.success) {
-    return NextResponse.json({ error: "Invalid update payload." }, { status: 400 });
-  }
-
-  const update = parsed.data;
-  const name = update.displayName || update.name;
-  const avatarUrl = update.photoURL || update.avatarUrl;
-
-  const existingUser = await findUserById(userId);
-  if (!existingUser) {
-    return NextResponse.json({ error: "User not found" }, { status: 404 });
-  }
-
-  const workspace =
-    update.workspace
-      ? {
-          id: update.workspace.id || existingUser.workspace?.id || randomUUID(),
-          name: update.workspace.name,
-        }
-      : undefined;
-
-  await updateUserById(userId, {
-    ...(name ? { name } : {}),
-    ...(avatarUrl !== undefined ? { avatarUrl } : {}),
-    ...(workspace ? { workspace } : {}),
-    ...(update.onboardingCompleted !== undefined
-      ? { onboardingCompleted: update.onboardingCompleted }
-      : {}),
-    ...(update.firefliesWebhookToken !== undefined
-      ? { firefliesWebhookToken: update.firefliesWebhookToken }
-      : {}),
-    ...(update.slackTeamId !== undefined ? { slackTeamId: update.slackTeamId } : {}),
-    ...(update.fathomWebhookToken !== undefined
-      ? { fathomWebhookToken: update.fathomWebhookToken }
-      : {}),
-    ...(update.fathomConnected !== undefined
-      ? { fathomConnected: update.fathomConnected }
-      : {}),
-    ...(update.fathomUserId !== undefined ? { fathomUserId: update.fathomUserId } : {}),
-    ...(update.taskGranularityPreference !== undefined
-      ? { taskGranularityPreference: update.taskGranularityPreference }
-      : {}),
-    ...(update.autoApproveCompletedTasks !== undefined
-      ? { autoApproveCompletedTasks: update.autoApproveCompletedTasks }
-      : {}),
-    ...(update.completionMatchThreshold !== undefined
-      ? { completionMatchThreshold: update.completionMatchThreshold }
-      : {}),
-    ...(update.slackAutoShareEnabled !== undefined
-      ? { slackAutoShareEnabled: update.slackAutoShareEnabled }
-      : {}),
-    ...(update.slackAutoShareChannelId !== undefined
-      ? { slackAutoShareChannelId: update.slackAutoShareChannelId }
-      : {}),
-  });
-
-  const user = await findUserById(userId);
-  return NextResponse.json(toAppUser(user));
 }
 

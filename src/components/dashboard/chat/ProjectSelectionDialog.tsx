@@ -180,7 +180,7 @@ export default function ProjectSelectionDialog({
             <>
               {projects.length > 0 ? (
                 <RadioGroup value={selectedProjectId} onValueChange={setSelectedProjectId} className="max-h-[200px] overflow-y-auto pr-2 space-y-1">
-                  {projects.map((project) => (
+                  {projects.map((project: any) => (
                     <div key={project.id} className="flex items-center space-x-3 p-2.5 rounded-md hover:bg-muted/50 transition-colors">
                       <RadioGroupItem value={project.id} id={`project-${project.id}`} />
                       <Label htmlFor={`project-${project.id}`} className="flex-1 cursor-pointer text-sm">{project.name}</Label>
@@ -214,3 +214,4 @@ export default function ProjectSelectionDialog({
     </Dialog>
   );
 }
+

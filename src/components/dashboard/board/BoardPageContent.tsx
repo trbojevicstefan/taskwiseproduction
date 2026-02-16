@@ -86,6 +86,7 @@ import { BOARD_TEMPLATES, DEFAULT_BOARD_TEMPLATE_ID } from "@/lib/board-template
 import { copyTextToClipboard, exportTasksToCSV, exportTasksToMarkdown, exportTasksToPDF, formatTasksToText } from "@/lib/exportUtils";
 import { useIntegrations } from "@/contexts/IntegrationsContext";
 import { useMeetingHistory } from "@/contexts/MeetingHistoryContext";
+import { subscribeRealtimeUpdates } from "@/lib/realtime-client";
 import type { Task } from "@/types/project";
 import type { Board, BoardStatus, BoardStatusCategory } from "@/types/board";
 import type { Person } from "@/types/person";
@@ -126,7 +127,7 @@ const normalizeDateInput = (value: string) => {
   return parsed.toISOString();
 };
 
-const formatDueDate = (value?: string | null) => {
+const formatDueDate = (value?: string | Date | null) => {
   if (!value) return null;
   const parsed = new Date(value);
   if (!isValid(parsed)) return null;
@@ -139,7 +140,7 @@ const applyHexAlpha = (hex: string, alpha: number) => {
   if (value.length === 3) {
     value = value
       .split("")
-      .map((ch) => ch + ch)
+      .map((ch: any) => ch + ch)
       .join("");
   }
   if (value.length !== 6) {
@@ -148,7 +149,7 @@ const applyHexAlpha = (hex: string, alpha: number) => {
   const r = Number.parseInt(value.slice(0, 2), 16);
   const g = Number.parseInt(value.slice(2, 4), 16);
   const b = Number.parseInt(value.slice(4, 6), 16);
-  if ([r, g, b].some((part) => Number.isNaN(part))) {
+  if ([r, g, b].some((part: any) => Number.isNaN(part))) {
     return `rgba(0, 0, 0, ${alpha})`;
   }
   return `rgba(${r}, ${g}, ${b}, ${alpha})`;
@@ -160,7 +161,7 @@ const getInitials = (value?: string | null) => {
   if (!cleaned) return "?";
   const parts = cleaned.split(/\s+/).filter(Boolean);
   if (!parts.length) return cleaned.slice(0, 2).toUpperCase();
-  const initials = parts.slice(0, 2).map((part) => part[0]).join("");
+  const initials = parts.slice(0, 2).map((part: any) => part[0]).join("");
   return initials.toUpperCase();
 };
 
@@ -284,7 +285,7 @@ function AssigneeDropdown({
         </DropdownMenuItem>
         <DropdownMenuSeparator />
         {people.length ? (
-          people.map((person) => (
+          people.map((person: any) => (
             <DropdownMenuItem
               key={person.id}
               onSelect={() => onAssign(task, person)}
@@ -483,7 +484,7 @@ function AssigneeDropdown({
   const lastLoadedBoardIdRef = useRef<string | null>(null);
 
     const orderedStatuses = useMemo(
-      () => [...boardStatuses].sort((a, b) => a.order - b.order),
+      () => [...boardStatuses].sort((a: any, b: any) => a.order - b.order),
       [boardStatuses]
     );
 
@@ -509,19 +510,19 @@ function AssigneeDropdown({
 
   const peopleById = useMemo(() => {
     const map = new Map<string, Person>();
-    people.forEach((person) => map.set(person.id, person));
+    people.forEach((person: any) => map.set(person.id, person));
     return map;
   }, [people]);
 
   const personNameKeyToId = useMemo(() => {
     const map = new Map<string, string>();
-    people.forEach((person) => {
+    people.forEach((person: any) => {
       const nameKey = normalizePersonNameKey(person.name || "");
       if (nameKey && !map.has(nameKey)) {
         map.set(nameKey, person.id);
       }
       if (Array.isArray(person.aliases)) {
-        person.aliases.forEach((alias) => {
+        person.aliases.forEach((alias: any) => {
           const aliasKey = normalizePersonNameKey(alias || "");
           if (aliasKey && !map.has(aliasKey)) {
             map.set(aliasKey, person.id);
@@ -534,12 +535,12 @@ function AssigneeDropdown({
 
   const personEmailToId = useMemo(() => {
     const map = new Map<string, string>();
-    people.forEach((person) => {
+    people.forEach((person: any) => {
       if (person.email) {
         map.set(person.email.toLowerCase(), person.id);
       }
       if (Array.isArray(person.aliases)) {
-        person.aliases.forEach((alias) => {
+        person.aliases.forEach((alias: any) => {
           if (alias && alias.includes("@")) {
             map.set(alias.toLowerCase(), person.id);
           }
@@ -609,7 +610,7 @@ function AssigneeDropdown({
       start: startOfWeek(today, { weekStartsOn: 1 }),
       end: endOfWeek(today, { weekStartsOn: 1 }),
     };
-    return tasks.filter((task) => {
+    return tasks.filter((task: any) => {
       const statusId = task.boardStatusId || orderedStatuses[0]?.id || "";
       if (normalizedQuery) {
         const haystack = `${task.title} ${task.description || ""}`
@@ -628,7 +629,7 @@ function AssigneeDropdown({
 
       if (hasAssigneeFilter) {
         const assigneeIds = resolveAssigneeIds(task);
-        const matches = Array.from(assigneeIds).some((id) => assigneeFilters.has(id));
+        const matches = Array.from(assigneeIds).some((id: any) => assigneeFilters.has(id));
         const hasAssignee = assigneeIds.size > 0;
         if (matches) {
           // keep
@@ -666,14 +667,14 @@ function AssigneeDropdown({
 
   const tasksByStatus = useMemo(() => {
     const map = new Map<string, BoardTaskItem[]>();
-    orderedStatuses.forEach((status) => map.set(status.id, []));
-    filteredTasks.forEach((task) => {
+    orderedStatuses.forEach((status: any) => map.set(status.id, []));
+    filteredTasks.forEach((task: any) => {
       const statusId = task.boardStatusId || orderedStatuses[0]?.id;
       if (!statusId || !map.has(statusId)) return;
       map.get(statusId)?.push(task);
     });
-    map.forEach((items) =>
-      items.sort((a, b) => {
+    map.forEach((items: any) =>
+      items.sort((a: any, b: any) => {
         const rankA = typeof a.boardRank === "number" ? a.boardRank : 0;
         const rankB = typeof b.boardRank === "number" ? b.boardRank : 0;
         if (rankA !== rankB) return rankA - rankB;
@@ -685,7 +686,7 @@ function AssigneeDropdown({
 
   const totalTasksByStatus = useMemo(() => {
     const map = new Map<string, number>();
-    tasks.forEach((task) => {
+    tasks.forEach((task: any) => {
       const statusId = task.boardStatusId || orderedStatuses[0]?.id;
       if (!statusId) return;
       map.set(statusId, (map.get(statusId) ?? 0) + 1);
@@ -720,7 +721,7 @@ function AssigneeDropdown({
 
   const getStatusMeta = useCallback(
     (statusId?: string | null) =>
-      orderedStatuses.find((entry) => entry.id === statusId) || orderedStatuses[0],
+      orderedStatuses.find((entry: any) => entry.id === statusId) || orderedStatuses[0],
     [orderedStatuses]
   );
 
@@ -784,8 +785,8 @@ function AssigneeDropdown({
             lastLoadedBoardIdRef.current = boardId;
             return new Set();
           }
-          const validIds = new Set(boardItems.map((item) => item.id));
-          const next = new Set(Array.from(prev).filter((id) => validIds.has(id)));
+          const validIds = new Set(boardItems.map((item: any) => item.id));
+          const next = new Set(Array.from(prev).filter((id: any) => validIds.has(id)));
           return next.size === prev.size ? prev : next;
         });
       } catch (error) {
@@ -809,7 +810,9 @@ function AssigneeDropdown({
 
   useEffect(() => {
     if (!boards.length) return;
-    const paramMatch = boardIdParam && boards.find((board) => board.id === boardIdParam);
+    const paramMatch = boardIdParam
+      ? boards.find((board: any) => board.id === boardIdParam)
+      : undefined;
     const nextBoardId = paramMatch?.id || boards[0]?.id || null;
     if (nextBoardId && nextBoardId !== activeBoardId) {
       setActiveBoardId(nextBoardId);
@@ -834,9 +837,34 @@ function AssigneeDropdown({
     }
   }, [activeBoardId, loadBoardData]);
 
+  useEffect(() => {
+    if (!_workspaceId || !activeBoardId) return;
+    let refreshTimer: ReturnType<typeof setTimeout> | null = null;
+    const scheduleRefresh = () => {
+      if (refreshTimer) return;
+      refreshTimer = setTimeout(() => {
+        refreshTimer = null;
+        void loadBoardData(activeBoardId);
+      }, 150);
+    };
+    const unsubscribe = subscribeRealtimeUpdates(["board"], (event) => {
+      const payload =
+        event.payload && typeof event.payload === "object"
+          ? (event.payload as { boardId?: string; workspaceId?: string })
+          : null;
+      if (payload?.workspaceId && payload.workspaceId !== _workspaceId) return;
+      if (payload?.boardId && payload.boardId !== activeBoardId) return;
+      scheduleRefresh();
+    });
+    return () => {
+      if (refreshTimer) clearTimeout(refreshTimer);
+      unsubscribe();
+    };
+  }, [_workspaceId, activeBoardId, loadBoardData]);
+
   const resolveBoardStatusId = useCallback(
     (statusId?: string | null) => {
-      if (statusId && orderedStatuses.some((status) => status.id === statusId)) {
+      if (statusId && orderedStatuses.some((status: any) => status.id === statusId)) {
         return statusId;
       }
       return orderedStatuses[0]?.id || "";
@@ -847,7 +875,7 @@ function AssigneeDropdown({
   const resolveStatusIdByCategory = useCallback(
     (category?: BoardStatusCategory | null) => {
       if (!category) return resolveBoardStatusId(null);
-      const match = orderedStatuses.find((status) => status.category === category);
+      const match = orderedStatuses.find((status: any) => status.category === category);
       return match?.id || resolveBoardStatusId(null);
     },
     [orderedStatuses, resolveBoardStatusId]
@@ -867,11 +895,11 @@ function AssigneeDropdown({
       options: { statusId?: string; rank?: number; taskUpdates?: Record<string, any> }
     ) => {
       if (!activeBoardId) return;
-      const current = tasks.find((task) => task.id === taskId);
+      const current = tasks.find((task: any) => task.id === taskId);
       if (!current) return;
 
       const previous = tasks;
-      const nextTasks = tasks.map((task) =>
+      const nextTasks = tasks.map((task: any) =>
         task.id === taskId
           ? {
               ...task,
@@ -897,7 +925,7 @@ function AssigneeDropdown({
           }
         );
         setTasks((prev) =>
-          prev.map((task) => (task.id === updated.id ? { ...task, ...updated } : task))
+          prev.map((task: any) => (task.id === updated.id ? { ...task, ...updated } : task))
         );
       } catch (error) {
         console.error("Board update failed:", error);
@@ -924,12 +952,12 @@ function AssigneeDropdown({
     (targetStatusId: string, targetTaskId?: string | null, position?: DragPosition) => {
       if (!draggedTaskId) return;
 
-      const activeTask = tasks.find((task) => task.id === draggedTaskId);
+      const activeTask = tasks.find((task: any) => task.id === draggedTaskId);
       if (!activeTask) return;
 
       const resolvedTargetStatusId = resolveBoardStatusId(targetStatusId);
       const targetTasks = tasksByStatus.get(resolvedTargetStatusId) || [];
-      const visibleTargets = targetTasks.filter((task) => task.id !== activeTask.id);
+      const visibleTargets = targetTasks.filter((task: any) => task.id !== activeTask.id);
 
       let insertIndex = visibleTargets.length;
       if (targetTaskId) {
@@ -1094,7 +1122,7 @@ function AssigneeDropdown({
           }
         );
         setTasks((prev) =>
-          prev.map((task) => (task.id === updated.id ? { ...task, ...updated } : task))
+          prev.map((task: any) => (task.id === updated.id ? { ...task, ...updated } : task))
         );
       } else {
         const created = await apiFetch<BoardTaskItem>(
@@ -1173,7 +1201,7 @@ function AssigneeDropdown({
           `/api/workspaces/${_workspaceId}/boards/${activeBoardId}/items/${detailTaskBoardItem.boardItemId}`,
           { method: "DELETE" }
         );
-        setTasks((prev) => prev.filter((task) => task.id !== detailTaskBoardItem.id));
+        setTasks((prev) => prev.filter((task: any) => task.id !== detailTaskBoardItem.id));
         setSelectedTaskIds((prev) => {
           const next = new Set(prev);
           next.delete(detailTaskBoardItem.id);
@@ -1198,7 +1226,7 @@ function AssigneeDropdown({
       await apiFetch(`/api/tasks/${task.id}`, {
         method: "DELETE",
       });
-      setTasks((prev) => prev.filter((item) => item.id !== task.id));
+      setTasks((prev) => prev.filter((item: any) => item.id !== task.id));
     } catch (error) {
       console.error("Failed to delete task:", error);
       toast({
@@ -1257,7 +1285,7 @@ function AssigneeDropdown({
   const clearFilters = () => {
     setSearchQuery("");
     setDueFilter("all");
-    setStatusFilters(new Set(orderedStatuses.map((status) => status.id)));
+    setStatusFilters(new Set(orderedStatuses.map((status: any) => status.id)));
     setPriorityFilters(new Set(priorityOptions));
     setAssigneeFilters(new Set());
     setIncludeUnassigned(false);
@@ -1265,7 +1293,7 @@ function AssigneeDropdown({
 
   useEffect(() => {
     if (!orderedStatuses.length) return;
-    const statusIds = orderedStatuses.map((status) => status.id);
+    const statusIds = orderedStatuses.map((status: any) => status.id);
     setStatusFilters(new Set(statusIds));
     setBulkStatusId((prev) => (prev && statusIds.includes(prev) ? prev : statusIds[0]));
     setTaskDraft((prev) => ({
@@ -1275,7 +1303,7 @@ function AssigneeDropdown({
   }, [orderedStatuses]);
 
   const activeBoard = useMemo(
-    () => boards.find((board) => board.id === activeBoardId) || null,
+    () => boards.find((board: any) => board.id === activeBoardId) || null,
     [activeBoardId, boards]
   );
 
@@ -1295,7 +1323,7 @@ function AssigneeDropdown({
       if (!activeBoardId) return;
       const previous = boards;
       setBoards((prev) =>
-        prev.map((board) =>
+        prev.map((board: any) =>
           board.id === activeBoardId ? { ...board, color: nextColor } : board
         )
       );
@@ -1375,7 +1403,7 @@ function AssigneeDropdown({
 
   const selectedTemplate = useMemo(
     () =>
-      BOARD_TEMPLATES.find((template) => template.id === newBoardTemplateId) ||
+      BOARD_TEMPLATES.find((template: any) => template.id === newBoardTemplateId) ||
       BOARD_TEMPLATES[0],
     [newBoardTemplateId]
   );
@@ -1459,7 +1487,7 @@ function AssigneeDropdown({
         }
       );
       setBoardStatuses((prev) =>
-        prev.map((status) => (status.id === updated.id ? updated : status))
+        prev.map((status: any) => (status.id === updated.id ? updated : status))
       );
       setIsStageColorDialogOpen(false);
       setStageToEdit(null);
@@ -1483,7 +1511,7 @@ function AssigneeDropdown({
         `/api/workspaces/${_workspaceId}/boards/${activeBoardId}/statuses/${stageToDelete.id}`,
         { method: "DELETE" }
       );
-      setBoardStatuses((prev) => prev.filter((status) => status.id !== stageToDelete.id));
+      setBoardStatuses((prev) => prev.filter((status: any) => status.id !== stageToDelete.id));
       setStageToDelete(null);
     } catch (error) {
       console.error("Failed to delete stage:", error);
@@ -1496,7 +1524,7 @@ function AssigneeDropdown({
   }, [_workspaceId, activeBoardId, stageToDelete, toast]);
 
     const selectedVisibleCount = useMemo(
-      () => filteredTasks.filter((task) => selectedTaskIds.has(task.id)).length,
+      () => filteredTasks.filter((task: any) => selectedTaskIds.has(task.id)).length,
       [filteredTasks, selectedTaskIds]
     );
 
@@ -1506,7 +1534,7 @@ function AssigneeDropdown({
       selectedVisibleCount > 0 && selectedVisibleCount < filteredTasks.length;
 
     const selectedTasks = useMemo(
-      () => tasks.filter((task) => selectedTaskIds.has(task.id)),
+      () => tasks.filter((task: any) => selectedTaskIds.has(task.id)),
       [tasks, selectedTaskIds]
     );
 
@@ -1531,9 +1559,9 @@ function AssigneeDropdown({
       setSelectedTaskIds((prev) => {
         const next = new Set(prev);
         if (allVisibleSelected) {
-          filteredTasks.forEach((task) => next.delete(task.id));
+          filteredTasks.forEach((task: any) => next.delete(task.id));
       } else {
-        filteredTasks.forEach((task) => next.add(task.id));
+        filteredTasks.forEach((task: any) => next.add(task.id));
       }
       return next;
       });
@@ -1544,7 +1572,7 @@ function AssigneeDropdown({
         const columnTasks = tasksByStatus.get(statusId) || [];
         setSelectedTaskIds((prev) => {
           const next = new Set(prev);
-          columnTasks.forEach((task) => next.add(task.id));
+          columnTasks.forEach((task: any) => next.add(task.id));
           return next;
         });
       },
@@ -1556,7 +1584,7 @@ function AssigneeDropdown({
         const columnTasks = tasksByStatus.get(statusId) || [];
         setSelectedTaskIds((prev) => {
           const next = new Set(prev);
-          columnTasks.forEach((task) => next.delete(task.id));
+          columnTasks.forEach((task: any) => next.delete(task.id));
           return next;
         });
       },
@@ -1630,8 +1658,8 @@ function AssigneeDropdown({
 
   useEffect(() => {
     setSelectedTaskIds((prev) => {
-      const validIds = new Set(tasks.map((task) => task.id));
-      const next = new Set(Array.from(prev).filter((id) => validIds.has(id)));
+      const validIds = new Set(tasks.map((task: any) => task.id));
+      const next = new Set(Array.from(prev).filter((id: any) => validIds.has(id)));
       return next.size === prev.size ? prev : next;
     });
   }, [tasks]);
@@ -1670,11 +1698,11 @@ function AssigneeDropdown({
     if (!selectedTaskIds.size) return;
     const previous = tasks;
     const ids = Array.from(selectedTaskIds);
-    setTasks((prev) => prev.filter((task) => !selectedTaskIds.has(task.id)));
+    setTasks((prev) => prev.filter((task: any) => !selectedTaskIds.has(task.id)));
     clearSelection();
     try {
       await Promise.all(
-        ids.map((id) =>
+        ids.map((id: any) =>
           apiFetch(`/api/tasks/${id}`, {
             method: "DELETE",
           })
@@ -1699,7 +1727,7 @@ function AssigneeDropdown({
         name: person.name,
         email: person.email || undefined,
       };
-      const nextTasks = tasks.map((task) =>
+      const nextTasks = tasks.map((task: any) =>
         selectedTaskIds.has(task.id)
           ? {
               ...task,
@@ -1710,7 +1738,7 @@ function AssigneeDropdown({
           : task
       );
       await applyBulkUpdates(nextTasks, {
-        taskIds: selectedTasks.map((task) => task.id),
+        taskIds: selectedTasks.map((task: any) => task.id),
         updates: {
           assignee: assigneePayload,
           assigneeName: person.name,
@@ -1725,11 +1753,11 @@ function AssigneeDropdown({
     async (date: Date | undefined) => {
       if (!selectedTasks.length) return;
       const dueAt = date ? date.toISOString() : null;
-      const nextTasks = tasks.map((task) =>
+      const nextTasks = tasks.map((task: any) =>
         selectedTaskIds.has(task.id) ? { ...task, dueAt } : task
       );
       await applyBulkUpdates(nextTasks, {
-        taskIds: selectedTasks.map((task) => task.id),
+        taskIds: selectedTasks.map((task: any) => task.id),
         updates: { dueAt },
       });
       setIsSetDueDateDialogOpen(false);
@@ -1740,7 +1768,7 @@ function AssigneeDropdown({
   const openStatusDialog = useCallback(() => {
     if (!selectedTasks.length) return;
     const uniqueStatuses = new Set(
-      selectedTasks.map((task) => task.boardStatusId || resolveBoardStatusId(null))
+      selectedTasks.map((task: any) => task.boardStatusId || resolveBoardStatusId(null))
     );
     if (uniqueStatuses.size === 1) {
       setBulkStatusId(Array.from(uniqueStatuses)[0]);
@@ -1763,7 +1791,7 @@ function AssigneeDropdown({
     const targetCategory = targetStatusMeta?.category || "todo";
 
     const maxRankByStatus = new Map<string, number>();
-    tasks.forEach((task) => {
+    tasks.forEach((task: any) => {
       const statusId = task.boardStatusId || resolveBoardStatusId(null);
       const rank = typeof task.boardRank === "number" ? task.boardRank : 0;
       const currentMax = maxRankByStatus.get(statusId) ?? 0;
@@ -1775,14 +1803,14 @@ function AssigneeDropdown({
     let nextRank = maxRankByStatus.get(targetStatusId) ?? 0;
     const taskIdsToUpdate = new Set(
       selectedTasks
-        .filter((task) => task.boardStatusId !== targetStatusId)
-        .map((task) => task.id)
+        .filter((task: any) => task.boardStatusId !== targetStatusId)
+        .map((task: any) => task.id)
     );
     if (!taskIdsToUpdate.size) {
       setIsStatusDialogOpen(false);
       return;
     }
-    const nextTasks = tasks.map((task) => {
+    const nextTasks = tasks.map((task: any) => {
       if (!selectedTaskIds.has(task.id)) return task;
       if (!taskIdsToUpdate.has(task.id)) return task;
       nextRank += 1000;
@@ -1841,7 +1869,7 @@ function AssigneeDropdown({
   const renderBoardView = () => (
     <div className="flex-1 overflow-x-auto overflow-y-hidden">
       <div className="flex h-full gap-6 px-6 pb-6 min-w-[1000px]">
-        {orderedStatuses.map((status) => {
+        {orderedStatuses.map((status: any) => {
           const columnTasks = tasksByStatus.get(status.id) || [];
           const totalTasksForStatus = totalTasksByStatus.get(status.id) || 0;
           return (
@@ -1918,7 +1946,7 @@ function AssigneeDropdown({
                 </div>
               </div>
               <div className="flex-1 p-3 flex flex-col gap-3 overflow-y-auto">
-                  {columnTasks.map((task) => (
+                  {columnTasks.map((task: any) => (
                     <BoardTaskCard
                       key={task.id}
                       task={task}
@@ -1994,7 +2022,7 @@ function AssigneeDropdown({
 
         <div className="overflow-y-auto flex-1">
           {filteredTasks.length > 0 ? (
-            filteredTasks.map((task) => {
+            filteredTasks.map((task: any) => {
               const statusId = task.boardStatusId || resolveBoardStatusId(null);
               const statusMeta = getStatusMeta(statusId);
               const assigneeName = getAssigneeName(task);
@@ -2108,7 +2136,7 @@ function AssigneeDropdown({
                 <SelectValue placeholder="Select board" />
               </SelectTrigger>
               <SelectContent>
-                {boards.map((board) => (
+                {boards.map((board: any) => (
                   <SelectItem key={board.id} value={board.id}>
                     <div className="flex items-center gap-2">
                       <span
@@ -2191,7 +2219,7 @@ function AssigneeDropdown({
               >
                 Unassigned
               </DropdownMenuCheckboxItem>
-              {people.map((person) => (
+              {people.map((person: any) => (
                 <DropdownMenuCheckboxItem
                   key={person.id}
                   checked={assigneeFilters.has(person.id)}
@@ -2223,7 +2251,7 @@ function AssigneeDropdown({
               </DropdownMenuRadioGroup>
               <DropdownMenuSeparator />
               <DropdownMenuLabel>Status</DropdownMenuLabel>
-              {orderedStatuses.map((status) => (
+              {orderedStatuses.map((status: any) => (
                 <DropdownMenuCheckboxItem
                   key={status.id}
                   checked={statusFilters.has(status.id)}
@@ -2234,7 +2262,7 @@ function AssigneeDropdown({
               ))}
               <DropdownMenuSeparator />
               <DropdownMenuLabel>Priority</DropdownMenuLabel>
-              {priorityOptions.map((priority) => (
+              {priorityOptions.map((priority: TaskPriority) => (
                 <DropdownMenuCheckboxItem
                   key={priority}
                   checked={priorityFilters.has(priority)}
@@ -2315,7 +2343,7 @@ function AssigneeDropdown({
                   <SelectValue placeholder="Choose a template" />
                 </SelectTrigger>
                 <SelectContent>
-                  {BOARD_TEMPLATES.map((template) => (
+                  {BOARD_TEMPLATES.map((template: any) => (
                     <SelectItem key={template.id} value={template.id}>
                       {template.name}
                     </SelectItem>
@@ -2505,7 +2533,7 @@ function AssigneeDropdown({
                     <SelectValue placeholder="Select status" />
                   </SelectTrigger>
                   <SelectContent>
-                    {orderedStatuses.map((status) => (
+                    {orderedStatuses.map((status: any) => (
                       <SelectItem key={status.id} value={status.id}>
                         {status.label}
                       </SelectItem>
@@ -2528,7 +2556,7 @@ function AssigneeDropdown({
                     <SelectValue placeholder="Select priority" />
                   </SelectTrigger>
                   <SelectContent>
-                    {priorityOptions.map((priority) => (
+                    {priorityOptions.map((priority: TaskPriority) => (
                       <SelectItem key={priority} value={priority}>
                         {priorityLabel[priority]}
                       </SelectItem>
@@ -2554,7 +2582,7 @@ function AssigneeDropdown({
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="__unassigned__">Unassigned</SelectItem>
-                    {people.map((person) => (
+                    {people.map((person: any) => (
                       <SelectItem key={person.id} value={person.id}>
                         {person.name}
                       </SelectItem>
@@ -2659,7 +2687,7 @@ function AssigneeDropdown({
                   <SelectValue placeholder="Select status" />
                 </SelectTrigger>
                 <SelectContent>
-                  {orderedStatuses.map((status) => (
+                  {orderedStatuses.map((status: any) => (
                     <SelectItem key={status.id} value={status.id}>
                       {status.label}
                     </SelectItem>
@@ -2679,3 +2707,5 @@ function AssigneeDropdown({
     </div>
   );
 }
+
+

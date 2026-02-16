@@ -306,12 +306,12 @@ export default function PlanningPageContent() {
     setSelectedTaskIds((prev) => {
       if (prev.size === 0) return prev;
       const validIds = new Set<string>();
-      extractedTasks.forEach((task) => {
-        getTaskAndAllDescendantIds(task).forEach((id) => validIds.add(id));
+      extractedTasks.forEach((task: any) => {
+        getTaskAndAllDescendantIds(task).forEach((id: any) => validIds.add(id));
       });
       let changed = false;
       const next = new Set<string>();
-      prev.forEach((id) => {
+      prev.forEach((id: any) => {
         if (validIds.has(id)) {
           next.add(id);
         } else {
@@ -401,7 +401,9 @@ export default function PlanningPageContent() {
       let newDisplayTasks: DisplayTask[] = [];
 
       if (result.tasks && result.tasks.length > 0) {
-        newDisplayTasks = result.tasks.map((t: DisplayTask) => sanitizeTaskForInternalState(t as DisplayTask));
+        newDisplayTasks = result.tasks.map((t: any) =>
+          sanitizeTaskForInternalState(t as DisplayTask)
+        );
         setExtractedTasks(newDisplayTasks);
         toast({ title: "Plan Generated!", description: `${newDisplayTasks.length} macro task(s) identified.` });
         setIsInputAreaVisible(false);
@@ -549,14 +551,16 @@ export default function PlanningPageContent() {
         requestedDetailLevel: 'detailed',
         contextTaskTitle: taskToBreakDown.title,
         contextTaskDescription: taskToBreakDown.description || undefined,
-        existingTasks: extractedTasks,
+        existingTasks: extractedTasks as any,
       };
       const result = await extractTasksFromChat(input);
 
       let finalUpdatedTasks: DisplayTask[] = extractedTasks;
 
       if (result.tasks) {
-        const newTasks = result.tasks.map((t: DisplayTask) => sanitizeTaskForInternalState(t as DisplayTask));
+        const newTasks = result.tasks.map((t: any) =>
+          sanitizeTaskForInternalState(t as DisplayTask)
+        );
         setExtractedTasks(newTasks);
         if (activePlanningSessionId) {
           updateActivePlanningSession({ inputText: pastedContent, extractedTasks: newTasks.map(normalizeTaskUtil) });
@@ -1433,4 +1437,5 @@ export default function PlanningPageContent() {
     </>
   );
 }
+
 

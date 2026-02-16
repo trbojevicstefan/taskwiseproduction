@@ -1,6 +1,7 @@
 import crypto from "crypto";
 import { getDb } from "@/lib/db";
 import { logFathomIntegration } from "@/lib/fathom-logs";
+import { recordExternalApiFailure } from "@/lib/observability-metrics";
 
 export interface FathomInstallationDoc {
   _id: string;
@@ -94,7 +95,7 @@ export const consumeFathomOAuthState = async (
 ): Promise<string | null> => {
   const db = await getDb();
   const record = await db
-    .collection<{ _id: string; userId: string; createdAt: Date }>(
+    .collection(
       OAUTH_STATE_COLLECTION
     )
     .findOne({ _id: state });
@@ -108,7 +109,7 @@ export const getFathomInstallation = async (
 ): Promise<FathomInstallationDoc | null> => {
   const db = await getDb();
   return db
-    .collection<FathomInstallationDoc>(INSTALLATIONS_COLLECTION)
+    .collection(INSTALLATIONS_COLLECTION)
     .findOne({ _id: userId });
 };
 
@@ -118,7 +119,7 @@ export const saveFathomInstallation = async (
   const db = await getDb();
   const { createdAt, ...rest } = installation;
   await db
-    .collection<FathomInstallationDoc>(INSTALLATIONS_COLLECTION)
+    .collection(INSTALLATIONS_COLLECTION)
     .updateOne(
       { _id: installation.userId },
       { $set: rest, $setOnInsert: { createdAt: createdAt || new Date() } },
@@ -146,14 +147,25 @@ const refreshFathomToken = async (installation: FathomInstallationDoc) => {
     client_secret: FATHOM_CLIENT_SECRET,
   });
 
-  const response = await fetch(
-    "https://fathom.video/external/v1/oauth2/token",
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: params,
-    }
-  );
+  let response: Response;
+  try {
+    response = await fetch(
+      "https://fathom.video/external/v1/oauth2/token",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: params,
+      }
+    );
+  } catch (error) {
+    void recordExternalApiFailure({
+      provider: "fathom",
+      operation: "oauth.token.refresh",
+      userId: installation.userId,
+      error,
+    });
+    throw error;
+  }
 
   const payload = (await response.json()) as {
     access_token?: string;
@@ -164,6 +176,13 @@ const refreshFathomToken = async (installation: FathomInstallationDoc) => {
   };
 
   if (!payload.access_token) {
+    void recordExternalApiFailure({
+      provider: "fathom",
+      operation: "oauth.token.refresh",
+      userId: installation.userId,
+      statusCode: response.status,
+      error: payload.error || "Failed to refresh Fathom token.",
+    });
     throw new Error(payload.error || "Failed to refresh Fathom token.");
   }
 
@@ -213,6 +232,15 @@ const fathomApiFetch = async <T>(
   });
   if (!response.ok) {
     const errorText = await response.text().catch(() => "");
+    void recordExternalApiFailure({
+      provider: "fathom",
+      operation: "api.fetch",
+      statusCode: response.status,
+      error: errorText || response.statusText,
+      metadata: {
+        path,
+      },
+    });
     throw new Error(
       `Fathom API error (${response.status}): ${errorText || response.statusText}`
     );
@@ -256,6 +284,15 @@ const createFathomWebhook = async (
 
   if (!response.ok) {
     const errorText = await response.text().catch(() => "");
+    void recordExternalApiFailure({
+      provider: "fathom",
+      operation: "webhooks.create",
+      statusCode: response.status,
+      error: errorText || response.statusText,
+      metadata: {
+        destinationUrl: url,
+      },
+    });
     throw new Error(
       `Fathom webhook create failed (${response.status}): ${errorText || response.statusText}`
     );
@@ -337,6 +374,15 @@ export const deleteFathomWebhook = async (
 
   if (!response.ok) {
     const errorText = await response.text().catch(() => "");
+    void recordExternalApiFailure({
+      provider: "fathom",
+      operation: "webhooks.delete",
+      statusCode: response.status,
+      error: errorText || response.statusText,
+      metadata: {
+        webhookId: webhookId || null,
+      },
+    });
     throw new Error(
       `Fathom webhook delete failed (${response.status}): ${errorText || response.statusText}`
     );
@@ -376,7 +422,7 @@ export const ensureFathomWebhook = async (
     const existing = current.webhooks || [];
     const merged = [
       nextEntry,
-      ...existing.filter((entry) => {
+      ...existing.filter((entry: any) => {
         if (!entry) return false;
         if (webhookId && entry.id === webhookId) return false;
         if (!webhookId && entry.url && entry.url === createdUrl) return false;
@@ -403,7 +449,7 @@ export const ensureFathomWebhook = async (
     const existing = current.webhooks || [];
     const merged = [
       ...entry,
-      ...existing.filter((item) => {
+      ...existing.filter((item: any) => {
         if (!item) return false;
         if (webhookId && item.id === webhookId) return false;
         if (!webhookId && item.url && item.url === webhookUrl) return false;
@@ -419,7 +465,7 @@ export const ensureFathomWebhook = async (
       (webhook: any) => getWebhookUrl(webhook) === webhookUrl
     );
     if (matches.length > 0) {
-      const sorted = [...matches].sort((a, b) => {
+      const sorted = [...matches].sort((a: any, b: any) => {
         const aCreated = new Date(a.created_at || a.createdAt || 0).getTime();
         const bCreated = new Date(b.created_at || b.createdAt || 0).getTime();
         return bCreated - aCreated;
@@ -444,7 +490,7 @@ export const ensureFathomWebhook = async (
 
       if (sorted.length > 1) {
         await Promise.allSettled(
-          sorted.slice(1).map((webhook) =>
+          sorted.slice(1).map((webhook: any) =>
             deleteFathomWebhook(accessToken, webhook)
           )
         );
@@ -719,7 +765,7 @@ export const formatFathomTranscript = (segments: any): string => {
   if (!Array.isArray(segments)) return JSON.stringify(segments, null, 2);
 
   return segments
-    .map((segment) => {
+    .map((segment: any) => {
       const speakerValue = segment.speaker || segment.speaker_name || segment.name;
       const speaker =
         typeof speakerValue === "string"
@@ -739,3 +785,6 @@ export const formatFathomTranscript = (segments: any): string => {
     .filter(Boolean)
     .join("\n");
 };
+
+
+

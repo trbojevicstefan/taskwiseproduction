@@ -55,7 +55,7 @@ const fetchAllSlackUsers = async (
             !member.is_app_user &&
             member.id
         )
-        .map((member) => ({
+        .map((member: any) => ({
           id: member.id,
           name: member.name || member.real_name || "Slack User",
           realName: member.real_name || member.name || "Slack User",
@@ -96,3 +96,4 @@ export async function GET() {
     );
   }
 }
+

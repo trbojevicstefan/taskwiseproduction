@@ -134,7 +134,7 @@ export default function PushToGoogleTasksDialog({ isOpen, onClose, tasks }: Push
                 <SelectValue placeholder={isFetching ? "Loading lists..." : "Select a list"} />
               </SelectTrigger>
               <SelectContent>
-                {taskLists.map((list) => (
+                {taskLists.map((list: any) => (
                   <SelectItem key={list.id} value={list.id}>{list.title}</SelectItem>
                 ))}
               </SelectContent>
@@ -173,3 +173,4 @@ export default function PushToGoogleTasksDialog({ isOpen, onClose, tasks }: Push
     </Dialog>
   );
 }
+

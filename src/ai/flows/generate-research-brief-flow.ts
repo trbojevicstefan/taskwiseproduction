@@ -9,7 +9,6 @@
  */
 
 import { ai } from '@/ai/genkit';
-import type { PromptGenerateOptions } from "@genkit-ai/ai";
 import { z } from 'zod';
 import { runPromptWithFallback } from '@/ai/prompt-fallback';
 
@@ -64,11 +63,11 @@ const getKeywords = (input: GenerateResearchBriefInput) => {
   const raw = `${input.taskTitle || ""} ${input.taskDescription || ""} ${input.assigneeName || ""}`
     .toLowerCase()
     .split(/[^a-z0-9]+/g)
-    .map((token) => token.trim())
-    .filter((token) => token.length >= 4);
+    .map((token: any) => token.trim())
+    .filter((token: any) => token.length >= 4);
 
   const unique = new Set<string>();
-  raw.forEach((token) => {
+  raw.forEach((token: any) => {
     if (!unique.has(token) && unique.size < 12) {
       unique.add(token);
     }
@@ -122,7 +121,7 @@ const prepareBriefInput = (input: GenerateResearchBriefInput): GenerateResearchB
   const relatedCandidates = (input.relatedTranscripts || [])
     .filter((value): value is string => typeof value === "string" && value.trim().length > 0)
     .slice(0, MAX_RELATED_TRANSCRIPTS)
-    .map((value) =>
+    .map((value: any) =>
       compactTranscript(value, keywords, MAX_RELATED_TRANSCRIPT_CHARS)
     )
     .filter((value): value is string => Boolean(value));
@@ -205,7 +204,7 @@ const generateResearchBriefFlow = ai.defineFlow(
   async (input: GenerateResearchBriefInput) => {
     try {
       const preparedInput = prepareBriefInput(input);
-      const promptOptions: PromptGenerateOptions<unknown, unknown> = {
+      const promptOptions = {
         config: {
           model: BRIEF_MODEL,
           maxOutputTokens: BRIEF_MAX_OUTPUT_TOKENS,
@@ -236,3 +235,4 @@ const generateResearchBriefFlow = ai.defineFlow(
     }
   }
 );
+

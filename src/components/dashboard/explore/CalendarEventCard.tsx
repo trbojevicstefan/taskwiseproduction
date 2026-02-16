@@ -21,7 +21,7 @@ export default function CalendarEventCard({ event }: CalendarEventCardProps) {
   const startTime = getStartTime(event);
   const hasLink = Boolean(event.hangoutLink);
   const attendeeNames = (event.attendees || [])
-    .map((attendee) => attendee.name || attendee.email)
+    .map((attendee: any) => attendee.name || attendee.email)
     .filter(Boolean) as string[];
 
   return (
@@ -81,3 +81,4 @@ export default function CalendarEventCard({ event }: CalendarEventCardProps) {
     </Card>
   );
 }
+

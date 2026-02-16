@@ -141,7 +141,7 @@ function normalizeAiTaskNode(
   const subtasks = normalizeAiTasks(task.subtasks, childPrefix);
   const sourceEvidence = Array.isArray(task.sourceEvidence)
     ? task.sourceEvidence
-        .map((entry) => {
+        .map((entry: any) => {
           if (!entry || typeof entry !== "object") return null;
           const snippet =
             typeof entry.snippet === "string" && entry.snippet.trim()
@@ -188,7 +188,7 @@ export function normalizeAiTasks(
 }
 
 export function hasMeaningfulTasks(tasks: TaskType[]): boolean {
-  return tasks.some((task) => !isPlaceholderTitle(task.title));
+  return tasks.some((task: any) => !isPlaceholderTitle(task.title));
 }
 
 export type TaskAiProvider = "openai";
@@ -199,7 +199,7 @@ export function annotateTasksWithProvider(
 ): TaskType[] {
   if (!provider) return tasks;
   const apply = (items: TaskType[]): TaskType[] =>
-    items.map((task) => ({
+    items.map((task: any) => ({
       ...task,
       aiProvider: task.aiProvider || provider,
       subtasks: task.subtasks ? apply(task.subtasks) : task.subtasks,
@@ -219,10 +219,10 @@ export const normalizeTitleKey = (title: string | undefined): string => {
 const findMatchingTask = (task: TaskType, candidates: TaskType[]): TaskType | null => {
   const lightKey = normalizeTitleKey(task.title);
   if (!lightKey) return null;
-  const exact = candidates.find((candidate) => normalizeTitleKey(candidate.title) === lightKey);
+  const exact = candidates.find((candidate: any) => normalizeTitleKey(candidate.title) === lightKey);
   if (exact) return exact;
   return (
-    candidates.find((candidate) => {
+    candidates.find((candidate: any) => {
       const candidateKey = normalizeTitleKey(candidate.title);
       return candidateKey && (candidateKey.includes(lightKey) || lightKey.includes(candidateKey));
     }) || null
@@ -294,10 +294,10 @@ const TASK_TYPE_RULES: Array<{ type: TaskTypeCategory; keywords: string[] }> = [
 
 const inferPriorityFromText = (text: string, dueAt?: string | null): TaskType["priority"] => {
   const lowered = text.toLowerCase();
-  if (HIGH_PRIORITY_KEYWORDS.some((keyword) => lowered.includes(keyword))) {
+  if (HIGH_PRIORITY_KEYWORDS.some((keyword: any) => lowered.includes(keyword))) {
     return "high";
   }
-  if (LOW_PRIORITY_KEYWORDS.some((keyword) => lowered.includes(keyword))) {
+  if (LOW_PRIORITY_KEYWORDS.some((keyword: any) => lowered.includes(keyword))) {
     return "low";
   }
   if (dueAt) {
@@ -315,7 +315,7 @@ const inferPriorityFromText = (text: string, dueAt?: string | null): TaskType["p
 const inferTaskTypeFromText = (text: string): TaskTypeCategory => {
   const lowered = text.toLowerCase();
   for (const rule of TASK_TYPE_RULES) {
-    if (rule.keywords.some((keyword) => lowered.includes(keyword))) {
+    if (rule.keywords.some((keyword: any) => lowered.includes(keyword))) {
       return rule.type;
     }
   }
@@ -324,7 +324,7 @@ const inferTaskTypeFromText = (text: string): TaskTypeCategory => {
 
 export function applyTaskMetadata(tasks: TaskType[]): TaskType[] {
   const apply = (items: TaskType[]): TaskType[] =>
-    items.map((task) => {
+    items.map((task: any) => {
       const evidence = task.sourceEvidence?.[0]?.snippet || "";
       const contextText = [task.title, task.description, evidence].filter(Boolean).join(" ");
       const inferredPriority = inferPriorityFromText(contextText, task.dueAt || undefined);
@@ -340,3 +340,4 @@ export function applyTaskMetadata(tasks: TaskType[]): TaskType[] {
     });
   return apply(tasks);
 }
+

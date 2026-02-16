@@ -9,8 +9,6 @@ import { Label } from '@/components/ui/label';
 import { Loader2, Send } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { useIntegrations } from '@/contexts/IntegrationsContext';
-import { getFirebaseServices } from '@/lib/firebase/config';
-import { getFunctions, httpsCallable } from 'firebase/functions';
 import type { ExtractedTaskSchema } from '@/types/chat';
 import type { TrelloBoard, TrelloList } from '@/lib/trelloAPI';
 
@@ -19,6 +17,19 @@ interface PushToTrelloDialogProps {
   onClose: () => void;
   tasks: ExtractedTaskSchema[];
 }
+
+const extractErrorMessage = async (response: Response, fallback: string) => {
+  try {
+    const payload = await response.json();
+    const message = payload?.message || payload?.error || payload?.details;
+    if (typeof message === "string" && message.trim()) {
+      return message;
+    }
+  } catch {
+    // Ignore JSON parse failures and fall back to generic message.
+  }
+  return fallback;
+};
 
 export default function PushToTrelloDialog({ isOpen, onClose, tasks }: PushToTrelloDialogProps) {
   const { isTrelloConnected } = useIntegrations();
@@ -47,14 +58,14 @@ export default function PushToTrelloDialog({ isOpen, onClose, tasks }: PushToTre
     if (!isTrelloConnected) return;
     setIsFetchingBoards(true);
     try {
-      const { app } = getFirebaseServices();
-      if (!app) {
-        throw new Error("Firebase is not initialized.");
+      const response = await fetch("/api/trello/boards");
+      if (!response.ok) {
+        throw new Error(
+          await extractErrorMessage(response, "Failed to fetch Trello boards.")
+        );
       }
-      const functions = getFunctions(app, 'us-central1');
-      const trelloGetBoardsFn = httpsCallable(functions, 'trelloGetBoards');
-      const result = await trelloGetBoardsFn();
-      const fetchedBoards = (result.data as any).boards || [];
+      const payload = await response.json();
+      const fetchedBoards = Array.isArray(payload?.boards) ? payload.boards : [];
       setBoards(fetchedBoards);
       if (fetchedBoards.length > 0) {
         setSelectedBoardId(fetchedBoards[0].id);
@@ -80,14 +91,15 @@ export default function PushToTrelloDialog({ isOpen, onClose, tasks }: PushToTre
         setLists([]);
         setSelectedListId(null);
         try {
-            const { app } = getFirebaseServices();
-            if (!app) {
-              throw new Error("Firebase is not initialized.");
+            const params = new URLSearchParams({ boardId: selectedBoardId });
+            const response = await fetch(`/api/trello/lists?${params.toString()}`);
+            if (!response.ok) {
+              throw new Error(
+                await extractErrorMessage(response, "Failed to fetch Trello lists.")
+              );
             }
-            const functions = getFunctions(app, 'us-central1');
-            const trelloGetListsForBoardFn = httpsCallable(functions, 'trelloGetListsForBoard');
-            const result = await trelloGetListsForBoardFn({ boardId: selectedBoardId });
-            const fetchedLists = (result.data as any).lists || [];
+            const payload = await response.json();
+            const fetchedLists = Array.isArray(payload?.lists) ? payload.lists : [];
             setLists(fetchedLists);
             if (fetchedLists.length > 0) {
               setSelectedListId(fetchedLists[0].id);
@@ -112,21 +124,23 @@ export default function PushToTrelloDialog({ isOpen, onClose, tasks }: PushToTre
     toast({ title: 'Pushing to Trello...' });
     
     try {
-        const { app } = getFirebaseServices();
-        if (!app) {
-          throw new Error("Firebase is not initialized.");
-        }
-        const functions = getFunctions(app, 'us-central1');
-        const trelloCreateCardFn = httpsCallable(functions, 'trelloCreateCard');
-
-        // We'll create one card for each root task. Subtasks will be checklist items.
+        // Create one card for each root task. Subtasks become checklist items.
         for (const task of tasks) {
-            await trelloCreateCardFn({
+            const response = await fetch("/api/trello/cards", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
                 listId: selectedListId,
                 name: task.title,
                 desc: buildCardDescription(task),
                 subtasks: task.subtasks || [],
+              }),
             });
+            if (!response.ok) {
+              throw new Error(
+                await extractErrorMessage(response, "Failed to create a Trello card.")
+              );
+            }
         }
       
       toast({ title: 'Success!', description: `${tasks.length} card(s) were pushed to Trello.` });
@@ -167,7 +181,7 @@ export default function PushToTrelloDialog({ isOpen, onClose, tasks }: PushToTre
                 <SelectValue placeholder={isFetchingBoards ? "Loading boards..." : "Select a board"} />
               </SelectTrigger>
               <SelectContent>
-                {boards.map((board) => (
+                {boards.map((board: any) => (
                   <SelectItem key={board.id} value={board.id}>{board.name}</SelectItem>
                 ))}
               </SelectContent>
@@ -180,7 +194,7 @@ export default function PushToTrelloDialog({ isOpen, onClose, tasks }: PushToTre
                 <SelectValue placeholder={isFetchingLists ? "Loading lists..." : "Select a list"} />
               </SelectTrigger>
               <SelectContent>
-                {lists.map((list) => (
+                {lists.map((list: any) => (
                   <SelectItem key={list.id} value={list.id}>{list.name}</SelectItem>
                 ))}
               </SelectContent>
@@ -198,3 +212,4 @@ export default function PushToTrelloDialog({ isOpen, onClose, tasks }: PushToTre
     </Dialog>
   );
 }
+

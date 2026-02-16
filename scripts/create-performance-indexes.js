@@ -113,7 +113,28 @@ const indexPlan = [
       },
       {
         key: { userId: 1, workspaceId: 1, boardId: 1, taskId: 1 },
-        options: { name: "board_items_user_workspace_board_task" },
+        options: {
+          name: "board_items_user_workspace_board_task_unique",
+          unique: true,
+          partialFilterExpression: { taskId: { $type: "string" } },
+        },
+      },
+    ],
+  },
+  {
+    collection: "domainEvents",
+    indexes: [
+      {
+        key: { userId: 1, status: 1, createdAt: 1, _id: 1 },
+        options: { name: "domain_events_user_status_created_cursor" },
+      },
+      {
+        key: { userId: 1, type: 1, createdAt: -1 },
+        options: { name: "domain_events_user_type_created" },
+      },
+      {
+        key: { expiresAt: 1 },
+        options: { name: "domain_events_expires_at_ttl", expireAfterSeconds: 0 },
       },
     ],
   },

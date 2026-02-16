@@ -1,27 +1,25 @@
 import { NextResponse } from "next/server";
+import { apiError } from "@/lib/api-route";
 import { getSessionUserId } from "@/lib/server-auth";
 import { getGoogleAccessTokenForUser } from "@/lib/google-auth";
 
 export async function PATCH(request: Request) {
   const userId = await getSessionUserId();
   if (!userId) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return apiError(401, "request_error", "Unauthorized");
   }
 
   const body = await request.json().catch(() => ({}));
   const { eventId, description } = body || {};
 
   if (!eventId || typeof description !== "string") {
-    return NextResponse.json(
-      { error: "Missing eventId or description." },
-      { status: 400 }
-    );
+    return apiError(400, "request_error", "Missing eventId or description.");
   }
 
   try {
     const accessToken = await getGoogleAccessTokenForUser(userId);
     if (!accessToken) {
-      return NextResponse.json({ error: "Google not connected." }, { status: 404 });
+      return apiError(404, "request_error", "Google not connected.");
     }
 
     const response = await fetch(
@@ -50,3 +48,5 @@ export async function PATCH(request: Request) {
     );
   }
 }
+
+

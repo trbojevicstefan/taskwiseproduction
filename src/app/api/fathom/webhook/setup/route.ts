@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { apiError } from "@/lib/api-route";
 import { randomBytes } from "crypto";
 import { getSessionUserId } from "@/lib/server-auth";
 import {
@@ -14,22 +15,19 @@ import { logFathomIntegration } from "@/lib/fathom-logs";
 export async function POST() {
   const userId = await getSessionUserId();
   if (!userId) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return apiError(401, "request_error", "Unauthorized");
   }
 
   console.log("Fathom webhook setup requested", { userId });
 
   const installation = await getFathomInstallation(userId);
   if (!installation) {
-    return NextResponse.json(
-      { error: "Fathom integration not connected." },
-      { status: 400 }
-    );
+    return apiError(400, "request_error", "Fathom integration not connected.");
   }
 
   const user = await findUserById(userId);
   if (!user) {
-    return NextResponse.json({ error: "User not found." }, { status: 404 });
+    return apiError(404, "request_error", "User not found.");
   }
 
   const webhookToken = randomBytes(24).toString("hex");
@@ -72,3 +70,5 @@ export async function POST() {
     );
   }
 }
+
+

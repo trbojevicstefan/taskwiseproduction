@@ -1,0 +1,65 @@
+﻿{
+  "generatedAt": "2026-02-16T15:28:38.330Z",
+  "config": {
+    "totalJobs": 300,
+    "pollIntervalMs": 100,
+    "workerPollMs": 25,
+    "workerBatch": 25,
+    "firstPhaseTimeoutMs": 20000,
+    "fullRunTimeoutMs": 120000
+  },
+  "summary": {
+    "durationMs": 25459,
+    "initialCounts": {
+      "queued": 157,
+      "running": 3,
+      "succeeded": 140,
+      "failed": 0,
+      "total": 300
+    },
+    "countsAfterStop": {
+      "queued": 155,
+      "running": 3,
+      "succeeded": 142,
+      "failed": 0,
+      "total": 300
+    },
+    "finalCounts": {
+      "queued": 0,
+      "running": 0,
+      "succeeded": 300,
+      "failed": 0,
+      "total": 300
+    }
+  },
+  "checks": {
+    "initialEnqueueCountMatches": true,
+    "interruptionObserved": true,
+    "queueDrainedAfterRestart": true,
+    "noFailedJobs": true,
+    "allJobsTerminal": true
+  },
+  "passed": true,
+  "logsPreview": [
+    "{\"timestamp\":\"2026-02-16T15:28:37.094Z\",\"level\":\"info\",\"event\":\"jobs.worker.job.succeeded\",\"scope\":\"jobs.worker\",\"correlationId\":\"39ce6659-ce84-44bd-8193-8a869e46e2dc\",\"jobId\":\"c9e51f11-3675-44a1-9a77-0085e444cde3\",\"jobType\":\"domain-event-dispatch\",\"userId\":\"worker-recovery-724090d3-df88-4261-aaf6-fef16999b7e2\",\"attempts\":1,\"maxAttempts\":2,\"durationMs\":194}\n",
+    "{\"timestamp\":\"2026-02-16T15:28:37.138Z\",\"level\":\"info\",\"event\":\"jobs.worker.job.claimed\",\"scope\":\"jobs.worker\",\"correlationId\":\"bc7b146e-ccd9-4674-8211-c7a4dbd7a197\",\"jobId\":\"7279eec4-b833-4e0f-a2f8-a9032a5b67bd\",\"jobType\":\"domain-event-dispatch\",\"userId\":\"worker-recovery-724090d3-df88-4261-aaf6-fef16999b7e2\",\"attempts\":1,\"maxAttempts\":2}\n",
+    "{\"timestamp\":\"2026-02-16T15:28:37.138Z\",\"level\":\"info\",\"event\":\"jobs.domain-event-dispatch.started\",\"scope\":\"jobs.worker\",\"correlationId\":\"bc7b146e-ccd9-4674-8211-c7a4dbd7a197\",\"jobId\":\"7279eec4-b833-4e0f-a2f8-a9032a5b67bd\",\"jobType\":\"domain-event-dispatch\",\"userId\":\"worker-recovery-724090d3-df88-4261-aaf6-fef16999b7e2\",\"attempts\":1,\"maxAttempts\":2,\"eventId\":\"c77c31bd-52a3-4ec6-ad3b-ffbb99de2f1c\"}\n",
+    "{\"timestamp\":\"2026-02-16T15:28:37.229Z\",\"level\":\"info\",\"event\":\"domain-events.dispatch.started\",\"scope\":\"domain-events\",\"eventId\":\"c77c31bd-52a3-4ec6-ad3b-ffbb99de2f1c\",\"eventType\":\"task.status.changed\",\"userId\":\"worker-recovery-724090d3-df88-4261-aaf6-fef16999b7e2\",\"correlationId\":\"worker-recovery-288\"}\n",
+    "{\"timestamp\":\"2026-02-16T15:28:37.297Z\",\"level\":\"info\",\"event\":\"domain-events.dispatch.succeeded\",\"scope\":\"domain-events\",\"eventId\":\"c77c31bd-52a3-4ec6-ad3b-ffbb99de2f1c\",\"eventType\":\"task.status.changed\",\"userId\":\"worker-recovery-724090d3-df88-4261-aaf6-fef16999b7e2\",\"correlationId\":\"worker-recovery-288\"}\n",
+    "{\"timestamp\":\"2026-02-16T15:28:37.297Z\",\"level\":\"info\",\"event\":\"jobs.domain-event-dispatch.succeeded\",\"scope\":\"jobs.worker\",\"correlationId\":\"bc7b146e-ccd9-4674-8211-c7a4dbd7a197\",\"jobId\":\"7279eec4-b833-4e0f-a2f8-a9032a5b67bd\",\"jobType\":\"domain-event-dispatch\",\"userId\":\"worker-recovery-724090d3-df88-4261-aaf6-fef16999b7e2\",\"attempts\":1,\"maxAttempts\":2,\"eventId\":\"c77c31bd-52a3-4ec6-ad3b-ffbb99de2f1c\",\"durationMs\":159,\"eventType\":\"task.status.changed\",\"result\":{\"matchedTasks\":0}}\n",
+    "{\"timestamp\":\"2026-02-16T15:28:37.335Z\",\"level\":\"info\",\"event\":\"jobs.worker.job.succeeded\",\"scope\":\"jobs.worker\",\"correlationId\":\"bc7b146e-ccd9-4674-8211-c7a4dbd7a197\",\"jobId\":\"7279eec4-b833-4e0f-a2f8-a9032a5b67bd\",\"jobType\":\"domain-event-dispatch\",\"userId\":\"worker-recovery-724090d3-df88-4261-aaf6-fef16999b7e2\",\"attempts\":1,\"maxAttempts\":2,\"durationMs\":197}\n",
+    "{\"timestamp\":\"2026-02-16T15:28:37.584Z\",\"level\":\"info\",\"event\":\"jobs.worker.job.claimed\",\"scope\":\"jobs.worker\",\"correlationId\":\"abd2958d-55bf-4772-ba9d-bf4a612b0fb0\",\"jobId\":\"20c10fb7-f070-4335-91c6-3a7e8a438f35\",\"jobType\":\"domain-event-dispatch\",\"userId\":\"worker-recovery-724090d3-df88-4261-aaf6-fef16999b7e2\",\"attempts\":1,\"maxAttempts\":2}\n",
+    "{\"timestamp\":\"2026-02-16T15:28:37.584Z\",\"level\":\"info\",\"event\":\"jobs.domain-event-dispatch.started\",\"scope\":\"jobs.worker\",\"correlationId\":\"abd2958d-55bf-4772-ba9d-bf4a612b0fb0\",\"jobId\":\"20c10fb7-f070-4335-91c6-3a7e8a438f35\",\"jobType\":\"domain-event-dispatch\",\"userId\":\"worker-recovery-724090d3-df88-4261-aaf6-fef16999b7e2\",\"attempts\":1,\"maxAttempts\":2,\"eventId\":\"58297680-f09c-4346-9f6f-6dca71d46083\"}\n",
+    "{\"timestamp\":\"2026-02-16T15:28:37.655Z\",\"level\":\"info\",\"event\":\"domain-events.dispatch.started\",\"scope\":\"domain-events\",\"eventId\":\"58297680-f09c-4346-9f6f-6dca71d46083\",\"eventType\":\"task.status.changed\",\"userId\":\"worker-recovery-724090d3-df88-4261-aaf6-fef16999b7e2\",\"correlationId\":\"worker-recovery-292\"}\n",
+    "{\"timestamp\":\"2026-02-16T15:28:37.730Z\",\"level\":\"info\",\"event\":\"domain-events.dispatch.succeeded\",\"scope\":\"domain-events\",\"eventId\":\"58297680-f09c-4346-9f6f-6dca71d46083\",\"eventType\":\"task.status.changed\",\"userId\":\"worker-recovery-724090d3-df88-4261-aaf6-fef16999b7e2\",\"correlationId\":\"worker-recovery-292\"}\n",
+    "{\"timestamp\":\"2026-02-16T15:28:37.730Z\",\"level\":\"info\",\"event\":\"jobs.domain-event-dispatch.succeeded\",\"scope\":\"jobs.worker\",\"correlationId\":\"abd2958d-55bf-4772-ba9d-bf4a612b0fb0\",\"jobId\":\"20c10fb7-f070-4335-91c6-3a7e8a438f35\",\"jobType\":\"domain-event-dispatch\",\"userId\":\"worker-recovery-724090d3-df88-4261-aaf6-fef16999b7e2\",\"attempts\":1,\"maxAttempts\":2,\"eventId\":\"58297680-f09c-4346-9f6f-6dca71d46083\",\"durationMs\":146,\"eventType\":\"task.status.changed\",\"result\":{\"matchedTasks\":0}}\n",
+    "{\"timestamp\":\"2026-02-16T15:28:37.768Z\",\"level\":\"info\",\"event\":\"jobs.worker.job.succeeded\",\"scope\":\"jobs.worker\",\"correlationId\":\"abd2958d-55bf-4772-ba9d-bf4a612b0fb0\",\"jobId\":\"20c10fb7-f070-4335-91c6-3a7e8a438f35\",\"jobType\":\"domain-event-dispatch\",\"userId\":\"worker-recovery-724090d3-df88-4261-aaf6-fef16999b7e2\",\"attempts\":1,\"maxAttempts\":2,\"durationMs\":184}\n",
+    "{\"timestamp\":\"2026-02-16T15:28:37.809Z\",\"level\":\"info\",\"event\":\"jobs.worker.job.claimed\",\"scope\":\"jobs.worker\",\"correlationId\":\"60bfff24-912c-47d7-867d-019adc21cb05\",\"jobId\":\"858e2632-b5cb-4db7-80de-2aa5f3ac0c05\",\"jobType\":\"domain-event-dispatch\",\"userId\":\"worker-recovery-724090d3-df88-4261-aaf6-fef16999b7e2\",\"attempts\":1,\"maxAttempts\":2}\n",
+    "{\"timestamp\":\"2026-02-16T15:28:37.809Z\",\"level\":\"info\",\"event\":\"jobs.domain-event-dispatch.started\",\"scope\":\"jobs.worker\",\"correlationId\":\"60bfff24-912c-47d7-867d-019adc21cb05\",\"jobId\":\"858e2632-b5cb-4db7-80de-2aa5f3ac0c05\",\"jobType\":\"domain-event-dispatch\",\"userId\":\"worker-recovery-724090d3-df88-4261-aaf6-fef16999b7e2\",\"attempts\":1,\"maxAttempts\":2,\"eventId\":\"f98d3b09-27bb-47c1-b318-51ceff697a87\"}\n",
+    "{\"timestamp\":\"2026-02-16T15:28:37.882Z\",\"level\":\"info\",\"event\":\"domain-events.dispatch.started\",\"scope\":\"domain-events\",\"eventId\":\"f98d3b09-27bb-47c1-b318-51ceff697a87\",\"eventType\":\"task.status.changed\",\"userId\":\"worker-recovery-724090d3-df88-4261-aaf6-fef16999b7e2\",\"correlationId\":\"worker-recovery-296\"}\n",
+    "{\"timestamp\":\"2026-02-16T15:28:37.959Z\",\"level\":\"info\",\"event\":\"domain-events.dispatch.succeeded\",\"scope\":\"domain-events\",\"eventId\":\"f98d3b09-27bb-47c1-b318-51ceff697a87\",\"eventType\":\"task.status.changed\",\"userId\":\"worker-recovery-724090d3-df88-4261-aaf6-fef16999b7e2\",\"correlationId\":\"worker-recovery-296\"}\n",
+    "{\"timestamp\":\"2026-02-16T15:28:37.959Z\",\"level\":\"info\",\"event\":\"jobs.domain-event-dispatch.succeeded\",\"scope\":\"jobs.worker\",\"correlationId\":\"60bfff24-912c-47d7-867d-019adc21cb05\",\"jobId\":\"858e2632-b5cb-4db7-80de-2aa5f3ac0c05\",\"jobType\":\"domain-event-dispatch\",\"userId\":\"worker-recovery-724090d3-df88-4261-aaf6-fef16999b7e2\",\"attempts\":1,\"maxAttempts\":2,\"eventId\":\"f98d3b09-27bb-47c1-b318-51ceff697a87\",\"durationMs\":150,\"eventType\":\"task.status.changed\",\"result\":{\"matchedTasks\":0}}\n",
+    "{\"timestamp\":\"2026-02-16T15:28:38.001Z\",\"level\":\"info\",\"event\":\"jobs.worker.job.succeeded\",\"scope\":\"jobs.worker\",\"correlationId\":\"60bfff24-912c-47d7-867d-019adc21cb05\",\"jobId\":\"858e2632-b5cb-4db7-80de-2aa5f3ac0c05\",\"jobType\":\"domain-event-dispatch\",\"userId\":\"worker-recovery-724090d3-df88-4261-aaf6-fef16999b7e2\",\"attempts\":1,\"maxAttempts\":2,\"durationMs\":191}\n",
+    "{\"timestamp\":\"2026-02-16T15:28:38.107Z\",\"level\":\"info\",\"event\":\"jobs.worker.backlog.ok\",\"scope\":\"jobs.worker\",\"queuedTotal\":0,\"thresholds\":{\"warn\":100,\"critical\":500},\"snapshot\":{\"queuedReady\":0,\"queuedDelayed\":0,\"running\":2,\"failedLast24h\":0,\"checkedAt\":\"2026-02-16T15:28:38.043Z\"}}\n"
+  ]
+}

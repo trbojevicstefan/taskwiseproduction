@@ -43,8 +43,13 @@ const summarizeChatSessionFlow = ai.defineFlow({
   inputSchema: SummarizeChatSessionInputSchema,
   outputSchema: SummarizeChatSessionOutputSchema,
 }, async (input: SummarizeChatSessionInput) => {
-  const { output } = await runPromptWithFallback(summarizeChatSessionPrompt, input);
-  return {
-    ...output,
-  };
+  const { output, text } = await runPromptWithFallback(
+    summarizeChatSessionPrompt,
+    input
+  );
+  const parsed = SummarizeChatSessionOutputSchema.safeParse(output);
+  if (parsed.success) {
+    return parsed.data;
+  }
+  return { summary: (text || "").trim() || "Unable to summarize this chat session." };
 });

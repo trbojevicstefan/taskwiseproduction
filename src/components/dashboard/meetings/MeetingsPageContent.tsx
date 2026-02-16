@@ -115,6 +115,7 @@ import { getBestPersonMatch } from '@/lib/people-matching';
 import type { Person } from '@/types/person';
 import { cn } from "@/lib/utils";
 import { apiFetch } from "@/lib/api";
+import { pollJobUntilDone } from "@/lib/job-client";
 import SelectionToolbar from '../common/SelectionToolbar';
 import SetDueDateDialog from '../planning/SetDueDateDialog';
 import { exportTasksToCSV, exportTasksToMarkdown, exportTasksToPDF, copyTextToClipboard, formatTasksToText } from '@/lib/exportUtils';
@@ -181,7 +182,7 @@ const getMeetingTaskCounts = (meeting: Meeting) => {
 const TIMESTAMP_REGEX = /\b(\d{1,2}:)?\d{1,2}:\d{2}\b/g;
 
 const getInitials = (name: string | null | undefined) =>
-  name ? name.split(" ").map((part) => part[0]).join("").toUpperCase().substring(0, 2) : "U";
+  name ? name.split(" ").map((part: any) => part[0]).join("").toUpperCase().substring(0, 2) : "U";
 
 const getMeetingPersonKey = (person: { name: string; title?: string; email?: string }) => {
   const name = person.name?.trim().toLowerCase() || "";
@@ -191,8 +192,8 @@ const getMeetingPersonKey = (person: { name: string; title?: string; email?: str
 };
 
 const parseTimestampToSeconds = (value: string) => {
-  const parts = value.split(":").map((part) => Number(part));
-  if (parts.some((part) => Number.isNaN(part))) return null;
+  const parts = value.split(":").map((part: any) => Number(part));
+  if (parts.some((part: any) => Number.isNaN(part))) return null;
   if (parts.length === 3) {
     const [hours, minutes, seconds] = parts;
     return hours * 3600 + minutes * 60 + seconds;
@@ -210,7 +211,7 @@ const getTranscriptDurationMinutes = (transcript?: string | null) => {
   if (!matches) return null;
 
   let maxSeconds = 0;
-  matches.forEach((match) => {
+  matches.forEach((match: any) => {
     const seconds = parseTimestampToSeconds(match);
     if (seconds !== null && seconds > maxSeconds) {
       maxSeconds = seconds;
@@ -1006,7 +1007,7 @@ export function MeetingDetailSheet({
   } | null>(null);
   const lastMeetingIdRef = useRef<string | null>(null);
 
-  const meeting = useMemo(() => meetings.find((m) => m.id === id) || null, [id, meetings]);
+  const meeting = useMemo(() => meetings.find((m: any) => m.id === id) || null, [id, meetings]);
   const { toast } = useToast();
   const isPageVariant = variant === "page";
 
@@ -1018,7 +1019,7 @@ export function MeetingDetailSheet({
   const syncMeetingTasks = useCallback(
     async (tasks: ExtractedTaskSchema[]) => {
       if (!meeting) return null;
-      const sanitized = tasks.map((task) => normalizeTask(task));
+      const sanitized = tasks.map((task: any) => normalizeTask(task));
       const updated = await updateMeeting(meeting.id, { extractedTasks: sanitized });
       const chatSessionId = updated?.chatSessionId || meeting.chatSessionId;
       if (chatSessionId) {
@@ -1082,8 +1083,8 @@ export function MeetingDetailSheet({
 
   const getGroupTaskIds = useCallback((tasks: ExtractedTaskSchema[]) => {
     const ids = new Set<string>();
-    tasks.forEach((task) => {
-      getTaskAndAllDescendantIds(task).forEach((id) => ids.add(id));
+    tasks.forEach((task: any) => {
+      getTaskAndAllDescendantIds(task).forEach((id: any) => ids.add(id));
     });
     return ids;
   }, []);
@@ -1091,7 +1092,7 @@ export function MeetingDetailSheet({
   const getGroupCheckboxState = useCallback((tasks: ExtractedTaskSchema[], currentSelectedIds: Set<string>) => {
     const groupIds = Array.from(getGroupTaskIds(tasks));
     if (groupIds.length === 0) return "unchecked";
-    const selectedCount = groupIds.filter((id) => currentSelectedIds.has(id)).length;
+    const selectedCount = groupIds.filter((id: any) => currentSelectedIds.has(id)).length;
     if (selectedCount === 0) return "unchecked";
     if (selectedCount === groupIds.length) return "checked";
     return "indeterminate";
@@ -1101,7 +1102,7 @@ export function MeetingDetailSheet({
     setSelectedTaskIds((prev) => {
       const next = new Set(prev);
       const groupIds = getGroupTaskIds(tasks);
-      groupIds.forEach((id) => {
+      groupIds.forEach((id: any) => {
         if (isSelected) next.add(id);
         else next.delete(id);
       });
@@ -1121,30 +1122,30 @@ export function MeetingDetailSheet({
   }, [user]);
 
   const peopleByName = useMemo(() => {
-    return new Map(people.map((person) => [person.name.toLowerCase(), person]));
+    return new Map(people.map((person: any) => [person.name.toLowerCase(), person]));
   }, [people]);
 
   const peopleByEmail = useMemo(() => {
     return new Map(
       people
-        .filter((person) => person.email)
-        .map((person) => [person.email!.toLowerCase(), person])
+        .filter((person: any) => person.email)
+        .map((person: any) => [person.email!.toLowerCase(), person])
     );
   }, [people]);
 
   const blockedPeopleByName = useMemo(() => {
     return new Set(
       people
-        .filter((person) => person.isBlocked)
-        .map((person) => person.name.toLowerCase())
+        .filter((person: any) => person.isBlocked)
+        .map((person: any) => person.name.toLowerCase())
     );
   }, [people]);
 
   const blockedPeopleByEmail = useMemo(() => {
     return new Set(
       people
-        .filter((person) => person.isBlocked && person.email)
-        .map((person) => person.email!.toLowerCase())
+        .filter((person: any) => person.isBlocked && person.email)
+        .map((person: any) => person.email!.toLowerCase())
     );
   }, [people]);
 
@@ -1170,7 +1171,7 @@ export function MeetingDetailSheet({
   const meetingPeople = useMemo(() => meeting?.attendees || [], [meeting]);
 
   const selectableMeetingPeople = useMemo(() => {
-    return meetingPeople.filter((person) => !isMeetingPersonBlocked(person));
+    return meetingPeople.filter((person: any) => !isMeetingPersonBlocked(person));
   }, [meetingPeople, isMeetingPersonBlocked]);
 
   const allMeetingPeopleKeys = useMemo(() => {
@@ -1178,7 +1179,7 @@ export function MeetingDetailSheet({
   }, [selectableMeetingPeople]);
 
   const selectedPeople = useMemo(() => {
-    return selectableMeetingPeople.filter((person) => selectedPeopleKeys.has(getMeetingPersonKey(person)));
+    return selectableMeetingPeople.filter((person: any) => selectedPeopleKeys.has(getMeetingPersonKey(person)));
   }, [selectableMeetingPeople, selectedPeopleKeys]);
 
   useEffect(() => {
@@ -1364,7 +1365,7 @@ export function MeetingDetailSheet({
       { label: "State", value: meeting.state },
       { label: "Calendar Event ID", value: meeting.calendarEventId },
       { label: "Conference ID", value: meeting.conferenceId },
-    ].filter((row) => row.value);
+    ].filter((row: any) => row.value);
   }, [meeting, meetingDurationMinutes, meetingEnd, meetingStart]);
 
   const meetingRecordingLink = meeting?.recordingUrl || meeting?.shareUrl;
@@ -1400,7 +1401,7 @@ export function MeetingDetailSheet({
       if (prev.size === 0) return prev;
       const validIds = new Set<string>();
       const collect = (tasks: ExtractedTaskSchema[]) => {
-        tasks.forEach((task) => {
+        tasks.forEach((task: any) => {
           validIds.add(task.id);
           if (task.subtasks) collect(task.subtasks);
         });
@@ -1408,7 +1409,7 @@ export function MeetingDetailSheet({
       collect(getExtractedTasks(meeting.extractedTasks));
       let changed = false;
       const next = new Set<string>();
-      prev.forEach((id) => {
+      prev.forEach((id: any) => {
         if (validIds.has(id)) {
           next.add(id);
         } else {
@@ -1428,7 +1429,7 @@ export function MeetingDetailSheet({
     (tasks: ExtractedTaskSchema[]) => {
       if (filterByPerson === "all") return tasks;
       if (filterByPerson === "unassigned") {
-        return tasks.filter((t) => !t.assignee && !t.assigneeName);
+        return tasks.filter((t: any) => !t.assignee && !t.assigneeName);
       }
 
       const selectedPerson = selectableMeetingPeople.find(
@@ -1456,7 +1457,7 @@ export function MeetingDetailSheet({
 
   const groupedTasks = useMemo(() => {
     const groups = new Map<string, ExtractedTaskSchema[]>();
-    filteredOpenTasks.forEach((task) => {
+    filteredOpenTasks.forEach((task: any) => {
       const type = task.taskType || 'general';
       if (!groups.has(type)) {
         groups.set(type, []);
@@ -1478,7 +1479,7 @@ export function MeetingDetailSheet({
 
   const groupedCompletedTasks = useMemo(() => {
     const groups = new Map<string, ExtractedTaskSchema[]>();
-    filteredCompletedTasks.forEach((task) => {
+    filteredCompletedTasks.forEach((task: any) => {
       const type = task.taskType || 'general';
       if (!groups.has(type)) {
         groups.set(type, []);
@@ -1534,7 +1535,7 @@ export function MeetingDetailSheet({
     const targets = task.completionTargets || [];
 
     const updateRecursively = (tasks: ExtractedTaskSchema[]): ExtractedTaskSchema[] =>
-      tasks.map((t) => {
+      tasks.map((t: any) => {
         if (t.id === task.id) {
           return {
             ...t,
@@ -1551,7 +1552,7 @@ export function MeetingDetailSheet({
     const updatedTasks = updateRecursively(getExtractedTasks(meeting.extractedTasks));
     await syncMeetingTasks(updatedTasks);
 
-    const updates = targets.map((target) => {
+    const updates = targets.map((target: any) => {
       if (target.sourceType === "task") {
         return apiFetch(`/api/tasks/${target.taskId}`, {
           method: "PATCH",
@@ -1642,7 +1643,9 @@ export function MeetingDetailSheet({
     if (!meeting || isRescanLoading) return;
     setIsRescanLoading(true);
     try {
-      const result = await apiFetch<{
+      const enqueuePayload = await apiFetch<{
+        jobId?: string;
+        status?: string;
         stats?: {
           newTasksAdded?: number;
           completionUpdates?: number;
@@ -1652,6 +1655,20 @@ export function MeetingDetailSheet({
         method: "POST",
         body: JSON.stringify({ mode: "completed" }),
       });
+
+      const result =
+        enqueuePayload.jobId
+          ? ((await pollJobUntilDone(enqueuePayload.jobId)).result as
+              | {
+                  stats?: {
+                    newTasksAdded?: number;
+                    completionUpdates?: number;
+                    autoApproved?: boolean;
+                  };
+                }
+              | null)
+          : enqueuePayload;
+
       await refreshMeetings();
       const newTasksAdded = result?.stats?.newTasksAdded ?? 0;
       const completionUpdates = result?.stats?.completionUpdates ?? 0;
@@ -1810,15 +1827,15 @@ export function MeetingDetailSheet({
   const handleAddPeopleToDirectory = async (peopleToAdd: MeetingPerson[], forceUnique: boolean) => {
     if (!user || !meeting) return;
 
-    const existingNames = new Set(people.map((p) => p.name.toLowerCase()));
+    const existingNames = new Set(people.map((p: any) => p.name.toLowerCase()));
     const existingEmails = new Set(
       people
-        .map((p) => p.email?.toLowerCase())
+        .map((p: any) => p.email?.toLowerCase())
         .filter((email): email is string => Boolean(email))
     );
 
     const seenKeys = new Set<string>();
-    const filteredPeople = peopleToAdd.filter((person) => {
+    const filteredPeople = peopleToAdd.filter((person: any) => {
       if (isMeetingPersonBlocked(person)) return false;
       const personKey = getMeetingPersonKey(person);
       if (seenKeys.has(personKey)) return false;
@@ -1841,7 +1858,7 @@ export function MeetingDetailSheet({
       return;
     }
 
-    const addPromises = filteredPeople.map((person) => {
+    const addPromises = filteredPeople.map((person: any) => {
       const baseName = person.name || "Unknown";
       let name = baseName;
       let aliases: string[] | undefined;
@@ -1893,7 +1910,7 @@ export function MeetingDetailSheet({
       return;
     }
     const selectedKeys = new Set(selectedPeopleKeys);
-    const updatedAttendees = (meeting.attendees || []).filter((person) => !selectedKeys.has(getMeetingPersonKey(person)));
+    const updatedAttendees = (meeting.attendees || []).filter((person: any) => !selectedKeys.has(getMeetingPersonKey(person)));
     const updated = await updateMeeting(meeting.id, { attendees: updatedAttendees });
     if (!updated) {
       toast({ title: "Update Failed", description: "Could not remove people from this meeting.", variant: "destructive" });
@@ -1932,11 +1949,11 @@ export function MeetingDetailSheet({
   };
 
   const attendees = useMemo(
-    () => meetingPeople.filter((person) => person.role === "attendee"),
+    () => meetingPeople.filter((person: any) => person.role === "attendee"),
     [meetingPeople]
   );
   const mentionedPeople = useMemo(
-    () => meetingPeople.filter((person) => person.role === "mentioned"),
+    () => meetingPeople.filter((person: any) => person.role === "mentioned"),
     [meetingPeople]
   );
 
@@ -2200,7 +2217,7 @@ export function MeetingDetailSheet({
                     {meetingDetailRows.length === 0 && (
                       <p className="text-muted-foreground">No metadata available.</p>
                     )}
-                    {meetingDetailRows.map((row) => (
+                    {meetingDetailRows.map((row: any) => (
                       <div key={row.label} className="space-y-1">
                         <p className="text-xs uppercase tracking-wide text-muted-foreground">{row.label}</p>
                         <p className="font-medium text-foreground">{row.value}</p>
@@ -2254,7 +2271,7 @@ export function MeetingDetailSheet({
                         <div>
                           <p className="text-xs uppercase tracking-wide text-muted-foreground">Blockers</p>
                           <ul className="mt-2 list-disc space-y-1 pl-5 text-foreground">
-                            {meeting.meetingMetadata.blockers.map((blocker) => (
+                            {meeting.meetingMetadata.blockers.map((blocker: any) => (
                               <li key={blocker}>{blocker}</li>
                             ))}
                           </ul>
@@ -2270,7 +2287,7 @@ export function MeetingDetailSheet({
                       <CardTitle className="text-sm">Speaker Activity</CardTitle>
                     </CardHeader>
                     <CardContent className="space-y-2 p-4 pt-0 text-sm">
-                      {meeting.speakerActivity.map((speaker) => (
+                      {meeting.speakerActivity.map((speaker: any) => (
                         <div key={speaker.name} className="flex items-center justify-between">
                           <span className="font-medium text-foreground">{speaker.name}</span>
                           <span className="text-muted-foreground">{speaker.wordCount} words</span>
@@ -2300,7 +2317,7 @@ export function MeetingDetailSheet({
                       <DropdownMenuRadioGroup value={filterByPerson} onValueChange={setFilterByPerson}>
                         <DropdownMenuRadioItem value="all">All</DropdownMenuRadioItem>
                         <DropdownMenuRadioItem value="unassigned">Unassigned</DropdownMenuRadioItem>
-                        {selectableMeetingPeople.map((p) => (
+                        {selectableMeetingPeople.map((p: any) => (
                           <DropdownMenuRadioItem key={p.name} value={p.name}>{p.name}</DropdownMenuRadioItem>
                         ))}
                       </DropdownMenuRadioGroup>
@@ -2312,7 +2329,7 @@ export function MeetingDetailSheet({
                     No open tasks to review.
                   </div>
                 )}
-                {groupedTasks.map((group) => {
+                {groupedTasks.map((group: any) => {
                   const groupCheckboxState = getGroupCheckboxState(group.tasks, selectedTaskIds);
                   const groupChecked = groupCheckboxState === "checked";
                   const groupIndeterminate = groupCheckboxState === "indeterminate";
@@ -2333,7 +2350,7 @@ export function MeetingDetailSheet({
                           <Badge variant="secondary" className="text-[10px]">{group.tasks.length}</Badge>
                         </div>
                       </div>
-                      {group.tasks.map((t) => (
+                      {group.tasks.map((t: any) => (
                         <TaskRow
                           key={t.id}
                           task={t}
@@ -2362,7 +2379,7 @@ export function MeetingDetailSheet({
                     No completed tasks yet.
                   </div>
                 )}
-                {groupedCompletedTasks.map((group) => (
+                {groupedCompletedTasks.map((group: any) => (
                   <div key={group.type} className="space-y-2 pt-2">
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-2">
@@ -2372,7 +2389,7 @@ export function MeetingDetailSheet({
                         <Badge variant="secondary" className="text-[10px]">{group.tasks.length}</Badge>
                       </div>
                     </div>
-                    {group.tasks.map((t) => (
+                    {group.tasks.map((t: any) => (
                       <TaskRow
                         key={t.id}
                         task={t}
@@ -2675,7 +2692,7 @@ export default function MeetingsPageContent() {
       );
       if (duplicates.length === 0) return;
       await Promise.all(
-        duplicates.map((duplicate) =>
+        duplicates.map((duplicate: any) =>
           updateMeeting(duplicate.id, { chatSessionId: null })
         )
       );
@@ -2696,7 +2713,7 @@ export default function MeetingsPageContent() {
     setSelectedMeetingIds((prev) => {
       if (prev.size === 0) return prev;
       const next = new Set<string>();
-      meetings.forEach((meeting) => {
+      meetings.forEach((meeting: any) => {
         if (prev.has(meeting.id)) {
           next.add(meeting.id);
         }
@@ -2712,7 +2729,7 @@ export default function MeetingsPageContent() {
     setIsNavigatingToChat(true);
     try {
       const sessionFromMeeting = meeting.chatSessionId
-        ? sessions.find((session) => session.id === meeting.chatSessionId)
+        ? sessions.find((session: any) => session.id === meeting.chatSessionId)
         : undefined;
       const sessionFromLookup = sessions.find(
         (session) => session.sourceMeetingId === meeting.id
@@ -2780,10 +2797,17 @@ export default function MeetingsPageContent() {
       if (!response.ok) {
         throw new Error(payload.error || "Fathom sync failed.");
       }
+      const result = payload.jobId
+        ? (await pollJobUntilDone(payload.jobId)).result
+        : payload;
+      const typedResult = (result || payload) as {
+        created?: number;
+        skipped?: number;
+      };
       await refreshMeetings();
       toast({
         title: "Fathom Sync Complete",
-        description: `Imported ${payload.created || 0} meetings, skipped ${payload.skipped || 0}.`,
+        description: `Imported ${typedResult.created || 0} meetings, skipped ${typedResult.skipped || 0}.`,
       });
     } catch (error) {
       console.error("Fathom sync failed:", error);
@@ -2855,7 +2879,7 @@ export default function MeetingsPageContent() {
   }, [meetings, searchQuery, filter]);
 
   const selectedVisibleCount = useMemo(
-    () => filteredMeetings.filter((meeting) => selectedMeetingIds.has(meeting.id)).length,
+    () => filteredMeetings.filter((meeting: any) => selectedMeetingIds.has(meeting.id)).length,
     [filteredMeetings, selectedMeetingIds]
   );
 
@@ -2881,9 +2905,9 @@ export default function MeetingsPageContent() {
     setSelectedMeetingIds((prev) => {
       const next = new Set(prev);
       if (allVisibleSelected) {
-        filteredMeetings.forEach((meeting) => next.delete(meeting.id));
+        filteredMeetings.forEach((meeting: any) => next.delete(meeting.id));
       } else {
-        filteredMeetings.forEach((meeting) => next.add(meeting.id));
+        filteredMeetings.forEach((meeting: any) => next.add(meeting.id));
       }
       return next;
     });
@@ -2941,7 +2965,7 @@ export default function MeetingsPageContent() {
 
       Object.keys(groups)
         .filter(key => !groupOrder.includes(key))
-        .sort((a, b) => new Date(b).getTime() - new Date(a).getTime())
+        .sort((a: any, b: any) => new Date(b).getTime() - new Date(a).getTime())
         .forEach(key => {
           sortedGroupedMeetings.push({ label: key, meetings: groups[key] });
         });
@@ -3105,11 +3129,11 @@ export default function MeetingsPageContent() {
           <MeetingStatsBar meetings={filteredMeetings} />
 
           <div className="mt-6">
-            {groupedMeetings.length > 0 ? groupedMeetings.map((group) => (
+            {groupedMeetings.length > 0 ? groupedMeetings.map((group: any) => (
               <React.Fragment key={group.label}>
                 <DateSeparator label={group.label} />
                 <div className="space-y-4">
-                  {group.meetings.map((m) => (
+                  {group.meetings.map((m: any) => (
                     <MeetingListItem
                       key={m.id}
                       m={m}
@@ -3167,3 +3191,5 @@ export default function MeetingsPageContent() {
     </div>
   );
 }
+
+

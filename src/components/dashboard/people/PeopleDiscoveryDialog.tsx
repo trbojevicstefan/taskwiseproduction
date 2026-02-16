@@ -120,7 +120,7 @@ export default function PeopleDiscoveryDialog({
     if (isOpen) {
       // Pre-select all new people by default
       const initialKeys = new Set(
-        newPeople.map((person) => getPersonKey(person))
+        newPeople.map((person: any) => getPersonKey(person))
       );
       setPeopleToCreate(initialKeys);
     }
@@ -182,8 +182,8 @@ export default function PeopleDiscoveryDialog({
     const allCandidates = [
       ...newPeople,
       ...potentialMatches,
-    ].filter((person) => !resolvedKeys.has(getPersonKey(person)));
-    const finalPeopleToCreate = allCandidates.filter((p) =>
+    ].filter((person: any) => !resolvedKeys.has(getPersonKey(person)));
+    const finalPeopleToCreate = allCandidates.filter((p: any) =>
       selectedKeys.has(getPersonKey(p))
     );
     
@@ -219,7 +219,7 @@ export default function PeopleDiscoveryDialog({
   }
 
   const totalDiscovered = discoveredPeople.length;
-  const totalNew = newPeople.filter((person) => !resolvedKeys.has(getPersonKey(person))).length;
+  const totalNew = newPeople.filter((person: any) => !resolvedKeys.has(getPersonKey(person))).length;
   const totalExisting = existingDiscoveredPeople.length;
   const totalPotential = potentialMatches.length;
 
@@ -244,7 +244,7 @@ export default function PeopleDiscoveryDialog({
 
   const handleConfirmMatch = async () => {
     if (!matchCandidate || !selectedMatchId || !onMatch) return;
-    const matchedPerson = existingPeople.find((person) => person.id === selectedMatchId);
+    const matchedPerson = existingPeople.find((person: any) => person.id === selectedMatchId);
     if (!matchedPerson) return;
     setIsMatching(true);
     try {
@@ -413,7 +413,7 @@ export default function PeopleDiscoveryDialog({
                 <div className="space-y-2">
                   <p className="text-xs font-semibold uppercase text-muted-foreground">Top suggestions</p>
                   <div className="space-y-2">
-                    {matchSuggestions.map((match) => (
+                    {matchSuggestions.map((match: any) => (
                       <button
                         key={match.person.id}
                         className={cn(
@@ -445,7 +445,7 @@ export default function PeopleDiscoveryDialog({
                     <SelectValue placeholder="Select a person" />
                   </SelectTrigger>
                   <SelectContent>
-                    {existingPeople.map((person) => (
+                    {existingPeople.map((person: any) => (
                       <SelectItem key={person.id} value={person.id}>
                         {person.name} {person.email ? `(${person.email})` : ""}
                       </SelectItem>
@@ -491,3 +491,4 @@ export default function PeopleDiscoveryDialog({
     </>
   );
 }
+

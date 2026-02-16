@@ -2,7 +2,6 @@ import type { Db } from "mongodb";
 import type { ExtractedTaskSchema } from "@/types/chat";
 import { normalizeTask } from "@/lib/data";
 import { normalizePersonNameKey } from "@/lib/transcript-utils";
-import { buildIdQuery } from "@/lib/mongo-id";
 
 export type TaskOrigin = "manual" | "meeting" | "chat";
 export type TaskSourceType = "meeting" | "chat";
@@ -98,22 +97,17 @@ export const syncTasksForSource = async (
   options: TaskSyncOptions
 ): Promise<TaskSyncResult> => {
   const now = new Date();
-  const userIdQuery = buildIdQuery(options.userId);
-  const sessionIdQuery = buildIdQuery(options.sourceSessionId);
   const existingTasks = await db
-    .collection<any>("tasks")
+    .collection("tasks")
     .find({
-      userId: userIdQuery,
+      userId: options.userId,
       sourceSessionType: options.sourceSessionType,
-      $or: [
-        { sourceSessionId: sessionIdQuery },
-        { sourceSessionId: options.sourceSessionId },
-      ],
+      sourceSessionId: options.sourceSessionId,
     })
     .project({ _id: 1, sourceTaskId: 1 })
     .toArray();
   const existingBySourceTaskId = new Map<string, string>();
-  existingTasks.forEach((task) => {
+  existingTasks.forEach((task: any) => {
     const key =
       task.sourceTaskId || task._id?.toString?.() || task.id;
     if (!key) return;
@@ -128,7 +122,7 @@ export const syncTasksForSource = async (
   );
 
   const taskMap = new Map<string, string>();
-  records.forEach((rec) => {
+  records.forEach((rec: any) => {
     if (rec.sourceTaskId) {
       taskMap.set(rec.sourceTaskId, String(rec._id));
     }
@@ -136,13 +130,13 @@ export const syncTasksForSource = async (
 
   if (records.length) {
     await db.collection("tasks").bulkWrite(
-      records.map((rec) => {
+      records.map((rec: any) => {
         const { _id, sourceTaskId, ...rest } = rec;
         if (sourceTaskId) {
           return {
             updateOne: {
               filter: {
-                userId: userIdQuery,
+                userId: options.userId,
                 sourceSessionId: options.sourceSessionId,
                 sourceTaskId,
               },
@@ -154,7 +148,7 @@ export const syncTasksForSource = async (
 
         return {
           updateOne: {
-            filter: { _id, userId: userIdQuery },
+            filter: { _id, userId: options.userId },
             update: { $set: rest, $setOnInsert: { createdAt: now } },
             upsert: true,
           },
@@ -165,9 +159,9 @@ export const syncTasksForSource = async (
   }
 
   const deleteFilter: Record<string, any> = {
-    userId: userIdQuery,
+    userId: options.userId,
     sourceSessionType: options.sourceSessionType,
-    $or: [{ sourceSessionId: sessionIdQuery }, { sourceSessionId: options.sourceSessionId }],
+    sourceSessionId: options.sourceSessionId,
   };
 
   if (ids.length > 0) {

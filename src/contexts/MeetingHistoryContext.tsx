@@ -11,6 +11,7 @@ import { useToast } from "@/hooks/use-toast";
 import { ToastAction } from "@/components/ui/toast";
 import { apiFetch } from '@/lib/api';
 import { normalizeTask } from '@/lib/data';
+import { subscribeRealtimeUpdates } from "@/lib/realtime-client";
 
 interface MeetingHistoryContextType {
   meetings: Meeting[];
@@ -45,10 +46,10 @@ const sanitizeLevels = (levels: any) =>
 
 const sanitizeMeeting = (meeting: Meeting): Meeting => ({
   ...meeting,
-  extractedTasks: (meeting.extractedTasks || []).map((task) =>
+  extractedTasks: (meeting.extractedTasks || []).map((task: any) =>
     normalizeTask(task as ExtractedTaskSchema)
   ),
-  originalAiTasks: (meeting.originalAiTasks || []).map((task) =>
+  originalAiTasks: (meeting.originalAiTasks || []).map((task: any) =>
     normalizeTask(task as ExtractedTaskSchema)
   ),
   originalAllTaskLevels: sanitizeLevels(meeting.originalAllTaskLevels),
@@ -132,7 +133,7 @@ export const MeetingHistoryProvider = ({
       if (Notification.permission !== "granted") return;
 
       const state = notificationStateRef.current;
-      meetingsToNotify.forEach((meeting) => {
+      meetingsToNotify.forEach((meeting: any) => {
         if (state.notifiedIds.has(meeting.id)) return;
         const title = "New Fathom meeting";
         const body = meeting.title?.trim()
@@ -222,16 +223,16 @@ export const MeetingHistoryProvider = ({
           notifyMeetings(newlyAdded);
         } else if (Notification.permission === "default") {
           const pending = state.pendingMeetings;
-          const pendingIds = new Set(pending.map((meeting) => meeting.id));
+          const pendingIds = new Set(pending.map((meeting: any) => meeting.id));
           state.pendingMeetings = [
             ...pending,
-            ...newlyAdded.filter((meeting) => !pendingIds.has(meeting.id)),
+            ...newlyAdded.filter((meeting: any) => !pendingIds.has(meeting.id)),
           ];
           promptForNotificationPermission();
         }
       }
 
-      state.knownIds = new Set(nextMeetings.map((meeting) => meeting.id));
+      state.knownIds = new Set(nextMeetings.map((meeting: any) => meeting.id));
       state.hasLoaded = true;
     },
     [canUseNotifications, notifyMeetings, promptForNotificationPermission]
@@ -262,7 +263,7 @@ export const MeetingHistoryProvider = ({
       }
       try {
         const loadedMeetings = await apiFetch<Meeting[]>("/api/meetings");
-        const sanitizedMeetings = loadedMeetings.map((meeting) =>
+        const sanitizedMeetings = loadedMeetings.map((meeting: any) =>
           sanitizeMeeting(meeting)
         );
         maybeNotifyNewFathomMeetings(sanitizedMeetings);
@@ -276,7 +277,7 @@ export const MeetingHistoryProvider = ({
             if (activeIdStillExists) {
                 return prevActiveId;
             }
-            const sortedMeetings = [...sanitizedMeetings].sort((a, b) =>
+            const sortedMeetings = [...sanitizedMeetings].sort((a: any, b: any) =>
                 timeValue(b.lastActivityAt) - timeValue(a.lastActivityAt)
             );
             return sortedMeetings.length > 0 ? sortedMeetings[0].id : null;
@@ -305,17 +306,21 @@ export const MeetingHistoryProvider = ({
   }, [enabled, loadMeetings]);
 
   useEffect(() => {
-    if (!enabled || !user?.uid || !user?.fathomConnected) return;
-    let isActive = true;
-    const interval = setInterval(() => {
-      if (!isActive) return;
-      void loadMeetings({ silent: true });
-    }, 60000);
-    return () => {
-      isActive = false;
-      clearInterval(interval);
+    if (!enabled || !user?.uid) return;
+    let refreshTimer: ReturnType<typeof setTimeout> | null = null;
+    const queueRefresh = () => {
+      if (refreshTimer) return;
+      refreshTimer = setTimeout(() => {
+        refreshTimer = null;
+        void loadMeetings({ silent: true });
+      }, 150);
     };
-  }, [enabled, loadMeetings, user?.fathomConnected, user?.uid]);
+    const unsubscribe = subscribeRealtimeUpdates(["meetings"], queueRefresh);
+    return () => {
+      if (refreshTimer) clearTimeout(refreshTimer);
+      unsubscribe();
+    };
+  }, [enabled, loadMeetings, user?.uid]);
 
   const refreshMeetings = useCallback(async () => {
     await loadMeetings();
@@ -494,7 +499,7 @@ export const MeetingHistoryProvider = ({
         }
 
         const deletedSet = new Set(uniqueIds);
-        setMeetings((prev) => prev.filter((meeting) => !deletedSet.has(meeting.id)));
+        setMeetings((prev) => prev.filter((meeting: any) => !deletedSet.has(meeting.id)));
         if (activeMeetingId && deletedSet.has(activeMeetingId)) {
           setActiveMeetingIdState(null);
         }
@@ -540,4 +545,6 @@ export const useMeetingHistory = () => {
   }
   return context;
 };
+
+
 

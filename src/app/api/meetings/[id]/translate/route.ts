@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
+import { apiError } from "@/lib/api-route";
 import { randomUUID } from "crypto";
 import { getDb } from "@/lib/db";
 import { getSessionUserId } from "@/lib/server-auth";
-import { buildIdQuery } from "@/lib/mongo-id";
 const OPENAI_RESPONSES_URL =
   process.env.OPENAI_RESPONSES_URL || "https://api.openai.com/v1/responses";
 
@@ -30,7 +30,7 @@ const buildTranslateMessages = (transcript: string, targetLanguage: string) => [
 const toResponsesInput = (
   messages: Array<{ role: string; content: string }>
 ) =>
-  messages.map((message) => ({
+  messages.map((message: any) => ({
     role: message.role,
     content: [
       {
@@ -50,7 +50,7 @@ const extractResponsesText = (payload: unknown): string => {
     const content = Array.isArray(message.content) ? message.content : [];
     if (message.type === "message" && content.length) {
       const text = content
-        .map((part) => {
+        .map((part: any) => {
           const outputPart = part as { type?: unknown; text?: unknown };
           return outputPart.type === "output_text" && typeof outputPart.text === "string"
             ? outputPart.text
@@ -110,29 +110,24 @@ export async function POST(
     const { id } = await params;
     const userId = await getSessionUserId();
     if (!userId) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+      return apiError(401, "request_error", "Unauthorized");
     }
 
     const body = await request.json().catch(() => ({}));
     const targetLanguage =
       typeof body?.targetLanguage === "string" ? body.targetLanguage.trim() : "";
     if (!targetLanguage) {
-      return NextResponse.json(
-        { error: "Target language is required." },
-        { status: 400 }
-      );
+      return apiError(400, "request_error", "Target language is required.");
     }
 
     const db = await getDb();
-    const idQuery = buildIdQuery(id);
-    const userIdQuery = buildIdQuery(userId);
     const filter = {
-      userId: userIdQuery,
-      $or: [{ _id: idQuery }, { id }],
+      userId,
+      $or: [{ _id: id }, { id }],
     };
-    const meeting = await db.collection<any>("meetings").findOne(filter);
+    const meeting = await db.collection("meetings").findOne(filter);
     if (!meeting || meeting.isHidden) {
-      return NextResponse.json({ error: "Meeting not found." }, { status: 404 });
+      return apiError(404, "request_error", "Meeting not found.");
     }
 
     const transcript =
@@ -140,10 +135,7 @@ export async function POST(
         ? meeting.originalTranscript
         : "";
     if (!transcript.trim()) {
-      return NextResponse.json(
-        { error: "Transcript not available." },
-        { status: 400 }
-      );
+      return apiError(400, "request_error", "Transcript not available.");
     }
 
     try {
@@ -200,3 +192,7 @@ export async function POST(
     return NextResponse.json(responsePayload, { status: 500 });
   }
 }
+
+
+
+

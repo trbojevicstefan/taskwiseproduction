@@ -60,7 +60,7 @@ const isLikelyTaskModification = (message: string): boolean => {
     "mark",
     "status",
   ];
-  const hasModification = modificationSignals.some((signal) => normalized.includes(signal));
+  const hasModification = modificationSignals.some((signal: any) => normalized.includes(signal));
   const taskKeywords = /task|tasks|action item|action items|todo|to-do|follow up|next step/;
   const isQuestion =
     /\?$/.test(trimmed) ||
@@ -103,7 +103,7 @@ const STOP_WORDS = new Set([
 const flattenTasks = (tasks: TaskType[]): TaskType[] => {
   const result: TaskType[] = [];
   const walk = (items: TaskType[]) => {
-    items.forEach((task) => {
+    items.forEach((task: any) => {
       result.push(task);
       if (task.subtasks) {
         walk(task.subtasks);
@@ -119,33 +119,33 @@ const extractQueryTokens = (message: string): string[] =>
     .toLowerCase()
     .replace(/[^a-z0-9\s]/g, " ")
     .split(/\s+/)
-    .map((token) => token.trim())
-    .filter((token) => token.length > 2 && !STOP_WORDS.has(token));
+    .map((token: any) => token.trim())
+    .filter((token: any) => token.length > 2 && !STOP_WORDS.has(token));
 
 const scoreTaskMatch = (task: TaskType, tokens: string[]): number => {
   if (!tokens.length) return 0;
   const haystack = `${task.title} ${task.description || ""}`.toLowerCase();
-  const matched = tokens.filter((token) => haystack.includes(token));
+  const matched = tokens.filter((token: any) => haystack.includes(token));
   return matched.length / tokens.length;
 };
 
 const findTaskMatches = (message: string, tasks: TaskType[]) => {
   const tokens = extractQueryTokens(message);
   const candidates = flattenTasks(tasks)
-    .map((task) => ({
+    .map((task: any) => ({
       task,
       score: scoreTaskMatch(task, tokens),
     }))
-    .filter((entry) => entry.score > 0)
-    .sort((a, b) => b.score - a.score);
+    .filter((entry: any) => entry.score > 0)
+    .sort((a: any, b: any) => b.score - a.score);
 
   return { tokens, candidates };
 };
 
 const removeTasksByIds = (tasks: TaskType[], ids: Set<string>): TaskType[] =>
   tasks
-    .filter((task) => !task.id || !ids.has(task.id))
-    .map((task) => ({
+    .filter((task: any) => !task.id || !ids.has(task.id))
+    .map((task: any) => ({
       ...task,
       subtasks: task.subtasks ? removeTasksByIds(task.subtasks, ids) : task.subtasks,
     }));
@@ -408,11 +408,11 @@ ${titles}
       };
     }
     const topScore = candidates[0].score;
-    const topMatches = candidates.filter((entry) => entry.score >= topScore - 0.15);
+    const topMatches = candidates.filter((entry: any) => entry.score >= topScore - 0.15);
     if (topMatches.length > 1) {
       const options = topMatches
         .slice(0, 3)
-        .map((entry) => `"${entry.task.title}"`)
+        .map((entry: any) => `"${entry.task.title}"`)
         .join(", ");
       return {
         tasks: existingTasks,
@@ -432,10 +432,10 @@ ${titles}
     }
 
     const topScore = candidates[0].score;
-    const topMatches = candidates.filter((entry) => entry.score >= topScore - 0.15);
+    const topMatches = candidates.filter((entry: any) => entry.score >= topScore - 0.15);
 
     if (topMatches.length > 1) {
-      const options = topMatches.slice(0, 3).map((entry) => `"${entry.task.title}"`).join(", ");
+      const options = topMatches.slice(0, 3).map((entry: any) => `"${entry.task.title}"`).join(", ");
       return {
         tasks: existingTasks,
         chatResponseText: `I found multiple tasks that match. Which one should I delete: ${options}?`,
@@ -568,7 +568,7 @@ export async function processChatForTasks(output: ExtractTasksFromChatOutput | n
   }
 
   const tasks = (output.tasks || [])
-    .map((task) => filterTaskRecursive(task as unknown as ExtractedTaskSchema))
+    .map((task: any) => filterTaskRecursive(task as unknown as ExtractedTaskSchema))
     .filter(Boolean) as TaskType[];
 
   return {
@@ -578,3 +578,5 @@ export async function processChatForTasks(output: ExtractTasksFromChatOutput | n
     people: output.people || [],
   };
 }
+
+

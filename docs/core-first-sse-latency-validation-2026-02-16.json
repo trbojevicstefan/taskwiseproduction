@@ -1,0 +1,32 @@
+﻿{
+  "generatedAt": "2026-02-16T15:30:00.180Z",
+  "config": {
+    "seedEvents": 5000,
+    "concurrency": 50,
+    "iterations": 40,
+    "limit": 200,
+    "p95TargetMs": 1100,
+    "p99TargetMs": 1300
+  },
+  "summary": {
+    "totalQueries": 2000,
+    "totalRows": 400000,
+    "avgRowsPerQuery": 200,
+    "latencyMs": {
+      "avg": 647.7,
+      "p50": 789.7255000000005,
+      "p95": 1009.4205999999995,
+      "p99": 1167.5874999999996
+    }
+  },
+  "queryPlan": {
+    "winningPlanStages": "LIMIT -> PROJECTION_SIMPLE -> FETCH -> IXSCAN"
+  },
+  "checks": {
+    "p95WithinTarget": true,
+    "p99WithinTarget": true,
+    "expectedConcurrencyCovered": true,
+    "queryPlannerIndexPresent": true
+  },
+  "passed": true
+}

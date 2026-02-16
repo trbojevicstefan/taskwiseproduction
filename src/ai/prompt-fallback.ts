@@ -2,6 +2,7 @@ import type { ExecutablePrompt, PromptGenerateOptions } from "@genkit-ai/ai";
 import { appendFile } from "fs/promises";
 import type { ZodTypeAny } from "zod";
 import { extractJsonValue } from "@/ai/flows/parse-json-output";
+import { recordExternalApiFailure } from "@/lib/observability-metrics";
 
 const OPENAI_MODEL =
   process.env.OPENAI_MODEL || process.env.OPENAI_FALLBACK_MODEL || "gpt-4o-mini";
@@ -15,6 +16,8 @@ type PromptUsageContext = {
   endpoint: string;
   operation?: string;
   inputChars?: number;
+  correlationId?: string;
+  userId?: string;
 };
 
 let usageFileLoggingErrorPrinted = false;
@@ -121,7 +124,7 @@ const ensureJsonInstruction = (
   expectsJson: boolean
 ) => {
   if (!expectsJson) return messages;
-  const hasJsonToken = messages.some((message) =>
+  const hasJsonToken = messages.some((message: any) =>
     message.content.toLowerCase().includes("json")
   );
   if (hasJsonToken) return messages;
@@ -142,7 +145,7 @@ const toOpenAIMessages = (rendered: {
     messages.push({ role: "system", content: systemText });
   }
   if (rendered.messages?.length) {
-    rendered.messages.forEach((message) => {
+    rendered.messages.forEach((message: any) => {
       const role =
         message.role === "assistant" || message.role === "model"
           ? "assistant"
@@ -168,7 +171,7 @@ const toOpenAIResponsesInput = (rendered: {
   messages?: Array<{ role?: string; content?: unknown }>;
 }, expectsJson: boolean) => {
   const messages = toOpenAIMessages(rendered, expectsJson);
-  return messages.map((message) => ({
+  return messages.map((message: any) => ({
     role: message.role,
     content: [
       {
@@ -223,23 +226,54 @@ const runOpenAiResponses = async (
           .maxOutputTokens!
       : 2048;
 
-  const response = await fetch(OPENAI_RESPONSES_URL, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({
-      model,
-      input: messages,
-      temperature: 0.2,
-      max_output_tokens: maxTokens,
-      text: expectsJson ? { format: { type: "json_object" } } : undefined,
-    }),
-  });
+  const requestStartedAtMs = Date.now();
+  let response: Response;
+  try {
+    response = await fetch(OPENAI_RESPONSES_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model,
+        input: messages,
+        temperature: 0.2,
+        max_output_tokens: maxTokens,
+        text: expectsJson ? { format: { type: "json_object" } } : undefined,
+      }),
+    });
+  } catch (error) {
+    void recordExternalApiFailure({
+      provider: "openai",
+      operation: usageContext.operation || usageContext.promptName,
+      correlationId: usageContext.correlationId,
+      userId: usageContext.userId,
+      durationMs: Date.now() - requestStartedAtMs,
+      error,
+      metadata: {
+        endpoint: usageContext.endpoint,
+        model,
+      },
+    });
+    throw error;
+  }
 
   if (!response.ok) {
     const payload = await response.text();
+    void recordExternalApiFailure({
+      provider: "openai",
+      operation: usageContext.operation || usageContext.promptName,
+      correlationId: usageContext.correlationId,
+      userId: usageContext.userId,
+      durationMs: Date.now() - requestStartedAtMs,
+      statusCode: response.status,
+      error: payload || response.statusText,
+      metadata: {
+        endpoint: usageContext.endpoint,
+        model,
+      },
+    });
     throw new Error(`OpenAI responses fallback failed: ${response.status} ${payload}`);
   }
 
@@ -262,6 +296,8 @@ export async function runPromptWithFallback<
     endpoint?: string;
     operation?: string;
     promptName?: string;
+    correlationId?: string;
+    userId?: string;
   }
 ): Promise<{ output?: unknown; text?: string; provider?: LlmProvider }> {
   const rendered = await prompt.render(input, options);
@@ -271,6 +307,8 @@ export async function runPromptWithFallback<
     endpoint: context?.endpoint || promptName,
     operation: context?.operation,
     inputChars: OPENAI_USAGE_DEBUG ? estimateRenderedChars(rendered) : undefined,
+    correlationId: context?.correlationId,
+    userId: context?.userId,
   };
   let lastFallbackError = "";
   const toMessage = (err: unknown) =>
@@ -285,3 +323,4 @@ export async function runPromptWithFallback<
     );
   }
 }
+

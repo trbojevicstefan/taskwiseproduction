@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
+import { apiError } from "@/lib/api-route";
 import { getDb } from "@/lib/db";
 import { getSessionUserId } from "@/lib/server-auth";
-import { buildIdQuery } from "@/lib/mongo-id";
 import { normalizeTask } from "@/lib/data";
 import { syncTasksForSource } from "@/lib/task-sync";
 
@@ -25,9 +25,8 @@ const cleanupChatTasksForSession = async (db: any, userId: string, session: any)
   if (!session) return;
   const sessionIds = collectSessionIds(session);
   if (!sessionIds.length) return;
-  const userIdQuery = buildIdQuery(userId);
-  await db.collection<any>("tasks").deleteMany({
-    userId: userIdQuery,
+  await db.collection("tasks").deleteMany({
+    userId,
     sourceSessionType: "chat",
     sourceSessionId: { $in: sessionIds },
   });
@@ -40,7 +39,7 @@ export async function PATCH(
   const { id } = await params;
   const userId = await getSessionUserId();
   if (!userId) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return apiError(401, "request_error", "Unauthorized");
   }
 
   const body = await request.json().catch(() => ({}));
@@ -60,14 +59,12 @@ export async function PATCH(
   }
 
   const db = await getDb();
-  const idQuery = buildIdQuery(id);
-  const userIdQuery = buildIdQuery(userId);
   const filter = {
-    userId: userIdQuery,
-    $or: [{ _id: idQuery }, { id }],
+    userId,
+    $or: [{ _id: id }, { id }],
   };
   // Fetch session first to get context for sync
-  const getCurrent = await db.collection<any>("chatSessions").findOne(filter);
+  const getCurrent = await db.collection("chatSessions").findOne(filter);
   const sessionTitle = getCurrent?.title || body.title || "Chat Session";
   const sourceMeetingId = getCurrent?.sourceMeetingId;
 
@@ -109,11 +106,11 @@ export async function PATCH(
       if (sourceMeetingId) {
         const meetingId = String(sourceMeetingId);
         const meetingFilter = {
-          userId: userIdQuery,
-          $or: [{ _id: buildIdQuery(meetingId) }, { id: meetingId }],
+          userId,
+          $or: [{ _id: meetingId }, { id: meetingId }],
         };
         // Update meeting with the SAME references (since they share the task list in this context)
-        await db.collection<any>("meetings").updateOne(meetingFilter, {
+        await db.collection("meetings").updateOne(meetingFilter, {
           $set: { extractedTasks: referencedTasks }, // Update lastActivity? Maybe not to avoid noise
         });
 
@@ -129,9 +126,9 @@ export async function PATCH(
   }
 
   // Update the chat session with references
-  await db.collection<any>("chatSessions").updateOne(filter, { $set: update });
+  await db.collection("chatSessions").updateOne(filter, { $set: update });
 
-  const session = await db.collection<any>("chatSessions").findOne(filter);
+  const session = await db.collection("chatSessions").findOne(filter);
 
   if (session?.sourceMeetingId) {
     await cleanupChatTasksForSession(db, userId, session);
@@ -146,22 +143,22 @@ export async function DELETE(
   const { id } = await params;
   const userId = await getSessionUserId();
   if (!userId) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return apiError(401, "request_error", "Unauthorized");
   }
 
   const db = await getDb();
-  const idQuery = buildIdQuery(id);
-  const userIdQuery = buildIdQuery(userId);
   const filter = {
-    userId: userIdQuery,
-    $or: [{ _id: idQuery }, { id }],
+    userId,
+    $or: [{ _id: id }, { id }],
   };
   const result = await db
-    .collection<any>("chatSessions")
+    .collection("chatSessions")
     .deleteOne(filter);
   if (!result.deletedCount) {
-    return NextResponse.json({ error: "Chat session not found." }, { status: 404 });
+    return apiError(404, "request_error", "Chat session not found.");
   }
 
   return NextResponse.json({ ok: true });
 }
+
+

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
+import { apiError } from "@/lib/api-route";
 import { getDb } from "@/lib/db";
 import { getSessionUserId } from "@/lib/server-auth";
-import { buildIdQuery } from "@/lib/mongo-id";
 import { normalizePersonNameKey } from "@/lib/transcript-utils";
 
 export async function POST(
@@ -17,11 +17,11 @@ export async function POST(
   const { workspaceId, boardId } = await Promise.resolve(params);
   const userId = await getSessionUserId();
   if (!userId) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return apiError(401, "request_error", "Unauthorized");
   }
 
   if (!workspaceId || !boardId) {
-    return NextResponse.json({ error: "Workspace ID and board ID are required." }, { status: 400 });
+    return apiError(400, "request_error", "Workspace ID and board ID are required.");
   }
 
   const body = await request.json().catch(() => ({}));
@@ -29,13 +29,13 @@ export async function POST(
     ? body.taskIds.map((id: any) => String(id)).filter(Boolean)
     : [];
   if (taskIds.length === 0) {
-    return NextResponse.json({ error: "taskIds is required." }, { status: 400 });
+    return apiError(400, "request_error", "taskIds is required.");
   }
 
   const db = await getDb();
-  const userIdQuery = buildIdQuery(userId);
-  const taskIdFilters = taskIds.flatMap((id) => [
-    { _id: buildIdQuery(id) },
+  const userIdQuery = userId;
+  const taskIdFilters = taskIds.flatMap((id: any) => [
+    { _id: id },
     { id },
   ]);
   const now = new Date();
@@ -60,15 +60,15 @@ export async function POST(
   let statusIdValue: string | null = null;
   let statusCategory: string | null = null;
   if (typeof body.statusId === "string") {
-    const statusIdQuery = buildIdQuery(body.statusId);
-    const status = await db.collection<any>("boardStatuses").findOne({
+    const statusIdQuery = body.statusId;
+    const status = await db.collection("boardStatuses").findOne({
       userId: userIdQuery,
       workspaceId,
       boardId,
       $or: [{ _id: statusIdQuery }, { id: body.statusId }],
     });
     if (!status) {
-      return NextResponse.json({ error: "Status not found." }, { status: 404 });
+      return apiError(404, "request_error", "Status not found.");
     }
     statusIdValue = status._id?.toString?.() || status._id || body.statusId;
     statusCategory = status.category;
@@ -76,7 +76,7 @@ export async function POST(
   }
 
   if (Object.keys(taskUpdate).length > 1) {
-    await db.collection<any>("tasks").updateMany(
+    await db.collection("tasks").updateMany(
       {
         userId: userIdQuery,
         $or: taskIdFilters,
@@ -87,14 +87,14 @@ export async function POST(
 
   if (statusIdValue) {
     const lastItem = await db
-      .collection<any>("boardItems")
+      .collection("boardItems")
       .find({ userId: userIdQuery, workspaceId, boardId, statusId: statusIdValue })
       .sort({ rank: -1 })
       .limit(1)
       .toArray();
     let nextRank = typeof lastItem[0]?.rank === "number" ? lastItem[0].rank : 0;
 
-    const operations = taskIds.map((taskId) => {
+    const operations = taskIds.map((taskId: any) => {
       nextRank += 1000;
       return {
         updateOne: {
@@ -110,9 +110,14 @@ export async function POST(
       };
     });
     if (operations.length) {
-      await db.collection<any>("boardItems").bulkWrite(operations);
+      await db.collection("boardItems").bulkWrite(operations);
     }
   }
 
   return NextResponse.json({ ok: true });
 }
+
+
+
+
+

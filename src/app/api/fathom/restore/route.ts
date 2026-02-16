@@ -1,18 +1,17 @@
 import { NextResponse } from "next/server";
+import { apiError } from "@/lib/api-route";
 import { getSessionUserId } from "@/lib/server-auth";
 import { getDb } from "@/lib/db";
-import { buildIdQuery } from "@/lib/mongo-id";
 
 export async function POST() {
   const userId = await getSessionUserId();
   if (!userId) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return apiError(401, "request_error", "Unauthorized");
   }
 
   const db = await getDb();
-  const userIdQuery = buildIdQuery(userId);
   const filter = {
-    userId: userIdQuery,
+    userId,
     isHidden: true,
     $or: [
       { ingestSource: "fathom" },
@@ -21,10 +20,13 @@ export async function POST() {
     ],
   };
 
-  const result = await db.collection<any>("meetings").updateMany(filter, {
+  const result = await db.collection("meetings").updateMany(filter, {
     $set: { isHidden: false },
     $unset: { hiddenAt: "" },
   });
 
   return NextResponse.json({ ok: true, restored: result.modifiedCount || 0 });
 }
+
+
+

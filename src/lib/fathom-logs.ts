@@ -1,5 +1,4 @@
 import { getDb } from "@/lib/db";
-import { buildIdQuery } from "@/lib/mongo-id";
 
 export type FathomLogLevel = "info" | "warn" | "error";
 
@@ -32,7 +31,7 @@ export const logFathomIntegration = async (
       metadata: metadata || null,
       createdAt: new Date(),
     };
-    await db.collection<FathomIntegrationLog>(COLLECTION).insertOne(entry);
+    await db.collection(COLLECTION).insertOne(entry);
   } catch (error) {
     console.error("Failed to persist Fathom integration log:", error);
   }
@@ -40,11 +39,11 @@ export const logFathomIntegration = async (
 
 export const getFathomIntegrationLogs = async (userId: string, limit = 200) => {
   const db = await getDb();
-  const userIdQuery = buildIdQuery(userId);
   return db
-    .collection<FathomIntegrationLog>(COLLECTION)
-    .find({ userId: userIdQuery })
+    .collection(COLLECTION)
+    .find({ userId })
     .sort({ createdAt: -1 })
     .limit(limit)
     .toArray();
 };
+

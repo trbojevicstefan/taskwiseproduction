@@ -9,7 +9,6 @@
  */
 
 import { ai } from '@/ai/genkit';
-import type { PromptGenerateOptions } from "@genkit-ai/ai";
 import { z } from 'zod';
 import { runPromptWithFallback } from '@/ai/prompt-fallback';
 
@@ -92,7 +91,7 @@ const generateTaskAssistanceFlow = ai.defineFlow(
   async (input: GenerateTaskAssistanceInput) => {
     try {
       const preparedInput = prepareAssistanceInput(input);
-      const promptOptions: PromptGenerateOptions<unknown, unknown> = {
+      const promptOptions = {
         config: {
           model: ASSISTANCE_MODEL,
           maxOutputTokens: ASSISTANCE_MAX_OUTPUT_TOKENS,

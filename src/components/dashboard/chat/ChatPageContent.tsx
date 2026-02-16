@@ -124,7 +124,7 @@ const filterTasksByAssignee = (tasks: ExtractedTaskSchema[], personName: string)
   const target = normalizePersonName(personName);
   const filterNodes = (nodes: ExtractedTaskSchema[]): ExtractedTaskSchema[] =>
     nodes
-      .map((node) => {
+      .map((node: any) => {
         const assigneeName = normalizePersonName(node.assignee?.name || node.assigneeName || '');
         const filteredSubtasks = node.subtasks ? filterNodes(node.subtasks) : [];
         if (assigneeName === target || filteredSubtasks.length > 0) {
@@ -485,7 +485,7 @@ export default function ChatPageContent() {
       return;
     }
 
-    const exists = sessions.some((session) => session.id === chatIdParam);
+    const exists = sessions.some((session: any) => session.id === chatIdParam);
     if (exists) {
       setActiveSessionId(chatIdParam);
     }
@@ -607,7 +607,7 @@ export default function ChatPageContent() {
       if (matching.length === 0) return undefined;
       const timeValue = (value: any) =>
         value?.toMillis ? value.toMillis() : value ? new Date(value).getTime() : 0;
-      return [...matching].sort((a, b) => {
+      return [...matching].sort((a: any, b: any) => {
         const aTime = timeValue(a.lastActivityAt ?? a.createdAt);
         const bTime = timeValue(b.lastActivityAt ?? b.createdAt);
         return bTime - aTime;
@@ -634,7 +634,7 @@ export default function ChatPageContent() {
   const getMeetingForSession = useCallback(
     (session?: { sourceMeetingId?: string | null; id?: string | null }) => {
       if (session?.sourceMeetingId) {
-        const bySource = meetings.find((meeting) => meeting.id === session.sourceMeetingId);
+        const bySource = meetings.find((meeting: any) => meeting.id === session.sourceMeetingId);
         return bySource;
       }
       if (session?.id) {
@@ -663,12 +663,12 @@ export default function ChatPageContent() {
     setSelectedTaskIds((prev) => {
       if (prev.size === 0) return prev;
       const validIds = new Set<string>();
-      suggestedTasks.forEach((task) => {
-        getTaskAndAllDescendantIds(task).forEach((id) => validIds.add(id));
+      suggestedTasks.forEach((task: any) => {
+        getTaskAndAllDescendantIds(task).forEach((id: any) => validIds.add(id));
       });
       let changed = false;
       const next = new Set<string>();
-      prev.forEach((id) => {
+      prev.forEach((id: any) => {
         if (validIds.has(id)) {
           next.add(id);
         } else {
@@ -684,7 +684,7 @@ export default function ChatPageContent() {
       nextTasks: ExtractedTaskSchema[],
       options: { skipHistory?: boolean; skipPersist?: boolean } = {}
     ) => {
-      const sanitized = nextTasks.map((task) => normalizeTask(task));
+      const sanitized = nextTasks.map((task: any) => normalizeTask(task));
       setSuggestedTasks((prev) => {
         if (!options.skipHistory) {
           setUndoStack((stack) => [...stack, prev]);
@@ -712,7 +712,7 @@ export default function ChatPageContent() {
       boardId: string,
       boardName: string
     ): ExtractedTaskSchema[] =>
-      tasks.map((task) => {
+      tasks.map((task: any) => {
         if (task.id === taskId) {
           return {
             ...task,
@@ -769,7 +769,7 @@ export default function ChatPageContent() {
       );
 
       const boardName =
-        boards.find((board) => board.id === selectedBoardId)?.name || "Board";
+        boards.find((board: any) => board.id === selectedBoardId)?.name || "Board";
       const updatedTasks = markTaskAddedToBoard(
         suggestedTasks,
         boardPickerTask.id,
@@ -807,7 +807,7 @@ export default function ChatPageContent() {
       }
       await moveTaskToBoard(workspaceId, taskForDetailView.id, boardId);
       const boardName =
-        boards.find((board) => board.id === boardId)?.name || "Board";
+        boards.find((board: any) => board.id === boardId)?.name || "Board";
       const updatedTasks = markTaskAddedToBoard(
         suggestedTasks,
         taskForDetailView.id,
@@ -1071,7 +1071,7 @@ export default function ChatPageContent() {
     }
 
     const applyBriefToTask = (nodes: ExtractedTaskSchema[], idToUpdate: string, brief: string): ExtractedTaskSchema[] => {
-      return nodes.map((node) => {
+      return nodes.map((node: any) => {
         if (node.id === idToUpdate) {
           return normalizeTask({ ...node, researchBrief: brief });
         }
@@ -1084,7 +1084,7 @@ export default function ChatPageContent() {
 
     let updatedTasks = [...suggestedTasks];
     let briefsApplied = 0;
-    results.forEach((result) => {
+    results.forEach((result: any) => {
       if (result?.brief) {
         updatedTasks = applyBriefToTask(updatedTasks, result.taskId, result.brief);
         briefsApplied += 1;
@@ -1135,8 +1135,8 @@ export default function ChatPageContent() {
 
   const allTaskIds = useMemo(() => {
     const ids = new Set<string>();
-    suggestedTasks.forEach((task) => {
-      getTaskAndAllDescendantIds(task).forEach((id) => ids.add(id));
+    suggestedTasks.forEach((task: any) => {
+      getTaskAndAllDescendantIds(task).forEach((id: any) => ids.add(id));
     });
     return ids;
   }, [suggestedTasks]);
@@ -1145,14 +1145,14 @@ export default function ChatPageContent() {
 
   const groupedTasks = useMemo(() => {
     const byType = new Map<TaskTypeCategory, ExtractedTaskSchema[]>();
-    suggestedTasks.forEach((task) => {
+    suggestedTasks.forEach((task: any) => {
       const typeKey = normalizeTaskType(task.taskType);
       const group = byType.get(typeKey) || [];
       group.push(task);
       byType.set(typeKey, group);
     });
     return TASK_TYPE_VALUES
-      .map((type) => ({
+      .map((type: TaskTypeCategory) => ({
         type,
         label: TASK_TYPE_LABELS[type],
         tasks: byType.get(type) || [],
@@ -1164,9 +1164,9 @@ export default function ChatPageContent() {
     const nextSelected = new Set(selectedTaskIds);
     const allSelected = Array.from(ids).every((id) => nextSelected.has(id));
     if (allSelected) {
-      ids.forEach((id) => nextSelected.delete(id));
+      ids.forEach((id: any) => nextSelected.delete(id));
     } else {
-      ids.forEach((id) => nextSelected.add(id));
+      ids.forEach((id: any) => nextSelected.add(id));
     }
     setSelectedTaskIds(nextSelected);
   }, [selectedTaskIds]);
@@ -1202,11 +1202,11 @@ export default function ChatPageContent() {
     allPeople: Person[]
   ) => {
     const peopleMap = new Map<string, Person>();
-    allPeople.forEach((p) => peopleMap.set(p.name.toLowerCase(), p));
-    newlySavedPeople.forEach((p) => peopleMap.set(p.name.toLowerCase(), p));
+    allPeople.forEach((p: any) => peopleMap.set(p.name.toLowerCase(), p));
+    newlySavedPeople.forEach((p: any) => peopleMap.set(p.name.toLowerCase(), p));
 
     const assignRecursively = (tasks: ExtractedTaskSchema[]): ExtractedTaskSchema[] => {
-      return tasks.map((task) => {
+      return tasks.map((task: any) => {
         let newAssignee = task.assignee;
         if (task.assigneeName) {
           const person = peopleMap.get(task.assigneeName.toLowerCase());
@@ -1260,7 +1260,10 @@ export default function ChatPageContent() {
         setIsSendingMessage(true);
         try {
             if (isTranscriptLike(promptText)) {
-                const result = await processPastedContent({ pastedText: promptText });
+                const result = await processPastedContent({
+                  pastedText: promptText,
+                  requestedDetailLevel: "medium",
+                });
                 if (result.isMeeting && result.meeting) {
                     const newMeeting = await createNewMeeting(result.meeting);
                     if (newMeeting) {
@@ -1268,15 +1271,15 @@ export default function ChatPageContent() {
                         const newChat = await createNewSession({
                           title: `Chat about "${newMeeting.title}"`,
                           sourceMeetingId: newMeeting.id,
-                          initialTasks: meetingTasks,
+                          initialTasks: meetingTasks as any,
                           initialPeople: newMeeting.attendees,
-                          allTaskLevels: result.allTaskLevels,
+                          allTaskLevels: result.allTaskLevels as any,
                         });
                         const newPlan = await createNewPlanningSession(
                           newMeeting.summary,
-                          meetingTasks,
+                          meetingTasks as any,
                           `Plan from "${newMeeting.title}"`,
-                          result.allTaskLevels,
+                          result.allTaskLevels as any,
                           newMeeting.id
                         );
                         if (newChat && newPlan) {
@@ -1385,7 +1388,9 @@ export default function ChatPageContent() {
                 });
             } else {
                 if (result.tasks && shouldApplyTaskUpdate) {
-                    const newTasks = result.tasks.map((t: ExtractedTaskSchema) => normalizeTask(t as ExtractedTaskSchema));
+                    const newTasks = result.tasks.map((t: any) =>
+                      normalizeTask(t as ExtractedTaskSchema)
+                    );
                     applyTaskUpdate(newTasks);
                 }
                 if (result.sessionTitle) {
@@ -1523,7 +1528,7 @@ export default function ChatPageContent() {
       const input: OrchestratorInput = {
         message: `Break this down`,
         contextTaskTitle: taskToBreakDown.title,
-        existingTasks: suggestedTasks, // Provide full context
+        existingTasks: suggestedTasks as any, // Provide full context
         requestedDetailLevel,
       };
       const activeSession = getActiveSession();
@@ -1534,7 +1539,9 @@ export default function ChatPageContent() {
           sourceMeetingTranscript: transcript,
         });
       
-      applyTaskUpdate(result.tasks.map((t: ExtractedTaskSchema) => normalizeTask(t as ExtractedTaskSchema)));
+      applyTaskUpdate(
+        result.tasks.map((t: any) => normalizeTask(t as ExtractedTaskSchema))
+      );
       toast({ title: "Sub-tasks Added", description: `Sub-tasks added under "${taskToBreakDown.title}".` });
 
     } catch (error) {
@@ -1557,13 +1564,15 @@ export default function ChatPageContent() {
         const transcript = getMeetingTranscript(meeting);
         const result = await extractTasksFromChat({
           message: `Simplify this task and its subtasks: ${taskToSimplify.title}`,
-          selectedTasks: [taskToSimplify],
-          existingTasks: suggestedTasks,
+          selectedTasks: [taskToSimplify] as any,
+          existingTasks: suggestedTasks as any,
           requestedDetailLevel,
           sourceMeetingTranscript: transcript,
         });
 
-        const newTasks = result.tasks.map((t: ExtractedTaskSchema) => normalizeTask(t as ExtractedTaskSchema));
+        const newTasks = result.tasks.map((t: any) =>
+          normalizeTask(t as ExtractedTaskSchema)
+        );
         applyTaskUpdate(newTasks);
         
     } catch (error) {
@@ -1681,7 +1690,7 @@ export default function ChatPageContent() {
   const meetingOptions = useMemo(() => {
     const getTime = (value: any) =>
       value?.toMillis ? value.toMillis() : value ? new Date(value).getTime() : 0;
-    return [...meetings].sort((a, b) => getTime(b.lastActivityAt) - getTime(a.lastActivityAt));
+    return [...meetings].sort((a: any, b: any) => getTime(b.lastActivityAt) - getTime(a.lastActivityAt));
   }, [meetings]);
 
   const clearDuplicateChatLinks = useCallback(
@@ -1691,7 +1700,7 @@ export default function ChatPageContent() {
       );
       if (duplicates.length === 0) return;
       await Promise.all(
-        duplicates.map((duplicate) =>
+        duplicates.map((duplicate: any) =>
           updateMeeting(duplicate.id, { chatSessionId: null })
         )
       );
@@ -1700,12 +1709,12 @@ export default function ChatPageContent() {
   );
 
   const handleOpenMeetingChat = async (meetingId: string) => {
-    const meeting = meetings.find((m) => m.id === meetingId);
+    const meeting = meetings.find((m: any) => m.id === meetingId);
     if (!meeting) return;
 
     const existingSession =
-      sessions.find((session) => session.sourceMeetingId === meetingId) ||
-      (meeting.chatSessionId ? sessions.find((session) => session.id === meeting.chatSessionId) : undefined);
+      sessions.find((session: any) => session.sourceMeetingId === meetingId) ||
+      (meeting.chatSessionId ? sessions.find((session: any) => session.id === meeting.chatSessionId) : undefined);
 
     if (existingSession) {
       await clearDuplicateChatLinks(existingSession.id, meeting.id);
@@ -1722,9 +1731,9 @@ export default function ChatPageContent() {
     const newSession = await createNewSession({
       title: `Chat about "${meeting.title}"`,
       sourceMeetingId: meeting.id,
-      initialTasks: meeting.extractedTasks || [],
+      initialTasks: (meeting.extractedTasks || []) as any,
       initialPeople: meeting.attendees || [],
-      allTaskLevels: meeting.allTaskLevels,
+      allTaskLevels: meeting.allTaskLevels as any,
     });
 
     if (newSession) {
@@ -1920,26 +1929,26 @@ export default function ChatPageContent() {
   const currentFolderId = currentSession?.folderId;
 
   const peopleByName = useMemo(() => {
-    return new Map(people.map((person) => [person.name.toLowerCase(), person]));
+    return new Map(people.map((person: any) => [person.name.toLowerCase(), person]));
   }, [people]);
 
   const peopleByEmail = useMemo(() => {
     return new Map(
       people
-        .filter((person) => person.email)
-        .map((person) => [person.email!.toLowerCase(), person])
+        .filter((person: any) => person.email)
+        .map((person: any) => [person.email!.toLowerCase(), person])
     );
   }, [people]);
 
   const blockedPeopleByName = useMemo(() => {
-    return new Set(people.filter((person) => person.isBlocked).map((person) => person.name.toLowerCase()));
+    return new Set(people.filter((person: any) => person.isBlocked).map((person: any) => person.name.toLowerCase()));
   }, [people]);
 
   const blockedPeopleByEmail = useMemo(() => {
     return new Set(
       people
-        .filter((person) => person.isBlocked && person.email)
-        .map((person) => person.email!.toLowerCase())
+        .filter((person: any) => person.isBlocked && person.email)
+        .map((person: any) => person.email!.toLowerCase())
     );
   }, [people]);
 
@@ -2145,11 +2154,11 @@ export default function ChatPageContent() {
               <div className="p-3 space-y-2 rounded-lg">
               {suggestedTasks.length > 0 ? (
                 isTasksGrouped ? (
-                  groupedTasks.map((group) => {
+                  groupedTasks.map((group: any) => {
                     const groupCount = countTasksRecursive(group.tasks);
                     const groupIds = new Set<string>();
-                    group.tasks.forEach((task) => {
-                      getTaskAndAllDescendantIds(task).forEach((id) => groupIds.add(id));
+                    group.tasks.forEach((task: any) => {
+                      getTaskAndAllDescendantIds(task).forEach((id: any) => groupIds.add(id));
                     });
                     const isGroupSelected = groupIds.size > 0 &&
                       Array.from(groupIds).every((id) => selectedTaskIds.has(id));
@@ -2171,7 +2180,7 @@ export default function ChatPageContent() {
                             </Button>
                           </div>
                         </div>
-                        {group.tasks.map((task) => (
+                        {group.tasks.map((task: any) => (
                           <TaskItem
                             key={task.id}
                             task={task}
@@ -2196,7 +2205,7 @@ export default function ChatPageContent() {
                     );
                   })
                 ) : (
-                  suggestedTasks.map((task) => (
+                  suggestedTasks.map((task: any) => (
                     <TaskItem
                       key={task.id}
                       task={task}
@@ -2329,7 +2338,7 @@ export default function ChatPageContent() {
                       </Button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="start" className="max-h-72 overflow-auto">
-                      {meetingOptions.map((meeting) => (
+                      {meetingOptions.map((meeting: any) => (
                         <DropdownMenuItem key={meeting.id} onSelect={() => handleOpenMeetingChat(meeting.id)}>
                           <Video className="mr-2 h-4 w-4" />
                           <span className="truncate">{meeting.title}</span>
@@ -2469,7 +2478,7 @@ export default function ChatPageContent() {
                           Suggested questions
                         </div>
                         <div className="flex flex-wrap gap-2">
-                          {suggestedQuestionItems.map((item) => (
+                          {suggestedQuestionItems.map((item: any) => (
                             <Button
                               key={item.label}
                               variant="outline"
@@ -2484,7 +2493,7 @@ export default function ChatPageContent() {
                         </div>
                       </div>
                     )}
-                    {currentMessages.map((msg) => (
+                    {currentMessages.map((msg: any) => (
                       <div key={msg.id} className="flex flex-col gap-2">
                           <div className={`flex items-start gap-3 ${msg.sender === 'user' ? 'justify-end' : 'justify-start'}`}>
                               {msg.sender === 'ai' && (
@@ -2648,7 +2657,7 @@ export default function ChatPageContent() {
                 <SelectValue placeholder="Select a board" />
               </SelectTrigger>
               <SelectContent>
-                {boards.map((board) => (
+                {boards.map((board: any) => (
                   <SelectItem key={board.id} value={board.id}>
                     {board.name}
                   </SelectItem>
@@ -2827,4 +2836,6 @@ export default function ChatPageContent() {
     </>
   );
 }
+
+
 

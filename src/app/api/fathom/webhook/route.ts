@@ -1,5 +1,8 @@
 import crypto from "crypto";
 import { NextResponse } from "next/server";
+import { apiError } from "@/lib/api-route";
+import { isQueueFirstWebhookIngestionEnabled } from "@/lib/core-first-flags";
+import { getDb } from "@/lib/db";
 import {
   getFathomInstallation,
   getValidFathomAccessToken,
@@ -8,13 +11,15 @@ import {
 import { ingestFathomMeeting } from "@/lib/fathom-ingest";
 import { findUserByFathomWebhookToken } from "@/lib/db/users";
 import { logFathomIntegration } from "@/lib/fathom-logs";
+import { enqueueJob } from "@/lib/jobs/store";
+import { kickJobWorker } from "@/lib/jobs/worker";
 
 const getSignaturesFromHeader = (headerValue: string) => {
   return headerValue
     .trim()
     .split(/\s+/)
-    .map((chunk) => chunk.split(",", 2))
-    .filter((parts) => parts.length === 2)
+    .map((chunk: any) => chunk.split(",", 2))
+    .filter((parts: any) => parts.length === 2)
     .map(([, signature]) => signature);
 };
 
@@ -76,7 +81,7 @@ const verifyWebhookSignature = (
 
   const signatures = getSignaturesFromHeader(signatureHeader);
   const expectedBuffer = Buffer.from(expected);
-  return signatures.some((sig) => {
+  return signatures.some((sig: any) => {
     const signatureBuffer = Buffer.from(sig);
     if (signatureBuffer.length !== expectedBuffer.length) return false;
     return crypto.timingSafeEqual(signatureBuffer, expectedBuffer);
@@ -89,17 +94,14 @@ export async function POST(request: Request) {
   const url = new URL(request.url);
   const token = url.searchParams.get("token");
   if (!token) {
-    return NextResponse.json(
-      { error: "Missing webhook token." },
-      { status: 400 }
-    );
+    return apiError(400, "request_error", "Missing webhook token.");
   }
 
   const rawBody = await request.text();
 
   const user = await findUserByFathomWebhookToken(token);
   if (!user) {
-    return NextResponse.json({ error: "Unknown webhook token." }, { status: 404 });
+    return apiError(404, "request_error", "Unknown webhook token.");
   }
 
   const signatureHeader = request.headers.get("webhook-signature");
@@ -117,20 +119,14 @@ export async function POST(request: Request) {
       webhookTimestamp
     )
   ) {
-    return NextResponse.json(
-      { error: "Invalid webhook signature." },
-      { status: 401 }
-    );
+    return apiError(401, "request_error", "Invalid webhook signature.");
   }
 
   let payload: any;
   try {
     payload = JSON.parse(rawBody);
   } catch (error) {
-    return NextResponse.json(
-      { error: "Invalid JSON payload." },
-      { status: 400 }
-    );
+    return apiError(400, "request_error", "Invalid JSON payload.");
   }
   const data = normalizePayload(payload);
   const eventType = payload?.event || payload?.event_type || payload?.type;
@@ -166,16 +162,45 @@ export async function POST(request: Request) {
       "webhook.receive",
       "Webhook missing recording ID."
     );
-    return NextResponse.json(
-      { error: "Missing recording ID." },
-      { status: 400 }
-    );
+    return apiError(400, "request_error", "Missing recording ID.");
   }
 
   const recordingIdHash = hashFathomRecordingId(
     user._id.toString(),
     String(recordingId)
   );
+
+  if (isQueueFirstWebhookIngestionEnabled()) {
+    const db = await getDb();
+    const job = await enqueueJob(db, {
+      type: "fathom-webhook-ingest",
+      userId: user._id.toString(),
+      payload: {
+        recordingId: String(recordingId),
+        data:
+          data && typeof data === "object"
+            ? (data as Record<string, unknown>)
+            : {},
+      },
+    });
+    void kickJobWorker();
+
+    await logFathomIntegration(
+      user._id.toString(),
+      "info",
+      "webhook.enqueue",
+      "Webhook accepted and queued for async ingestion.",
+      { recordingIdHash, jobId: job._id }
+    );
+
+    return NextResponse.json(
+      {
+        status: "accepted",
+        jobId: job._id,
+      },
+      { status: 202 }
+    );
+  }
 
   const accessToken = await getValidFathomAccessToken(user._id.toString());
   const result = await ingestFathomMeeting({
@@ -204,10 +229,7 @@ export async function POST(request: Request) {
       "Transcript missing for recording.",
       { recordingIdHash }
     );
-    return NextResponse.json(
-      { error: "Transcript unavailable for recording." },
-      { status: 422 }
-    );
+    return apiError(422, "request_error", "Transcript unavailable for recording.");
   }
 
   await logFathomIntegration(

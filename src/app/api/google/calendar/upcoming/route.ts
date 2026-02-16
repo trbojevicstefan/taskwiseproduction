@@ -95,7 +95,7 @@ export async function GET(request: Request) {
             : [],
         };
       })
-      .filter((event) => Boolean(event.startTime) && Boolean(event.hangoutLink));
+      .filter((event: any) => Boolean(event.startTime) && Boolean(event.hangoutLink));
 
     return NextResponse.json({ events });
   } catch (error: any) {

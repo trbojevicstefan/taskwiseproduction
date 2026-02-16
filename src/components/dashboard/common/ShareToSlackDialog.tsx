@@ -155,7 +155,7 @@ export default function ShareToSlackDialog({
           throw new Error(data.error || "Unknown error occurred.");
         }
         if (destinationType === "channel") {
-          const channelName = channels.find((c) => c.id === selectedChannel)?.name;
+          const channelName = channels.find((c: any) => c.id === selectedChannel)?.name;
           toast({
             title: "Shared to Slack!",
             description: channelName
@@ -163,7 +163,7 @@ export default function ShareToSlackDialog({
               : "Tasks were posted to Slack.",
           });
         } else {
-          const userName = users.find((u) => u.id === selectedUser)?.realName;
+          const userName = users.find((u: any) => u.id === selectedUser)?.realName;
           toast({
             title: "Shared to Slack!",
             description: userName
@@ -228,7 +228,7 @@ export default function ShareToSlackDialog({
                           <Loader2 className="h-4 w-4 animate-spin mr-2" /> Loading...
                       </div>
                   ) : (
-                      channels.map((channel) => (
+                      channels.map((channel: any) => (
                         <SelectItem key={channel.id} value={channel.id}>
                           # {channel.name}
                         </SelectItem>
@@ -251,7 +251,7 @@ export default function ShareToSlackDialog({
                           <Loader2 className="h-4 w-4 animate-spin mr-2" /> Loading...
                       </div>
                   ) : (
-                      users.map((user) => (
+                      users.map((user: any) => (
                         <SelectItem key={user.id} value={user.id}>
                           {user.realName} {user.email ? `(${user.email})` : ""}
                         </SelectItem>
@@ -301,3 +301,4 @@ export default function ShareToSlackDialog({
     </Dialog>
   );
 }
+

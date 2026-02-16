@@ -92,8 +92,8 @@ const tokenize = (text: string) =>
     .toLowerCase()
     .replace(/[^a-z0-9\s]/g, " ")
     .split(/\s+/)
-    .map((token) => token.trim())
-    .filter((token) => token.length > 2 && !QA_STOPWORDS.has(token));
+    .map((token: any) => token.trim())
+    .filter((token: any) => token.length > 2 && !QA_STOPWORDS.has(token));
 
 const toRelevantTranscript = (transcript: string, question: string) => {
   const cleanTranscript = transcript.trim();
@@ -102,7 +102,7 @@ const toRelevantTranscript = (transcript: string, question: string) => {
 
   const lines = cleanTranscript
     .split(/\r?\n/)
-    .map((line) => line.trim())
+    .map((line: any) => line.trim())
     .filter(Boolean);
   if (lines.length <= 80) return cleanTranscript;
 
@@ -118,16 +118,16 @@ const toRelevantTranscript = (transcript: string, question: string) => {
       const lineTokens = tokenize(line);
       if (!lineTokens.length) return { index, score: 0 };
       let overlap = 0;
-      lineTokens.forEach((token) => {
+      lineTokens.forEach((token: any) => {
         if (queryTokens.has(token)) overlap += 1;
       });
       const score = overlap / Math.max(1, Math.min(queryTokens.size, lineTokens.length));
       return { index, score };
     })
-    .sort((a, b) => b.score - a.score);
+    .sort((a: any, b: any) => b.score - a.score);
 
   const selectedIndexes = new Set<number>();
-  scored.slice(0, 24).forEach((entry) => {
+  scored.slice(0, 24).forEach((entry: any) => {
     if (entry.score <= 0) return;
     selectedIndexes.add(entry.index);
     if (entry.index > 0) selectedIndexes.add(entry.index - 1);
@@ -139,8 +139,8 @@ const toRelevantTranscript = (transcript: string, question: string) => {
   }
 
   return Array.from(selectedIndexes)
-    .sort((a, b) => a - b)
-    .map((index) => lines[index])
+    .sort((a: any, b: any) => a - b)
+    .map((index: any) => lines[index])
     .join("\n");
 };
 
@@ -181,7 +181,7 @@ const answerFromTranscriptFlow = ai.defineFlow(
     const splitTranscriptLines = (transcript: string): string[] =>
       transcript
         .split(/\r?\n/)
-        .map((line) => line.trim())
+        .map((line: any) => line.trim())
         .filter(Boolean);
     const findSnippetForName = (transcript: string, name: string): { timestamp: string; snippet: string } | null => {
       const normalized = name.toLowerCase();
@@ -199,7 +199,7 @@ const answerFromTranscriptFlow = ai.defineFlow(
     const normalizeSources = (value: unknown): TranscriptQAOutput["sources"] => {
       if (!Array.isArray(value)) return undefined;
       const normalized = value
-        .map((entry) => {
+        .map((entry: any) => {
           if (!entry || typeof entry !== "object") return null;
           const item = entry as { timestamp?: unknown; time?: unknown; snippet?: unknown; quote?: unknown; text?: unknown };
           const snippet = getString(item.snippet) || getString(item.quote) || getString(item.text);
@@ -238,7 +238,7 @@ const answerFromTranscriptFlow = ai.defineFlow(
     const transcript = input.transcript?.trim();
     if (transcript) {
       if (question.includes("who") && (question.includes("attend") || question.includes("participant") || question.includes("meeting"))) {
-        const attendees = extractTranscriptAttendees(transcript).map((person) => person.name).filter(Boolean);
+        const attendees = extractTranscriptAttendees(transcript).map((person: any) => person.name).filter(Boolean);
         if (!attendees.length) {
           return {
             answerText: "The transcript does not list any attendees explicitly.",
@@ -246,7 +246,7 @@ const answerFromTranscriptFlow = ai.defineFlow(
           };
         }
         const sources = attendees
-          .map((name) => findSnippetForName(transcript, name))
+          .map((name: any) => findSnippetForName(transcript, name))
           .filter((entry): entry is NonNullable<typeof entry> => Boolean(entry));
         return {
           answerText: `Attendees mentioned in the transcript: ${attendees.join(', ')}.`,
@@ -261,14 +261,14 @@ const answerFromTranscriptFlow = ai.defineFlow(
             sources: [],
           };
         }
-        const titles = tasks.map((task) => task.title).filter(Boolean);
+        const titles = tasks.map((task: any) => task.title).filter(Boolean);
         const sources = tasks
-          .flatMap((task) => task.sourceEvidence || [])
-          .map((evidence) => ({
+          .flatMap((task: any) => task.sourceEvidence || [])
+          .map((evidence: any) => ({
             timestamp: evidence.timestamp || extractTimestamp(evidence.snippet) || "N/A",
             snippet: evidence.snippet,
           }))
-          .filter((entry) => entry.snippet);
+          .filter((entry: any) => entry.snippet);
         return {
           answerText: `Action items from the transcript: ${titles.join('; ')}.`,
           sources,
@@ -302,3 +302,6 @@ const answerFromTranscriptFlow = ai.defineFlow(
 export async function answerFromTranscript(input: TranscriptQAInput): Promise<TranscriptQAOutput> {
   return await answerFromTranscriptFlow(input);
 }
+
+
+

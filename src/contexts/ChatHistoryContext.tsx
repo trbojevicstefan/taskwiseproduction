@@ -173,7 +173,7 @@ export const ChatHistoryProvider = ({ children }: { children: ReactNode }) => {
   const updateSession = useCallback(async (sessionId: string, updatedFields: Partial<Omit<ChatSession, 'id' | 'userId' | 'createdAt' | 'lastActivityAt'>>) => {
      if (!user?.uid) return;
       try {
-        const targetSession = sessions.find((session) => session.id === sessionId);
+        const targetSession = sessions.find((session: any) => session.id === sessionId);
         const updated = await apiFetch<ChatSession>(`/api/chat-sessions/${sessionId}`, {
           method: "PATCH",
           body: JSON.stringify(updatedFields),
@@ -339,4 +339,5 @@ export const useChatHistory = () => {
   }
   return context;
 };
+
 

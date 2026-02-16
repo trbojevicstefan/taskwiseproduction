@@ -1,4 +1,4 @@
-﻿// src/components/dashboard/explore/ExplorePageContent.tsx
+// src/components/dashboard/explore/ExplorePageContent.tsx
 "use client";
 
 import React, { useState, useMemo, useCallback, useEffect } from 'react';
@@ -156,14 +156,14 @@ export default function ExplorePageContent() {
         return true;
       });
 
-      const eventsForDay = calendarEvents.filter((event) => {
+      const eventsForDay = calendarEvents.filter((event: any) => {
         const eventDate = event.startTime ? new Date(event.startTime) : null;
         return eventDate ? isSameDay(eventDate, day) : false;
       });
 
       return {
         date: day,
-        meetings: meetingsForDay.sort((a, b) => {
+        meetings: meetingsForDay.sort((a: any, b: any) => {
           const timeValue = (value: any) =>
             value?.toMillis ? value.toMillis() : value ? new Date(value).getTime() : 0;
           return timeValue(b.lastActivityAt) - timeValue(a.lastActivityAt);
@@ -196,7 +196,9 @@ export default function ExplorePageContent() {
   const handleToggleSessionSelection = useCallback((meeting: Meeting, isSelected: boolean) => {
     setSelectedTaskIds(prev => {
       const newSet = new Set(prev);
-      const allTaskIdsInMeeting = (meeting.extractedTasks || []).flatMap(getTaskAndAllDescendantIds);
+      const allTaskIdsInMeeting = ((meeting.extractedTasks || []) as any[]).flatMap(
+        (task: any) => getTaskAndAllDescendantIds(task as ExtractedTaskSchema)
+      );
       if (isSelected) {
         allTaskIdsInMeeting.forEach(id => newSet.add(id));
       } else {
@@ -209,7 +211,11 @@ export default function ExplorePageContent() {
   const handleToggleDaySelection = useCallback((day: DayData, isSelected: boolean) => {
     setSelectedTaskIds(prev => {
         const newSet = new Set(prev);
-        const allTaskIdsInDay = day.meetings.flatMap(meeting => (meeting.extractedTasks || []).flatMap(getTaskAndAllDescendantIds));
+        const allTaskIdsInDay = day.meetings.flatMap((meeting) =>
+          ((meeting.extractedTasks || []) as any[]).flatMap((task: any) =>
+            getTaskAndAllDescendantIds(task as ExtractedTaskSchema)
+          )
+        );
         if (isSelected) {
             allTaskIdsInDay.forEach(id => newSet.add(id));
         } else {
@@ -242,7 +248,9 @@ export default function ExplorePageContent() {
         });
       };
         
-        const updatedTasks = updateRecursively(meetingToUpdate.extractedTasks || []);
+        const updatedTasks = updateRecursively(
+          (meetingToUpdate.extractedTasks || []) as ExtractedTaskSchema[]
+        );
         updateMeeting(sourceSessionId, { extractedTasks: updatedTasks });
           if (options?.close !== false) {
             setIsTaskDetailDialogVisible(false);
@@ -281,7 +289,9 @@ export default function ExplorePageContent() {
                 task.subtasks.forEach(findSelected);
             }
         };
-        (meeting.extractedTasks || []).forEach(findSelected);
+        ((meeting.extractedTasks || []) as any[]).forEach((task: any) =>
+          findSelected(task as ExtractedTaskSchema)
+        );
     });
     
     return tasks;
@@ -313,7 +323,9 @@ export default function ExplorePageContent() {
         if (meetingId) {
             if (!tasksToUpdateByMeeting[meetingId]) {
                 const meeting = allMeetings.find(m => m.id === meetingId);
-                tasksToUpdateByMeeting[meetingId] = [...(meeting?.extractedTasks || [])];
+                tasksToUpdateByMeeting[meetingId] = [
+                  ...((meeting?.extractedTasks || []) as ExtractedTaskSchema[]),
+                ];
             }
         }
     });
@@ -362,7 +374,9 @@ export default function ExplorePageContent() {
             if (meetingId) {
                 if (!tasksToUpdateByMeeting[meetingId]) {
                     const meeting = allMeetings.find(m => m.id === meetingId);
-                    tasksToUpdateByMeeting[meetingId] = [...(meeting?.extractedTasks || [])];
+                    tasksToUpdateByMeeting[meetingId] = [
+                      ...((meeting?.extractedTasks || []) as ExtractedTaskSchema[]),
+                    ];
                 }
             }
         });
@@ -542,3 +556,5 @@ export default function ExplorePageContent() {
     </div>
   );
 }
+
+

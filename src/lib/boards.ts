@@ -1,6 +1,5 @@
 import { randomUUID } from "crypto";
 import type { Db } from "mongodb";
-import { buildIdQuery } from "@/lib/mongo-id";
 import {
   getBoardTemplate,
   DEFAULT_BOARD_TEMPLATE_ID,
@@ -93,9 +92,9 @@ export const createBoardWithTemplate = async (
   const { board, now } = buildBoardRecord(userId, workspaceId, name, template, options);
   const statuses = buildStatusRecords(board._id, userId, workspaceId, template, now);
 
-  await db.collection("boards").insertOne(board);
+  await db.collection("boards").insertOne(board as any);
   if (statuses.length) {
-    await db.collection("boardStatuses").insertMany(statuses);
+    await db.collection("boardStatuses").insertMany(statuses as any);
   }
 
   return { board, statuses };
@@ -106,9 +105,8 @@ export const ensureDefaultBoard = async (
   userId: string,
   workspaceId: string
 ) => {
-  const userIdQuery = buildIdQuery(userId);
-  const existing = await db.collection<BoardRecord>("boards").findOne({
-    userId: userIdQuery,
+  const existing = await db.collection("boards").findOne({
+    userId,
     workspaceId,
     isDefault: true,
   });
@@ -127,3 +125,4 @@ export const ensureDefaultBoard = async (
   );
   return board;
 };
+

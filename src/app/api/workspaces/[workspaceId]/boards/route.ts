@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
+import { apiError } from "@/lib/api-route";
 import { getDb } from "@/lib/db";
 import { getSessionUserId } from "@/lib/server-auth";
-import { buildIdQuery } from "@/lib/mongo-id";
 import { createBoardWithTemplate, ensureDefaultBoard } from "@/lib/boards";
 import { getBoardTemplate } from "@/lib/board-templates";
 
@@ -22,17 +22,17 @@ export async function GET(
   const { workspaceId } = await Promise.resolve(params);
   const userId = await getSessionUserId();
   if (!userId) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return apiError(401, "request_error", "Unauthorized");
   }
 
   if (!workspaceId) {
-    return NextResponse.json({ error: "Workspace ID is required." }, { status: 400 });
+    return apiError(400, "request_error", "Workspace ID is required.");
   }
 
   const db = await getDb();
-  const userIdQuery = buildIdQuery(userId);
+  const userIdQuery = userId;
   let boards = await db
-    .collection<any>("boards")
+    .collection("boards")
     .find({ userId: userIdQuery, workspaceId })
     .sort({ createdAt: 1 })
     .toArray();
@@ -54,17 +54,17 @@ export async function POST(
   const { workspaceId } = await Promise.resolve(params);
   const userId = await getSessionUserId();
   if (!userId) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return apiError(401, "request_error", "Unauthorized");
   }
 
   if (!workspaceId) {
-    return NextResponse.json({ error: "Workspace ID is required." }, { status: 400 });
+    return apiError(400, "request_error", "Workspace ID is required.");
   }
 
   const body = await request.json().catch(() => ({}));
   const name = typeof body.name === "string" ? body.name.trim() : "";
   if (!name) {
-    return NextResponse.json({ error: "Board name is required." }, { status: 400 });
+    return apiError(400, "request_error", "Board name is required.");
   }
 
   const color =
@@ -74,7 +74,7 @@ export async function POST(
 
   const template = getBoardTemplate(body.templateId);
   if (!template) {
-    return NextResponse.json({ error: "Template not found." }, { status: 404 });
+    return apiError(404, "request_error", "Template not found.");
   }
 
   const db = await getDb();
@@ -93,3 +93,6 @@ export async function POST(
 
   return NextResponse.json(serializeBoard(board));
 }
+
+
+

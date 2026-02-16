@@ -1,12 +1,16 @@
 import { NextResponse } from "next/server";
+import { apiError } from "@/lib/api-route";
 import { getDb } from "@/lib/db";
 import { getSessionUserId } from "@/lib/server-auth";
-import { buildIdQuery } from "@/lib/mongo-id";
 import { normalizeTask } from "@/lib/data";
 import { upsertPeopleFromAttendees } from "@/lib/people-sync";
 import { syncTasksForSource } from "@/lib/task-sync";
 import { ensureBoardItemsForTasks } from "@/lib/board-items";
 import { ensureDefaultBoard } from "@/lib/boards";
+import {
+  cleanupChatTasksForSessions,
+  updateLinkedChatSessions,
+} from "@/lib/services/session-task-sync";
 import { getWorkspaceIdForUser } from "@/lib/workspace";
 import type { ExtractedTaskSchema } from "@/types/chat";
 
@@ -19,14 +23,6 @@ const serializeMeeting = (meeting: any) => {
     createdAt: meeting.createdAt?.toISOString?.() || meeting.createdAt,
     lastActivityAt: meeting.lastActivityAt?.toISOString?.() || meeting.lastActivityAt,
   };
-};
-
-const collectSessionIds = (session: any, fallbackId?: string | null) => {
-  const ids = new Set<string>();
-  if (session?._id) ids.add(String(session._id));
-  if (session?.id) ids.add(String(session.id));
-  if (fallbackId) ids.add(String(fallbackId));
-  return Array.from(ids);
 };
 
 const ACTIVITY_KEYS = new Set([
@@ -46,62 +42,14 @@ const ACTIVITY_KEYS = new Set([
 const shouldRefreshLastActivity = (payload: Record<string, any> | null) => {
   if (!payload) return false;
   // Only consider explicit meeting-level activity keys for touching lastActivityAt.
-  return Array.from(ACTIVITY_KEYS).some((key) =>
+  return Array.from(ACTIVITY_KEYS).some((key: any) =>
     Object.prototype.hasOwnProperty.call(payload, key)
   );
 };
 
-const updateLinkedChatSessions = async (
-  db: any,
-  userId: string,
-  meeting: any,
-  tasks: ExtractedTaskSchema[]
-) => {
-  const meetingIds = collectSessionIds(meeting);
-  const chatFilters: any[] = [];
-  if (meeting?.chatSessionId) {
-    const chatId = String(meeting.chatSessionId);
-    chatFilters.push({ _id: buildIdQuery(chatId) }, { id: chatId });
-  }
-  if (meetingIds.length > 0) {
-    chatFilters.push({ sourceMeetingId: { $in: meetingIds } });
-  }
-  if (!chatFilters.length) return [];
-
-  const userIdQuery = buildIdQuery(userId);
-  const filter = { userId: userIdQuery, $or: chatFilters };
-  const sessions = await db.collection<any>("chatSessions").find(filter).toArray();
-  if (!sessions.length) return [];
-
-  await db.collection<any>("chatSessions").updateMany(filter, {
-    $set: { suggestedTasks: tasks, lastActivityAt: new Date() },
-  });
-  return sessions;
-};
-
-const cleanupChatTasksForSessions = async (
-  db: any,
-  userId: string,
-  sessions: any[]
-) => {
-  if (!sessions.length) return;
-  const sessionIds = new Set<string>();
-  sessions.forEach((session) => {
-    if (session?._id) sessionIds.add(String(session._id));
-    if (session?.id) sessionIds.add(String(session.id));
-  });
-  if (!sessionIds.size) return;
-  const userIdQuery = buildIdQuery(userId);
-  await db.collection<any>("tasks").deleteMany({
-    userId: userIdQuery,
-    sourceSessionType: "chat",
-    sourceSessionId: { $in: Array.from(sessionIds) },
-  });
-};
-
 const collectDescendantTaskIds = async (
   db: any,
-  userIdQuery: any,
+  userId: string,
   parentIds: string[]
 ) => {
   const allIds = new Set<string>(parentIds);
@@ -110,9 +58,9 @@ const collectDescendantTaskIds = async (
   while (queue.length > 0) {
     const batch = queue.splice(0, 200);
     const children = await db
-      .collection<any>("tasks")
+      .collection("tasks")
       .find({
-        userId: userIdQuery,
+        userId,
         parentId: { $in: batch },
       })
       .project({ _id: 1 })
@@ -137,7 +85,7 @@ export async function PATCH(
   const { id } = await params;
   const userId = await getSessionUserId();
   if (!userId) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return apiError(401, "request_error", "Unauthorized");
   }
 
   const body = await request.json().catch(() => ({}));
@@ -155,16 +103,14 @@ export async function PATCH(
   }
 
   const db = await getDb();
-  const idQuery = buildIdQuery(id);
-  const userIdQuery = buildIdQuery(userId);
   const filter = {
-    userId: userIdQuery,
-    $or: [{ _id: idQuery }, { id }],
+    userId,
+    $or: [{ _id: id }, { id }],
   };
 
-  const meeting = await db.collection<any>("meetings").findOne(filter);
+  const meeting = await db.collection("meetings").findOne(filter);
   if (!meeting) {
-    return NextResponse.json({ error: "Meeting not found" }, { status: 404 });
+    return apiError(404, "request_error", "Meeting not found");
   }
 
   if (extractedTasks) {
@@ -182,7 +128,7 @@ export async function PATCH(
       });
 
       // Convert to references
-      const referencedTasks = extractedTasks.map((task) => {
+      const referencedTasks = extractedTasks.map((task: any) => {
         const canonicalId = syncResult.taskMap.get(task.id);
         return canonicalId
           ? {
@@ -196,7 +142,7 @@ export async function PATCH(
       update.extractedTasks = referencedTasks;
 
       // Update the meeting with references
-      await db.collection<any>("meetings").updateOne(filter, { $set: update });
+      await db.collection("meetings").updateOne(filter, { $set: update });
 
       if (meeting) {
         // We pass the FULL objects (extractedTasks) to updateLinkedChatSessions if it expects full objects.
@@ -216,7 +162,7 @@ export async function PATCH(
         await ensureBoardItemsForTasks(db, {
           userId,
           workspaceId,
-          boardId: defaultBoard._id,
+          boardId: String(defaultBoard._id),
           tasks: extractedTasks, // Board likely needs full info? Or syncTasksForSource handled it?
           // syncTasksForSource handled updating tasks collection.
           // ensureBoardItemsForTasks likely reads tasks? Or uses the array passed?
@@ -226,14 +172,14 @@ export async function PATCH(
     } catch (error) {
       console.error("Failed to sync meeting tasks after update:", error);
       // Fallback update if sync failed
-      await db.collection<any>("meetings").updateOne(filter, { $set: update });
+      await db.collection("meetings").updateOne(filter, { $set: update });
     }
   } else {
-    await db.collection<any>("meetings").updateOne(filter, { $set: update });
+    await db.collection("meetings").updateOne(filter, { $set: update });
   }
 
   // Re-fetch to return the definitive updated document? OR just patch local object
-  const updatedMeeting = await db.collection<any>("meetings").findOne(filter);
+  const updatedMeeting = await db.collection("meetings").findOne(filter);
   return NextResponse.json(serializeMeeting(updatedMeeting || meeting));
 }
 
@@ -244,20 +190,18 @@ export async function GET(
   const { id } = await params;
   const userId = await getSessionUserId();
   if (!userId) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return apiError(401, "request_error", "Unauthorized");
   }
 
   const db = await getDb();
-  const idQuery = buildIdQuery(id);
-  const userIdQuery = buildIdQuery(userId);
   const filter = {
-    userId: userIdQuery,
-    $or: [{ _id: idQuery }, { id }],
+    userId,
+    $or: [{ _id: id }, { id }],
   };
 
-  const meeting = await db.collection<any>("meetings").findOne(filter);
+  const meeting = await db.collection("meetings").findOne(filter);
   if (!meeting || meeting.isHidden) {
-    return NextResponse.json({ error: "Meeting not found." }, { status: 404 });
+    return apiError(404, "request_error", "Meeting not found.");
   }
 
   // Hydrate tasks from canonical collection
@@ -305,19 +249,17 @@ export async function DELETE(
   const { id } = await params;
   const userId = await getSessionUserId();
   if (!userId) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return apiError(401, "request_error", "Unauthorized");
   }
 
   const db = await getDb();
-  const idQuery = buildIdQuery(id);
-  const userIdQuery = buildIdQuery(userId);
   const filter = {
-    userId: userIdQuery,
-    $or: [{ _id: idQuery }, { id }],
+    userId,
+    $or: [{ _id: id }, { id }],
   };
-  const meeting = await db.collection<any>("meetings").findOne(filter);
+  const meeting = await db.collection("meetings").findOne(filter);
   if (!meeting) {
-    return NextResponse.json({ error: "Meeting not found." }, { status: 404 });
+    return apiError(404, "request_error", "Meeting not found.");
   }
   const now = new Date();
   const sessionIds = new Set<string>();
@@ -329,7 +271,7 @@ export async function DELETE(
     chatSessionIds.add(String(meeting.chatSessionId));
   }
 
-  await db.collection<any>("meetings").updateOne(filter, {
+  await db.collection("meetings").updateOne(filter, {
     $set: {
       isHidden: true,
       hiddenAt: now,
@@ -341,25 +283,25 @@ export async function DELETE(
   if (sessionIds.size > 0) {
     const sessionIdList = Array.from(sessionIds);
     const tasksToRemove = await db
-      .collection<any>("tasks")
+      .collection("tasks")
       .find({
-        userId: userIdQuery,
+        userId,
         sourceSessionType: "meeting",
         sourceSessionId: { $in: sessionIdList },
       })
       .project({ _id: 1 })
       .toArray();
     const rootTaskIds = tasksToRemove.map((task: any) => String(task._id));
-    const taskIds = await collectDescendantTaskIds(db, userIdQuery, rootTaskIds);
+    const taskIds = await collectDescendantTaskIds(db, userId, rootTaskIds);
 
-    await db.collection<any>("tasks").deleteMany({
-      userId: userIdQuery,
+    await db.collection("tasks").deleteMany({
+      userId,
       _id: { $in: taskIds },
     });
 
     if (taskIds.length) {
-      await db.collection<any>("boardItems").deleteMany({
-        userId: userIdQuery,
+      await db.collection("boardItems").deleteMany({
+        userId,
         taskId: { $in: taskIds },
       });
     }
@@ -368,8 +310,8 @@ export async function DELETE(
   const chatMeetingIds = Array.from(sessionIds);
   const chatIds = Array.from(chatSessionIds);
   if (chatMeetingIds.length || chatIds.length) {
-    await db.collection<any>("chatSessions").deleteMany({
-      userId: userIdQuery,
+    await db.collection("chatSessions").deleteMany({
+      userId,
       $or: [
         chatMeetingIds.length
           ? { sourceMeetingId: { $in: chatMeetingIds } }

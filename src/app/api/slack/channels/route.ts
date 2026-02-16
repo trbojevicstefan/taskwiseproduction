@@ -42,8 +42,8 @@ export async function GET() {
 
     const channels: SlackChannel[] =
       payload.channels
-        ?.filter((channel) => !channel.is_archived)
-        .map((channel) => ({ id: channel.id, name: channel.name })) || [];
+        ?.filter((channel: any) => !channel.is_archived)
+        .map((channel: any) => ({ id: channel.id, name: channel.name })) || [];
 
     return NextResponse.json({ channels });
   } catch (error) {
@@ -54,3 +54,4 @@ export async function GET() {
     );
   }
 }
+

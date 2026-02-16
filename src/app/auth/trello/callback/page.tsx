@@ -4,14 +4,10 @@
 import { useEffect, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { Loader2 } from 'lucide-react';
-import { getFunctions, httpsCallable } from 'firebase/functions';
-import { getFirebaseServices } from '@/lib/firebase/config';
-import { useAuth } from '@/contexts/AuthContext';
 
 
 function TrelloCallbackContent() {
   const searchParams = useSearchParams();
-  const { user } = useAuth();
 
   useEffect(() => {
     // This effect runs inside the popup window.
@@ -20,22 +16,35 @@ function TrelloCallbackContent() {
 
     if (!window.opener) {
         // This page should only be opened as a popup.
-        // You can show an error or close it.
         window.close();
         return;
     }
 
-    if (oauthToken && oauthVerifier && user) {
+    if (oauthToken && oauthVerifier) {
         const exchangeTokens = async () => {
             try {
-                const { app } = getFirebaseServices();
-                if (!app) {
-                    throw new Error("Firebase is not initialized.");
+                const response = await fetch("/api/trello/oauth/exchange", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        oauthToken,
+                        oauthVerifier,
+                    }),
+                });
+                if (!response.ok) {
+                    let errorMessage = "Could not connect your Trello account.";
+                    try {
+                        const payload = await response.json();
+                        if (typeof payload?.message === "string") {
+                            errorMessage = payload.message;
+                        } else if (typeof payload?.error === "string") {
+                            errorMessage = payload.error;
+                        }
+                    } catch {
+                        // Ignore payload parse errors and use fallback message.
+                    }
+                    throw new Error(errorMessage);
                 }
-                const functions = getFunctions(app, 'us-central1');
-                const trelloGetAccessTokenFn = httpsCallable(functions, 'trelloGetAccessToken');
-
-                await trelloGetAccessTokenFn({ oauth_token: oauthToken, oauth_verifier: oauthVerifier });
 
                 // Send success message to parent window and close self
                 window.opener.postMessage({ type: 'trelloAuthSuccess' }, window.location.origin);
@@ -54,16 +63,13 @@ function TrelloCallbackContent() {
 
         exchangeTokens();
 
-    } else if (user === null) {
-         // If the user context isn't loaded yet, just wait.
-         // This prevents errors on initial load of the popup.
     } else {
         // Handle cases where tokens are missing
         window.opener.postMessage({ type: 'trelloAuthError', message: 'Trello authorization was incomplete. Please try again.' }, window.location.origin);
         window.close();
     }
 
-  }, [searchParams, user]);
+  }, [searchParams]);
 
   return (
     <div className="flex flex-col items-center justify-center min-h-screen bg-background p-4">

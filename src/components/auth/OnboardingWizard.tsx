@@ -73,7 +73,7 @@ const OnboardingWizard = ({ onClose }: { onClose?: () => void }) => {
         }
 
         const unsubscribe = onPeopleSnapshot(user.uid, (loadedPeople) => {
-            const slackCount = loadedPeople.filter((person) => Boolean(person.slackId)).length;
+            const slackCount = loadedPeople.filter((person: any) => Boolean(person.slackId)).length;
             setSlackPeopleCount(slackCount);
             if (slackCount > 0) {
                 setHasSyncedSlackPeople(true);
@@ -89,7 +89,7 @@ const OnboardingWizard = ({ onClose }: { onClose?: () => void }) => {
             if (!response.ok) return;
             const data = await response.json();
             if (!Array.isArray(data)) return;
-            const slackCount = data.filter((person) => Boolean(person.slackId)).length;
+            const slackCount = data.filter((person: any) => Boolean(person.slackId)).length;
             setSlackPeopleCount(slackCount);
             if (slackCount > 0) {
                 setHasSyncedSlackPeople(true);
@@ -363,7 +363,7 @@ const OnboardingWizard = ({ onClose }: { onClose?: () => void }) => {
                     {renderStepContent()}
                 </AnimatePresence>
                 <div className="flex justify-center gap-2 mt-6">
-                    {[1, 2, 3, 4].map((step) => (
+                    {[1, 2, 3, 4].map((step: any) => (
                         <div
                             key={step}
                             className={`w-2.5 h-2.5 rounded-full transition-all duration-300 ${currentStep === step ? 'bg-primary scale-125' : 'bg-muted'}`}
@@ -384,3 +384,4 @@ const OnboardingWizard = ({ onClose }: { onClose?: () => void }) => {
 };
 
 export default OnboardingWizard;
+

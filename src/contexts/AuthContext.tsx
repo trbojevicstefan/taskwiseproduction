@@ -2,7 +2,7 @@
 "use client";
 
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
-import { useRouter, usePathname } from 'next/navigation';
+import { useRouter, usePathname, useSearchParams } from 'next/navigation';
 import { signIn, signOut, useSession } from "next-auth/react";
 import type { Person } from '@/types/person';
 
@@ -69,6 +69,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const { status } = useSession();
   const router = useRouter();
   const pathname = usePathname();
+  const searchParams = useSearchParams();
 
   const fetchUserProfile = async () => {
     if (status !== "authenticated") {
@@ -131,16 +132,25 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     }
 
     const isAuthPage = pathname === '/login' || pathname === '/signup';
-    const isPublicPage = pathname === '/' || pathname === '/privacy' || pathname === '/terms';
+    const isInvitePage = pathname?.startsWith('/invite/');
+    const isPublicPage =
+      pathname === '/' ||
+      pathname === '/privacy' ||
+      pathname === '/terms' ||
+      isInvitePage;
 
     if (user && isAuthPage) {
-      // If user is logged in and on an auth page, redirect them away.
-      router.push('/meetings');
+      const callbackUrl = searchParams?.get('callbackUrl');
+      const safeCallbackUrl =
+        callbackUrl && callbackUrl.startsWith('/') && !callbackUrl.startsWith('//')
+          ? callbackUrl
+          : null;
+      router.push(safeCallbackUrl || '/meetings');
     } else if (!user && !isAuthPage && !isPublicPage) {
       // Keep the homepage public; redirect to login only for protected pages.
       router.push('/login');
     }
-  }, [user, loading, pathname, router]);
+  }, [user, loading, pathname, router, searchParams]);
 
   const login = async (email?: string, password?: string) => {
     if (!email || !password) throw new Error("Email and password are required.");

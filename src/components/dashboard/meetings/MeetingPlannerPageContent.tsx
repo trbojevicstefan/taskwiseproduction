@@ -64,7 +64,7 @@ const getEmailOptionsForPerson = (person: Person) => {
   const options = new Set<string>();
   if (isValidEmail(person.email)) options.add(person.email as string);
   if (Array.isArray(person.aliases)) {
-    person.aliases.forEach((alias) => {
+    person.aliases.forEach((alias: any) => {
       if (isValidEmail(alias)) options.add(alias);
     });
   }
@@ -73,7 +73,7 @@ const getEmailOptionsForPerson = (person: Person) => {
 
 const dedupePeopleById = (items: Person[]) => {
   const map = new Map<string, Person>();
-  items.forEach((person) => {
+  items.forEach((person: any) => {
     if (!map.has(person.id)) {
       map.set(person.id, person);
     }
@@ -92,7 +92,7 @@ const formatDueDate = (value?: string | Date | null) => {
 };
 
 const sortTasks = (tasks: Task[]) => {
-  return [...tasks].sort((a, b) => {
+  return [...tasks].sort((a: any, b: any) => {
     const dueA = a.dueAt ? new Date(a.dueAt as string).getTime() : null;
     const dueB = b.dueAt ? new Date(b.dueAt as string).getTime() : null;
     if (dueA && dueB && dueA !== dueB) return dueA - dueB;
@@ -189,7 +189,7 @@ export default function MeetingPlannerPageContent() {
   }, [isGoogleTasksConnected, selectedEventId, toast]);
 
   const selectedEvent = useMemo(
-    () => calendarEvents.find((event) => event.id === selectedEventId) || null,
+    () => calendarEvents.find((event: any) => event.id === selectedEventId) || null,
     [calendarEvents, selectedEventId]
   );
 
@@ -199,7 +199,7 @@ export default function MeetingPlannerPageContent() {
       return;
     }
     const defaultSelection = new Set<string>();
-    (selectedEvent.attendees || []).forEach((attendee) => {
+    (selectedEvent.attendees || []).forEach((attendee: any) => {
       const key = getAttendeeKey(attendee);
       if (key) defaultSelection.add(key);
     });
@@ -216,7 +216,7 @@ export default function MeetingPlannerPageContent() {
 
   const attendeeMatches = useMemo(() => {
     if (!selectedEvent) return [];
-    return (selectedEvent.attendees || []).map((attendee) => {
+    return (selectedEvent.attendees || []).map((attendee: any) => {
       const match = getBestPersonMatch(
         { name: attendee.name, email: attendee.email },
         people,
@@ -229,7 +229,7 @@ export default function MeetingPlannerPageContent() {
   useEffect(() => {
     const loadTasks = async () => {
       const selected = isSchedulingNew
-        ? people.filter((person) => scheduleSelectedPeople.has(person.id))
+        ? people.filter((person: any) => scheduleSelectedPeople.has(person.id))
         : dedupePeopleById(
           attendeeMatches
             .filter(({ attendee, match }) => {
@@ -251,7 +251,7 @@ export default function MeetingPlannerPageContent() {
             const response = await fetch(`/api/people/${person.id}/tasks`);
             if (!response.ok) return;
             const tasks = (await response.json()) as Task[];
-            nextTasks[person.id] = tasks.filter((task) => task.status !== "done");
+            nextTasks[person.id] = tasks.filter((task: any) => task.status !== "done");
           } catch (error) {
             console.error("Failed to load tasks for", person.name, error);
           }
@@ -271,23 +271,23 @@ export default function MeetingPlannerPageContent() {
   }, [selectedEvent, isSchedulingNew, scheduleTitle]);
 
   const scheduleSelectedPeopleList = useMemo(
-    () => people.filter((person) => scheduleSelectedPeople.has(person.id)),
+    () => people.filter((person: any) => scheduleSelectedPeople.has(person.id)),
     [people, scheduleSelectedPeople]
   );
 
   const scheduleManualAttendees = useMemo(
-    () => manualAttendees.map((email) => ({ email })),
+    () => manualAttendees.map((email: any) => ({ email })),
     [manualAttendees]
   );
 
   const agendaSections = useMemo(() => {
     if (isSchedulingNew) {
-      const peopleSections = scheduleSelectedPeopleList.map((person) => ({
+      const peopleSections = scheduleSelectedPeopleList.map((person: any) => ({
         label: person.name || "Attendee",
         person,
         tasks: sortTasks(personTasks[person.id] || []),
       }));
-      const manualSections = scheduleManualAttendees.map((attendee) => ({
+      const manualSections = scheduleManualAttendees.map((attendee: any) => ({
         label: attendee.email || "Guest",
         person: { id: attendee.email || "manual", name: attendee.email || "Guest" } as Person,
         tasks: [] as Task[],
@@ -318,12 +318,12 @@ export default function MeetingPlannerPageContent() {
     lines.push(MEETING_GUIDE_TEXT);
     lines.push(MEETING_GUIDE_TRIGGER);
     lines.push("");
-    agendaSections.forEach((section) => {
+    agendaSections.forEach((section: any) => {
       lines.push(section.label);
       if (section.tasks.length === 0) {
         lines.push("- No open tasks found.");
       } else {
-        section.tasks.forEach((task) => {
+        section.tasks.forEach((task: any) => {
           const due = formatDueDate(task.dueAt);
           const priorityIcon = getPriorityIcon(task.priority);
           const parts = [`${task.title} ${priorityIcon}`];
@@ -340,19 +340,19 @@ export default function MeetingPlannerPageContent() {
     if (!selectedEvent && !isSchedulingNew) return [];
     const attendeeEmails = new Set<string>();
     if (isSchedulingNew) {
-      scheduleSelectedPeopleList.forEach((person) => {
+      scheduleSelectedPeopleList.forEach((person: any) => {
         if (person.email) attendeeEmails.add(person.email.toLowerCase());
       });
-      manualAttendees.forEach((email) => attendeeEmails.add(email.toLowerCase()));
+      manualAttendees.forEach((email: any) => attendeeEmails.add(email.toLowerCase()));
     } else {
       (selectedEvent?.attendees || [])
-        .map((attendee) => attendee.email?.toLowerCase())
+        .map((attendee: any) => attendee.email?.toLowerCase())
         .filter(Boolean)
-        .forEach((email) => attendeeEmails.add(email as string));
+        .forEach((email: any) => attendeeEmails.add(email as string));
     }
     return meetings
-      .filter((meeting) =>
-        (meeting.attendees || []).some((attendee) =>
+      .filter((meeting: any) =>
+        (meeting.attendees || []).some((attendee: any) =>
           attendee.email ? attendeeEmails.has(attendee.email.toLowerCase()) : false
         )
       )
@@ -469,7 +469,7 @@ export default function MeetingPlannerPageContent() {
       setPersonTasks((prev) => {
         const next = { ...prev };
         const tasksForPerson = next[taskDetailContext.personId] || [];
-        next[taskDetailContext.personId] = tasksForPerson.map((task) =>
+        next[taskDetailContext.personId] = tasksForPerson.map((task: any) =>
           task.id === taskDetailContext.taskId
             ? {
               ...task,
@@ -546,10 +546,10 @@ export default function MeetingPlannerPageContent() {
   const schedulePeopleOptions = useMemo(() => {
     const term = schedulePeopleSearch.trim().toLowerCase();
     if (!term) return people;
-    return people.filter((person) =>
+    return people.filter((person: any) =>
       [person.name, person.email, ...(person.aliases || [])]
         .filter(Boolean)
-        .some((value) => String(value).toLowerCase().includes(term))
+        .some((value: any) => String(value).toLowerCase().includes(term))
     );
   }, [people, schedulePeopleSearch]);
 
@@ -565,8 +565,8 @@ export default function MeetingPlannerPageContent() {
 
     const attendees = [
       ...scheduleSelectedPeopleList
-        .map((person) => schedulePersonEmails[person.id] || person.email || "")
-        .filter((email) => isValidEmail(email)),
+        .map((person: any) => schedulePersonEmails[person.id] || person.email || "")
+        .filter((email: any) => isValidEmail(email)),
       ...manualAttendees,
     ];
 
@@ -645,7 +645,7 @@ export default function MeetingPlannerPageContent() {
             : [],
         };
 
-        setCalendarEvents((prev) => [newEvent, ...prev.filter((item) => item.id !== newEvent.id)]);
+        setCalendarEvents((prev) => [newEvent, ...prev.filter((item: any) => item.id !== newEvent.id)]);
       }
       setIsSchedulingNew(false);
       setScheduleTitle("");
@@ -747,7 +747,7 @@ export default function MeetingPlannerPageContent() {
             ) : (
               <ScrollArea className="h-full">
                 <div className="space-y-2 pr-2">
-                  {calendarEvents.map((event) => {
+                  {calendarEvents.map((event: any) => {
                     const isSelected = event.id === selectedEventId;
                     return (
                       <button
@@ -882,14 +882,14 @@ export default function MeetingPlannerPageContent() {
                         </div>
                         {manualAttendees.length > 0 && (
                           <div className="flex flex-wrap gap-2 pt-2 text-xs">
-                            {manualAttendees.map((email) => (
+                            {manualAttendees.map((email: any) => (
                               <Badge
                                 key={email}
                                 variant="secondary"
                                 className="cursor-pointer"
                                 onClick={() =>
                                   setManualAttendees((prev) =>
-                                    prev.filter((item) => item !== email)
+                                    prev.filter((item: any) => item !== email)
                                   )
                                 }
                               >
@@ -916,7 +916,7 @@ export default function MeetingPlannerPageContent() {
                         placeholder="Search people..."
                       />
                       <div className="space-y-2 max-h-64 overflow-auto pr-2">
-                        {schedulePeopleOptions.map((person) => {
+                        {schedulePeopleOptions.map((person: any) => {
                           const emailOptions = getEmailOptionsForPerson(person);
                           const isSelected = scheduleSelectedPeople.has(person.id);
                           return (
@@ -947,7 +947,7 @@ export default function MeetingPlannerPageContent() {
                                           No emails found
                                         </SelectItem>
                                       )}
-                                      {emailOptions.map((email) => (
+                                      {emailOptions.map((email: any) => (
                                         <SelectItem key={email} value={email}>
                                           {email}
                                         </SelectItem>
@@ -996,7 +996,7 @@ export default function MeetingPlannerPageContent() {
                   </div>
                   <div className="space-y-3">
                     <h4 className="text-sm font-semibold">Attendees</h4>
-                    {(selectedEvent.attendees || []).map((attendee) => {
+                    {(selectedEvent.attendees || []).map((attendee: any) => {
                       const key = getAttendeeKey(attendee);
                       const match = getBestPersonMatch(
                         { name: attendee.name, email: attendee.email },
@@ -1044,7 +1044,7 @@ export default function MeetingPlannerPageContent() {
                     {agendaSections.length === 0 && (
                       <p className="text-sm text-muted-foreground">No matched attendees selected.</p>
                     )}
-                    {agendaSections.map((section) => (
+                    {agendaSections.map((section: any) => (
                       <div key={section.person.id} className="rounded-md border p-3">
                         <div className="flex items-center justify-between">
                           <p className="font-semibold text-sm">{section.label}</p>
@@ -1052,7 +1052,7 @@ export default function MeetingPlannerPageContent() {
                         </div>
                         <ul className="mt-2 space-y-1 text-xs text-muted-foreground">
                           {section.tasks.length === 0 && <li>No open tasks.</li>}
-                          {section.tasks.map((task) => {
+                          {section.tasks.map((task: any) => {
                             const due = formatDueDate(task.dueAt);
                             return (
                               <li key={task.id}>
@@ -1099,14 +1099,14 @@ export default function MeetingPlannerPageContent() {
                         <p className="text-sm italic text-muted-foreground">{MEETING_GUIDE_TRIGGER}</p>
                       </div>
                       <div className="space-y-4">
-                        {agendaSections.map((section) => (
+                        {agendaSections.map((section: any) => (
                           <div key={section.person.id} className="space-y-2">
                             <p className="text-sm font-semibold">{section.label}</p>
                             {section.tasks.length === 0 ? (
                               <p className="text-xs text-muted-foreground">No open tasks found.</p>
                             ) : (
                               <ul className="space-y-2">
-                                {section.tasks.map((task) => {
+                                {section.tasks.map((task: any) => {
                                   const due = formatDueDate(task.dueAt);
                                   return (
                                     <li key={task.id} className="flex items-start gap-2">
@@ -1146,7 +1146,7 @@ export default function MeetingPlannerPageContent() {
               {recentMeetings.length > 0 && (
                 <div className="space-y-2">
                   <h4 className="text-sm font-semibold">Recent Related Meetings</h4>
-                  {recentMeetings.map((meeting) => (
+                  {recentMeetings.map((meeting: any) => (
                     <div key={meeting.id} className="rounded-md border p-2">
                       <p className="text-sm font-medium">{meeting.title}</p>
                       <p className="text-xs text-muted-foreground line-clamp-2">{meeting.summary}</p>
@@ -1179,6 +1179,8 @@ export default function MeetingPlannerPageContent() {
     </div>
   );
 }
+
+
 
 
 

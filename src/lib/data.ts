@@ -3,6 +3,18 @@ import type { ExtractedTaskSchema } from "@/types/chat";
 import type { Person, PersonWithTaskCount } from "@/types/person";
 import type { Task } from "@/types/project";
 import { apiFetch } from "@/lib/api";
+import { subscribeRealtimeUpdates } from "@/lib/realtime-client";
+
+const LOCAL_REALTIME_EVENT = "taskwise:local-data-update";
+
+const emitLocalDataUpdate = (topic: "people" | "tasks") => {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(
+    new CustomEvent(LOCAL_REALTIME_EVENT, {
+      detail: { topic },
+    })
+  );
+};
 
 export const onPeopleSnapshot = (
   _userId: string,
@@ -10,9 +22,13 @@ export const onPeopleSnapshot = (
 ): (() => void) => {
   let active = true;
   let inFlight = false;
+  let queuedRefresh = false;
 
   const fetchPeople = async () => {
-    if (inFlight) return;
+    if (inFlight) {
+      queuedRefresh = true;
+      return;
+    }
     inFlight = true;
     try {
       const people = await apiFetch<PersonWithTaskCount[]>("/api/people");
@@ -21,15 +37,35 @@ export const onPeopleSnapshot = (
       console.error("Error fetching people:", error);
     } finally {
       inFlight = false;
+      if (queuedRefresh) {
+        queuedRefresh = false;
+        void fetchPeople();
+      }
     }
   };
 
-  fetchPeople();
-  const interval = setInterval(fetchPeople, 60000);
+  void fetchPeople();
+  const unsubscribeRealtime = subscribeRealtimeUpdates(
+    ["people", "meetings", "tasks", "board"],
+    () => {
+      void fetchPeople();
+    }
+  );
+  const handleLocalDataUpdate = (event: Event) => {
+    const detail = (event as CustomEvent<{ topic?: string }>).detail;
+    if (detail?.topic !== "people") return;
+    void fetchPeople();
+  };
+  if (typeof window !== "undefined") {
+    window.addEventListener(LOCAL_REALTIME_EVENT, handleLocalDataUpdate);
+  }
 
   return () => {
     active = false;
-    clearInterval(interval);
+    unsubscribeRealtime();
+    if (typeof window !== "undefined") {
+      window.removeEventListener(LOCAL_REALTIME_EVENT, handleLocalDataUpdate);
+    }
   };
 };
 
@@ -42,6 +78,7 @@ export const addPerson = async (
     method: "POST",
     body: JSON.stringify({ ...personData, sourceSessionId }),
   });
+  emitLocalDataUpdate("people");
   return created.id;
 };
 
@@ -78,6 +115,7 @@ export const updatePerson = async (
     method: "PATCH",
     body: JSON.stringify(data),
   });
+  emitLocalDataUpdate("people");
 };
 
 export const mergePeople = async (
@@ -91,6 +129,7 @@ export const mergePeople = async (
       body: JSON.stringify({ sourceId, targetId }),
     }
   );
+  emitLocalDataUpdate("people");
   return response.person || null;
 };
 
@@ -101,9 +140,13 @@ export const onTasksForPersonSnapshot = (
 ): (() => void) => {
   let active = true;
   let inFlight = false;
+  let queuedRefresh = false;
 
   const fetchTasks = async () => {
-    if (inFlight) return;
+    if (inFlight) {
+      queuedRefresh = true;
+      return;
+    }
     inFlight = true;
     try {
       const tasks = await apiFetch<Task[]>(`/api/people/${personId}/tasks`);
@@ -113,15 +156,35 @@ export const onTasksForPersonSnapshot = (
       if (active) callback([]);
     } finally {
       inFlight = false;
+      if (queuedRefresh) {
+        queuedRefresh = false;
+        void fetchTasks();
+      }
     }
   };
 
-  fetchTasks();
-  const interval = setInterval(fetchTasks, 60000);
+  void fetchTasks();
+  const unsubscribeRealtime = subscribeRealtimeUpdates(
+    ["tasks", "meetings", "board"],
+    () => {
+      void fetchTasks();
+    }
+  );
+  const handleLocalDataUpdate = (event: Event) => {
+    const detail = (event as CustomEvent<{ topic?: string }>).detail;
+    if (detail?.topic !== "tasks") return;
+    void fetchTasks();
+  };
+  if (typeof window !== "undefined") {
+    window.addEventListener(LOCAL_REALTIME_EVENT, handleLocalDataUpdate);
+  }
 
   return () => {
     active = false;
-    clearInterval(interval);
+    unsubscribeRealtime();
+    if (typeof window !== "undefined") {
+      window.removeEventListener(LOCAL_REALTIME_EVENT, handleLocalDataUpdate);
+    }
   };
 };
 

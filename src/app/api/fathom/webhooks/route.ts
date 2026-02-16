@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { apiError } from "@/lib/api-route";
 import {
   deleteFathomWebhook,
   getFathomInstallation,
@@ -11,12 +12,12 @@ import { getSessionUserId } from "@/lib/server-auth";
 export async function GET() {
   const userId = await getSessionUserId();
   if (!userId) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return apiError(401, "request_error", "Unauthorized");
   }
 
   const installation = await getFathomInstallation(userId);
   if (!installation) {
-    return NextResponse.json({ error: "Fathom integration not connected." }, { status: 400 });
+    return apiError(400, "request_error", "Fathom integration not connected.");
   }
 
   const fallback = installation.webhooks?.length
@@ -37,17 +38,17 @@ export async function GET() {
 
   const logs = await getFathomIntegrationLogs(userId, 200);
   const fromLogs = logs
-    .filter((entry) => entry.event === "webhook.create")
-    .map((entry) => ({
+    .filter((entry: any) => entry.event === "webhook.create")
+    .map((entry: any) => ({
       id: entry.metadata?.webhookId ?? null,
       url: entry.metadata?.destinationUrl ?? null,
       created_at: entry.createdAt,
     }))
-    .filter((entry) => entry.id || entry.url);
+    .filter((entry: any) => entry.id || entry.url);
 
   const unique = Array.from(
     new Map(
-      fromLogs.map((entry) => [
+      fromLogs.map((entry: any) => [
         entry.id || entry.url || JSON.stringify(entry),
         entry,
       ])
@@ -60,7 +61,7 @@ export async function GET() {
 export async function DELETE(request: Request) {
   const userId = await getSessionUserId();
   if (!userId) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return apiError(401, "request_error", "Unauthorized");
   }
 
   const body = await request.json().catch(() => ({}));
@@ -68,7 +69,7 @@ export async function DELETE(request: Request) {
 
   const installation = await getFathomInstallation(userId);
   if (!installation) {
-    return NextResponse.json({ error: "Fathom integration not connected." }, { status: 400 });
+    return apiError(400, "request_error", "Fathom integration not connected.");
   }
 
   try {
@@ -92,19 +93,16 @@ export async function DELETE(request: Request) {
     if (shouldDeleteAll && webhookIds.length === 0) {
       const logs = await getFathomIntegrationLogs(userId, 200);
       webhookIds = logs
-        .filter((entry) => entry.event === "webhook.create")
-        .map((entry) => ({
+        .filter((entry: any) => entry.event === "webhook.create")
+        .map((entry: any) => ({
           id: entry.metadata?.webhookId ?? null,
           url: entry.metadata?.destinationUrl ?? null,
         }))
-        .filter((entry) => entry.id || entry.url);
+        .filter((entry: any) => entry.id || entry.url);
     }
 
     if (!webhookIds.length) {
-      return NextResponse.json(
-        { error: "No webhook IDs provided." },
-        { status: 400 }
-      );
+      return apiError(400, "request_error", "No webhook IDs provided.");
     }
 
     for (const webhook of webhookIds) {
@@ -116,7 +114,7 @@ export async function DELETE(request: Request) {
       .filter(Boolean);
     const nextWebhooks =
       installation.webhooks?.filter(
-        (entry) => !deletedIds.includes(entry.id || "")
+        (entry: any) => !deletedIds.includes(entry.id || "")
       ) || [];
 
     await saveFathomInstallation({
@@ -141,3 +139,5 @@ export async function DELETE(request: Request) {
     );
   }
 }
+
+

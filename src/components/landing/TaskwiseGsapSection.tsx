@@ -102,7 +102,7 @@ const SHOWCASE_SECTIONS: ShowcaseSection[] = [
               icon: <Share2 size={18} />,
               iconColor: "text-orange-400",
             },
-          ].map((item) => (
+          ].map((item: any) => (
             <div
               key={item.name}
               className="flex items-center gap-4 rounded-xl border border-white/5 bg-white/5 p-4 transition-colors hover:bg-white/10"
@@ -269,7 +269,7 @@ export default function TaskwiseGsapSection() {
 
         <div className="relative z-10 mx-auto grid w-full max-w-[1400px] grid-cols-1 items-center gap-12 px-6 md:grid-cols-[1fr_auto] md:gap-24 md:px-12">
           <div className="max-w-xl space-y-2">
-            {SHOWCASE_SECTIONS.map((section) => (
+            {SHOWCASE_SECTIONS.map((section: any) => (
               <div key={section.id} className="relative flex flex-col items-start justify-center">
                 <h2
                   id={`nav-${section.id}`}
@@ -300,7 +300,7 @@ export default function TaskwiseGsapSection() {
             <div className="absolute bottom-0 left-[50%] right-[-100vw] top-0 z-0 bg-gradient-to-r from-[#FF7A59] via-[#FF5C8D] to-[#FF3F3F]" />
 
             <div className="absolute inset-0 z-10 overflow-hidden rounded-full border-[10px] border-white bg-black shadow-[0_0_80px_rgba(0,0,0,0.5)] sm:border-[12px] md:border-[16px]">
-              {SHOWCASE_SECTIONS.map((section) => (
+              {SHOWCASE_SECTIONS.map((section: any) => (
                 <React.Fragment key={`rings-${section.id}`}>
                   <div id={`rings-${section.id}`} className="absolute inset-0 flex items-center justify-center">
                     <div className={`absolute h-[100%] w-[100%] rounded-full ${section.ringColors[0]}`} />
@@ -325,3 +325,4 @@ export default function TaskwiseGsapSection() {
     </section>
   );
 }
+

@@ -1,6 +1,5 @@
 import { randomUUID } from "crypto";
 import type { Db } from "mongodb";
-import { buildIdQuery } from "@/lib/mongo-id";
 import { normalizePersonNameKey } from "@/lib/transcript-utils";
 
 type AttendeeInput = {
@@ -39,10 +38,9 @@ export const upsertPeopleFromAttendees = async ({
     return { created: 0, updated: 0 };
   }
 
-  const userIdQuery = buildIdQuery(userId);
   const people = await db
-    .collection<any>("people")
-    .find({ userId: userIdQuery })
+    .collection("people")
+    .find({ userId })
     .toArray();
 
   const emailMap = new Map<string, any>();
@@ -104,8 +102,8 @@ export const upsertPeopleFromAttendees = async ({
         update.aliases = Array.from(nextAliases);
       }
 
-      await db.collection<any>("people").updateOne(
-        { _id: existing._id, userId: userIdQuery },
+      await db.collection("people").updateOne(
+        { _id: existing._id, userId },
         { $set: update }
       );
 
@@ -138,10 +136,11 @@ export const upsertPeopleFromAttendees = async ({
       lastSeenAt: now,
     };
 
-    await db.collection<any>("people").insertOne(person);
+    await db.collection("people").insertOne(person as any);
     attachToMaps(person);
     created += 1;
   }
 
   return { created, updated };
 };
+

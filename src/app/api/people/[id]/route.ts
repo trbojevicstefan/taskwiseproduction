@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
+import { apiError } from "@/lib/api-route";
 import { getDb } from "@/lib/db";
 import { getSessionUserId } from "@/lib/server-auth";
-import { buildIdQuery } from "@/lib/mongo-id";
 import { normalizePersonNameKey } from "@/lib/transcript-utils";
 
 const serializePerson = (person: any) => ({
@@ -19,20 +19,18 @@ export async function GET(
   const { id } = await params;
   const userId = await getSessionUserId();
   if (!userId) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return apiError(401, "request_error", "Unauthorized");
   }
 
   const db = await getDb();
-  const idQuery = buildIdQuery(id);
-  const userIdQuery = buildIdQuery(userId);
   const person = await db
-    .collection<any>("people")
+    .collection("people")
     .findOne({
-      userId: userIdQuery,
-      $or: [{ _id: idQuery }, { id }, { slackId: id }],
+      userId,
+      $or: [{ _id: id }, { id }, { slackId: id }],
     });
   if (!person) {
-    return NextResponse.json({ error: "Person not found" }, { status: 404 });
+    return apiError(404, "request_error", "Person not found");
   }
 
   type TaskStatus = "todo" | "inprogress" | "done" | "recurring";
@@ -72,7 +70,7 @@ export async function GET(
   };
 
   const assigneeId = person.id ?? person._id ?? id;
-  const assigneeQuery = buildIdQuery(String(assigneeId));
+  const assigneeQuery = String(assigneeId);
   const nameKeys = new Set<string>();
   if (person.name) {
     const normalized = normalizePersonNameKey(person.name);
@@ -87,9 +85,9 @@ export async function GET(
   const nameKeyList = Array.from(nameKeys).filter(Boolean);
 
   const tasks = await db
-    .collection<any>("tasks")
+    .collection("tasks")
     .find({
-      userId: userIdQuery,
+      userId,
       $or: [
         { "assignee.uid": assigneeQuery },
         ...(person.email ? [{ "assignee.email": person.email }] : []),
@@ -105,7 +103,7 @@ export async function GET(
     .toArray();
 
   const taskCounts = emptyCounts();
-  tasks.forEach((task) => {
+  tasks.forEach((task: any) => {
     increment(taskCounts, normalizeStatus(task?.status));
   });
 
@@ -123,32 +121,30 @@ export async function PATCH(
   const { id } = await params;
   const userId = await getSessionUserId();
   if (!userId) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return apiError(401, "request_error", "Unauthorized");
   }
 
   const body = await request.json().catch(() => ({}));
   const update = { ...body, lastSeenAt: new Date() };
 
   const db = await getDb();
-  const idQuery = buildIdQuery(id);
-  const userIdQuery = buildIdQuery(userId);
   const existing = await db
-    .collection<any>("people")
+    .collection("people")
     .findOne({
-      userId: userIdQuery,
-      $or: [{ _id: idQuery }, { id }, { slackId: id }],
+      userId,
+      $or: [{ _id: id }, { id }, { slackId: id }],
     });
   if (!existing) {
-    return NextResponse.json({ error: "Person not found" }, { status: 404 });
+    return apiError(404, "request_error", "Person not found");
   }
 
-  await db.collection<any>("people").updateOne(
+  await db.collection("people").updateOne(
     { _id: existing._id },
     { $set: update }
   );
 
   const person = await db
-    .collection<any>("people")
+    .collection("people")
     .findOne({ _id: existing._id });
   type TaskStatus = "todo" | "inprogress" | "done" | "recurring";
   const emptyCounts = () => ({
@@ -187,7 +183,7 @@ export async function PATCH(
   };
 
   const assigneeId = person.id ?? person._id ?? id;
-  const assigneeQuery = buildIdQuery(String(assigneeId));
+  const assigneeQuery = String(assigneeId);
   const nameKeys = new Set<string>();
   if (person.name) {
     const normalized = normalizePersonNameKey(person.name);
@@ -202,9 +198,9 @@ export async function PATCH(
   const nameKeyList = Array.from(nameKeys).filter(Boolean);
 
   const tasks = await db
-    .collection<any>("tasks")
+    .collection("tasks")
     .find({
-      userId: userIdQuery,
+      userId,
       $or: [
         { "assignee.uid": assigneeQuery },
         ...(person.email ? [{ "assignee.email": person.email }] : []),
@@ -220,7 +216,7 @@ export async function PATCH(
     .toArray();
 
   const taskCounts = emptyCounts();
-  tasks.forEach((task) => {
+  tasks.forEach((task: any) => {
     increment(taskCounts, normalizeStatus(task?.status));
   });
 
@@ -238,28 +234,26 @@ export async function DELETE(
   const { id } = await params;
   const userId = await getSessionUserId();
   if (!userId) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return apiError(401, "request_error", "Unauthorized");
   }
 
   const db = await getDb();
-  const idQuery = buildIdQuery(id);
-  const userIdQuery = buildIdQuery(userId);
 
   const person = await db
-    .collection<any>("people")
+    .collection("people")
     .findOne({
-      userId: userIdQuery,
-      $or: [{ _id: idQuery }, { id }, { slackId: id }],
+      userId,
+      $or: [{ _id: id }, { id }, { slackId: id }],
     });
   if (!person) {
-    return NextResponse.json({ error: "Person not found" }, { status: 404 });
+    return apiError(404, "request_error", "Person not found");
   }
 
-  await db.collection<any>("people").deleteOne({ _id: person._id });
+  await db.collection("people").deleteOne({ _id: person._id });
   const assigneeId = person.id ?? person._id ?? id;
-  const assigneeQuery = buildIdQuery(String(assigneeId));
-  await db.collection<any>("tasks").updateMany(
-    { userId: userIdQuery, "assignee.uid": assigneeQuery },
+  const assigneeQuery = String(assigneeId);
+  await db.collection("tasks").updateMany(
+    { userId, "assignee.uid": assigneeQuery },
     { $set: { assignee: null, assigneeName: null } }
   );
 
@@ -276,8 +270,8 @@ export async function DELETE(
   if (nameMatches.size || emailMatches.size) {
     const nameList = Array.from(nameMatches);
     const emailList = Array.from(emailMatches);
-    await db.collection<any>("meetings").updateMany(
-      { userId: userIdQuery },
+    await db.collection("meetings").updateMany(
+      { userId },
       {
         $pull: {
           attendees: {
@@ -289,8 +283,8 @@ export async function DELETE(
         },
       }
     );
-    await db.collection<any>("chatSessions").updateMany(
-      { userId: userIdQuery },
+    await db.collection("chatSessions").updateMany(
+      { userId },
       {
         $pull: {
           people: {
@@ -306,3 +300,7 @@ export async function DELETE(
 
   return NextResponse.json({ ok: true });
 }
+
+
+
+

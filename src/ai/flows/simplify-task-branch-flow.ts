@@ -22,7 +22,7 @@ const BaseTaskSchemaInternal = z.object({
     dueAt: z.string().optional().describe('The due date and time for the task in ISO 8601 format (YYYY-MM-DDTHH:mm:ss.sssZ), if mentioned.'),
 });
 
-type TaskTypeInternal = z.infer<typeof BaseTaskSchemaInternal> & {
+type TaskTypeInternal = z.input<typeof BaseTaskSchemaInternal> & {
     subtasks?: TaskTypeInternal[];
     // We don't need id, addedToProjectId, etc. for the AI processing part for simplification
 };

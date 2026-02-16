@@ -16,7 +16,7 @@ const wrapCollection = (collName: string, coll: any) => {
   ];
 
   const wrapped: any = { ...coll };
-  methodsToWrap.forEach((m) => {
+  methodsToWrap.forEach((m: any) => {
     if (typeof coll[m] !== "function") return;
     wrapped[m] = async (...args: any[]) => {
       try {
@@ -53,3 +53,4 @@ export const getDb = async () => {
 };
 
 export default getDb;
+

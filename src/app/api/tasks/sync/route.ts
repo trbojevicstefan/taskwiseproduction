@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
+import { apiError } from "@/lib/api-route";
 import { getDb } from "@/lib/db";
 import { getSessionUserId } from "@/lib/server-auth";
-import { buildIdQuery } from "@/lib/mongo-id";
 import { syncTasksForSource } from "@/lib/task-sync";
 import { getWorkspaceIdForUser } from "@/lib/workspace";
 import type { ExtractedTaskSchema } from "@/types/chat";
@@ -9,7 +9,7 @@ import type { ExtractedTaskSchema } from "@/types/chat";
 export async function POST(request: Request) {
   const userId = await getSessionUserId();
   if (!userId) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return apiError(401, "request_error", "Unauthorized");
   }
 
   const body = await request.json().catch(() => ({}));
@@ -22,38 +22,27 @@ export async function POST(request: Request) {
   } = body || {};
 
   if (!sourceSessionId || !sourceSessionType) {
-    return NextResponse.json(
-      { error: "Missing source session details." },
-      { status: 400 }
-    );
+    return apiError(400, "request_error", "Missing source session details.");
   }
 
   if (!["meeting", "chat"].includes(sourceSessionType)) {
-    return NextResponse.json(
-      { error: "Unsupported source session type." },
-      { status: 400 }
-    );
+    return apiError(400, "request_error", "Unsupported source session type.");
   }
 
   if (!Array.isArray(tasks)) {
-    return NextResponse.json(
-      { error: "Tasks payload must be an array." },
-      { status: 400 }
-    );
+    return apiError(400, "request_error", "Tasks payload must be an array.");
   }
 
   const db = await getDb();
-  const userIdQuery = buildIdQuery(userId);
   const workspaceId = await getWorkspaceIdForUser(db, userId);
   if (sourceSessionType === "chat") {
-    const sessionIdQuery = buildIdQuery(sourceSessionId);
-    const session = await db.collection<any>("chatSessions").findOne({
-      userId: userIdQuery,
-      $or: [{ _id: sessionIdQuery }, { id: sourceSessionId }],
+    const session = await db.collection("chatSessions").findOne({
+      userId,
+      $or: [{ _id: sourceSessionId }, { id: sourceSessionId }],
     });
     if (session?.sourceMeetingId) {
-      const deleteResult = await db.collection<any>("tasks").deleteMany({
-        userId: userIdQuery,
+      const deleteResult = await db.collection("tasks").deleteMany({
+        userId,
         sourceSessionType: "chat",
         sourceSessionId,
       });
@@ -81,3 +70,6 @@ export async function POST(request: Request) {
 
   return NextResponse.json(result);
 }
+
+
+

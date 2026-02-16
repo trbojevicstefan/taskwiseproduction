@@ -119,7 +119,7 @@ const detectCompletedTasksFlow = ai.defineFlow(
     const promptInput = {
       transcript: input.transcript,
       candidatesJson: JSON.stringify(
-        input.candidates.map((candidate) => ({
+        input.candidates.map((candidate: any) => ({
           groupId: candidate.groupId,
           title: candidate.title,
           assigneeKey: candidate.assigneeKey || "",
@@ -133,7 +133,7 @@ const detectCompletedTasksFlow = ai.defineFlow(
       console.info("[completion-audit] request", {
         transcriptChars: input.transcript.length,
         candidateCount: input.candidates.length,
-        sampleCandidates: input.candidates.slice(0, 5).map((candidate) => ({
+        sampleCandidates: input.candidates.slice(0, 5).map((candidate: any) => ({
           groupId: candidate.groupId,
           title: candidate.title,
           assigneeKey: candidate.assigneeKey || "",
@@ -166,3 +166,4 @@ export async function detectCompletedTasks(
 ): Promise<DetectCompletedTasksOutput> {
   return await detectCompletedTasksFlow(input);
 }
+

@@ -11,6 +11,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Slack, Loader2, Users } from "lucide-react";
 import { useIntegrations } from "@/contexts/IntegrationsContext";
 import { useToast } from "@/hooks/use-toast";
+import { pollJobUntilDone } from "@/lib/job-client";
 import { cn } from "@/lib/utils";
 
 type SlackSyncUser = {
@@ -29,7 +30,7 @@ type SlackSyncDialogProps = {
 
 const getInitials = (name: string | null | undefined) => {
   if (!name) return "U";
-  return name.split(" ").map((part) => part[0]).join("").toUpperCase().substring(0, 2);
+  return name.split(" ").map((part: any) => part[0]).join("").toUpperCase().substring(0, 2);
 };
 
 export default function SlackSyncDialog({ isOpen, onClose, onSynced }: SlackSyncDialogProps) {
@@ -98,8 +99,8 @@ export default function SlackSyncDialog({ isOpen, onClose, onSynced }: SlackSync
   const filteredSlackUsers = useMemo(() => {
     const term = slackUserSearch.trim().toLowerCase();
     if (!term) return slackUsers;
-    return slackUsers.filter((user) =>
-      [user.realName, user.name, user.email].some((value) =>
+    return slackUsers.filter((user: any) =>
+      [user.realName, user.name, user.email].some((value: any) =>
         value?.toLowerCase().includes(term)
       )
     );
@@ -125,9 +126,9 @@ export default function SlackSyncDialog({ isOpen, onClose, onSynced }: SlackSync
     setSelectedSlackUserIds((prev) => {
       const next = new Set(prev);
       if (checked) {
-        filteredSlackUsers.forEach((user) => next.add(user.id));
+        filteredSlackUsers.forEach((user: any) => next.add(user.id));
       } else {
-        filteredSlackUsers.forEach((user) => next.delete(user.id));
+        filteredSlackUsers.forEach((user: any) => next.delete(user.id));
       }
       return next;
     });
@@ -155,11 +156,16 @@ export default function SlackSyncDialog({ isOpen, onClose, onSynced }: SlackSync
       if (!response.ok) {
         throw new Error(data.error || "Slack sync failed.");
       }
+      const result = data.jobId
+        ? ((await pollJobUntilDone(data.jobId)).result as { created?: number; updated?: number } | null)
+        : (data as { created?: number; updated?: number });
+      const created = result?.created || 0;
+      const updated = result?.updated || 0;
       toast({
         title: "Slack users synced",
-        description: `Added ${data.created} and updated ${data.updated} people.`,
+        description: `Added ${created} and updated ${updated} people.`,
       });
-      onSynced?.(data);
+      onSynced?.({ created, updated });
       onClose();
     } catch (error: any) {
       toast({
@@ -228,7 +234,7 @@ export default function SlackSyncDialog({ isOpen, onClose, onSynced }: SlackSync
                     <p>No Slack users match this search.</p>
                   </div>
                 ) : (
-                  filteredSlackUsers.map((member) => {
+                  filteredSlackUsers.map((member: any) => {
                     const displayName = member.realName || member.name;
                     const isSelected = selectedSlackUserIds.has(member.id);
                     return (
@@ -296,3 +302,4 @@ export default function SlackSyncDialog({ isOpen, onClose, onSynced }: SlackSync
     </Dialog>
   );
 }
+

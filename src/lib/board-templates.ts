@@ -52,6 +52,7 @@ export const BOARD_TEMPLATES: BoardTemplate[] = [
 export const DEFAULT_BOARD_TEMPLATE_ID = "kanban-basic";
 
 export const getBoardTemplate = (templateId?: string | null) =>
-  BOARD_TEMPLATES.find((template) => template.id === templateId) ||
-  BOARD_TEMPLATES.find((template) => template.id === DEFAULT_BOARD_TEMPLATE_ID) ||
+  BOARD_TEMPLATES.find((template: any) => template.id === templateId) ||
+  BOARD_TEMPLATES.find((template: any) => template.id === DEFAULT_BOARD_TEMPLATE_ID) ||
   BOARD_TEMPLATES[0];
+

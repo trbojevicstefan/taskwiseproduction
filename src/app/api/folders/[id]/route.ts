@@ -1,7 +1,17 @@
 import { NextResponse } from "next/server";
+import { z } from "zod";
 import { getDb } from "@/lib/db";
 import { getSessionUserId } from "@/lib/server-auth";
-import { buildIdQuery } from "@/lib/mongo-id";
+import { apiError, mapApiError, parseJsonBody } from "@/lib/api-route";
+
+const updateFolderSchema = z
+  .object({
+    name: z.string().trim().min(1).optional(),
+    parentId: z.string().optional().nullable(),
+  })
+  .refine((value) => value.name !== undefined || value.parentId !== undefined, {
+    message: "No updates provided.",
+  });
 
 const serializeFolder = (folder: any) => ({
   ...folder,
@@ -12,75 +22,79 @@ const serializeFolder = (folder: any) => ({
 
 export async function PATCH(
   request: Request,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
-  const userId = await getSessionUserId();
-  if (!userId) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  try {
+    const userId = await getSessionUserId();
+    if (!userId) {
+      return apiError(401, "unauthorized", "Unauthorized");
+    }
+
+    const { id } = await params;
+    const body = await parseJsonBody(request, updateFolderSchema, "No updates provided.");
+    const update: Record<string, unknown> = {};
+
+    if (body.name !== undefined) {
+      update.name = body.name;
+    }
+    if (body.parentId !== undefined) {
+      update.parentId = body.parentId ?? null;
+    }
+
+    const db = await getDb();
+    const filter = {
+      userId,
+      $or: [{ _id: id }, { id }],
+    };
+    await db.collection("folders").updateOne(filter, { $set: update });
+
+    const folder = await db.collection("folders").findOne(filter);
+    if (!folder) {
+      return apiError(404, "not_found", "Folder not found.");
+    }
+    return NextResponse.json(serializeFolder(folder));
+  } catch (error) {
+    return mapApiError(error, "Failed to update folder.");
   }
-
-  const body = await request.json().catch(() => ({}));
-  const update: Record<string, unknown> = {};
-
-  if (typeof body.name === "string") {
-    update.name = body.name.trim();
-  }
-  if ("parentId" in body) {
-    update.parentId = body.parentId ?? null;
-  }
-
-  if (Object.keys(update).length === 0) {
-    return NextResponse.json({ error: "No updates provided." }, { status: 400 });
-  }
-
-  const db = await getDb();
-  const idQuery = buildIdQuery(params.id);
-  const userIdQuery = buildIdQuery(userId);
-  const filter = {
-    userId: userIdQuery,
-    $or: [{ _id: idQuery }, { id: params.id }],
-  };
-  await db.collection<any>("folders").updateOne(filter, { $set: update });
-
-  const folder = await db.collection<any>("folders").findOne(filter);
-  return NextResponse.json(serializeFolder(folder));
 }
 
 export async function DELETE(
   _request: Request,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
-  const userId = await getSessionUserId();
-  if (!userId) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  try {
+    const userId = await getSessionUserId();
+    if (!userId) {
+      return apiError(401, "unauthorized", "Unauthorized");
+    }
+
+    const { id } = await params;
+    const db = await getDb();
+    const filter = {
+      userId,
+      $or: [{ _id: id }, { id }],
+    };
+    const result = await db.collection("folders").deleteOne(filter);
+    if (!result.deletedCount) {
+      return apiError(404, "not_found", "Folder not found.");
+    }
+
+    await db.collection("chatSessions").updateMany(
+      { userId, folderId: id },
+      { $set: { folderId: null } }
+    );
+    await db.collection("planningSessions").updateMany(
+      { userId, folderId: id },
+      { $set: { folderId: null } }
+    );
+    await db.collection("folders").updateMany(
+      { userId, parentId: id },
+      { $set: { parentId: null } }
+    );
+
+    return NextResponse.json({ ok: true });
+  } catch (error) {
+    return mapApiError(error, "Failed to delete folder.");
   }
-
-  const db = await getDb();
-  const idQuery = buildIdQuery(params.id);
-  const userIdQuery = buildIdQuery(userId);
-  const filter = {
-    userId: userIdQuery,
-    $or: [{ _id: idQuery }, { id: params.id }],
-  };
-  const result = await db
-    .collection<any>("folders")
-    .deleteOne(filter);
-  if (!result.deletedCount) {
-    return NextResponse.json({ error: "Folder not found." }, { status: 404 });
-  }
-
-  await db.collection<any>("chatSessions").updateMany(
-    { userId: userIdQuery, folderId: idQuery },
-    { $set: { folderId: null } }
-  );
-  await db.collection<any>("planningSessions").updateMany(
-    { userId: userIdQuery, folderId: idQuery },
-    { $set: { folderId: null } }
-  );
-  await db.collection<any>("folders").updateMany(
-    { userId: userIdQuery, parentId: idQuery },
-    { $set: { parentId: null } }
-  );
-
-  return NextResponse.json({ ok: true });
 }
+

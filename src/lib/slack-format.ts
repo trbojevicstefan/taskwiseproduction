@@ -32,7 +32,7 @@ export const formatTasksToSlackBlocks = (
   blocks.push({ type: "divider" });
 
   const addTasks = (items: ExtractedTaskSchema[], level = 0) => {
-    items.forEach((task) => {
+    items.forEach((task: any) => {
       const indent = "  ".repeat(level);
       const taskText = `${indent}- *${task.title}*`;
       const details: string[] = [];
@@ -115,3 +115,4 @@ export const formatTasksToSlackBlocks = (
 
   return blocks.slice(0, 50);
 };
+

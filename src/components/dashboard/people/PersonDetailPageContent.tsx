@@ -151,7 +151,7 @@ export default function PersonDetailPageContent({ personId }: PersonDetailPageCo
   }, [tasks, mapTaskToExtracted]);
 
   const selectedTasks = useMemo(
-    () => tasks.filter((task) => selectedTaskIds.has(task.id)),
+    () => tasks.filter((task: any) => selectedTaskIds.has(task.id)),
     [tasks, selectedTaskIds]
   );
 
@@ -163,7 +163,7 @@ export default function PersonDetailPageContent({ personId }: PersonDetailPageCo
   const filteredTasks = useMemo(() => {
     let next = tasks;
     if (statusFilter !== "all") {
-      next = next.filter((task) => (task.status || "todo") === statusFilter);
+      next = next.filter((task: any) => (task.status || "todo") === statusFilter);
     }
 
     if (dueDateFilter !== "all") {
@@ -176,7 +176,7 @@ export default function PersonDetailPageContent({ personId }: PersonDetailPageCo
         return date;
       };
 
-      next = next.filter((task) => {
+      next = next.filter((task: any) => {
         const dueDate = resolveDueDate(task.dueAt ?? null);
         if (dueDateFilter === "no_due") return !dueDate;
         if (!dueDate) return false;
@@ -192,7 +192,7 @@ export default function PersonDetailPageContent({ personId }: PersonDetailPageCo
   }, [tasks, statusFilter, dueDateFilter]);
 
   const selectedVisibleCount = useMemo(
-    () => filteredTasks.filter((task) => selectedTaskIds.has(task.id)).length,
+    () => filteredTasks.filter((task: any) => selectedTaskIds.has(task.id)).length,
     [filteredTasks, selectedTaskIds]
   );
 
@@ -215,7 +215,7 @@ export default function PersonDetailPageContent({ personId }: PersonDetailPageCo
     const entries = Object.entries(groupedTasks);
     if (showCompletedMeetings) return entries;
     return entries.filter(([, sessionTasks]) =>
-      sessionTasks.some((task) => (task.status || "todo") !== "done")
+      sessionTasks.some((task: any) => (task.status || "todo") !== "done")
     );
   }, [groupedTasks, showCompletedMeetings]);
 
@@ -256,7 +256,7 @@ export default function PersonDetailPageContent({ personId }: PersonDetailPageCo
     setSelectedTaskIds((prev) => {
       if (prev.size === 0) return prev;
       const next = new Set<string>();
-      tasks.forEach((task) => {
+      tasks.forEach((task: any) => {
         if (prev.has(task.id)) {
           next.add(task.id);
         }
@@ -368,9 +368,9 @@ export default function PersonDetailPageContent({ personId }: PersonDetailPageCo
     setSelectedTaskIds((prev) => {
       const next = new Set(prev);
       if (allVisibleSelected) {
-        filteredTasks.forEach((task) => next.delete(task.id));
+        filteredTasks.forEach((task: any) => next.delete(task.id));
       } else {
-        filteredTasks.forEach((task) => next.add(task.id));
+        filteredTasks.forEach((task: any) => next.add(task.id));
       }
       return next;
     });
@@ -396,7 +396,7 @@ export default function PersonDetailPageContent({ personId }: PersonDetailPageCo
       }
 
       setTasks((prev) =>
-        prev.map((item) =>
+        prev.map((item: any) =>
           item.id === task.id ? { ...item, status: nextStatus } : item
         )
       );
@@ -427,7 +427,7 @@ export default function PersonDetailPageContent({ personId }: PersonDetailPageCo
       taskId: string,
       updated: ExtractedTaskSchema
     ): ExtractedTaskSchema[] => {
-      return tasksToUpdate.map((taskItem) => {
+      return tasksToUpdate.map((taskItem: any) => {
         if (taskItem.id === taskId) {
           return { ...taskItem, ...updated, id: taskItem.id };
         }
@@ -481,7 +481,7 @@ export default function PersonDetailPageContent({ personId }: PersonDetailPageCo
 
       if (sourceType === "meeting" && sourceSessionId && sourceTaskId) {
         const meetings = await apiFetch<any[]>("/api/meetings");
-        const meeting = meetings.find((item) => String(item.id) === sourceSessionId);
+        const meeting = meetings.find((item: any) => String(item.id) === sourceSessionId);
         if (!meeting) {
           await fallbackUpdate();
         } else {
@@ -497,7 +497,7 @@ export default function PersonDetailPageContent({ personId }: PersonDetailPageCo
         }
       } else if (sourceType === "chat" && sourceSessionId && sourceTaskId) {
         const sessions = await apiFetch<any[]>("/api/chat-sessions");
-        const session = sessions.find((item) => String(item.id) === sourceSessionId);
+        const session = sessions.find((item: any) => String(item.id) === sourceSessionId);
         if (!session) {
           await fallbackUpdate();
         } else {
@@ -516,7 +516,7 @@ export default function PersonDetailPageContent({ personId }: PersonDetailPageCo
       }
 
       setTasks((prev) =>
-        prev.map((item) =>
+        prev.map((item: any) =>
           item.id === derivedTaskId
             ? { ...item, ...taskUpdatePayload }
             : item
@@ -563,7 +563,9 @@ export default function PersonDetailPageContent({ personId }: PersonDetailPageCo
         taskToDelete.sourceSessionType === "chat";
       if (isSessionTask && taskToDelete.sourceSessionId) {
         params.set("sourceSessionId", taskToDelete.sourceSessionId);
-        params.set("sourceSessionType", taskToDelete.sourceSessionType);
+        if (taskToDelete.sourceSessionType) {
+          params.set("sourceSessionType", taskToDelete.sourceSessionType);
+        }
       }
       if (taskToDelete.sourceTaskId) {
         params.set("sourceTaskId", taskToDelete.sourceTaskId);
@@ -574,7 +576,7 @@ export default function PersonDetailPageContent({ personId }: PersonDetailPageCo
         : `/api/tasks/${persistentTaskId}`;
       await apiFetch(deleteUrl, { method: "DELETE" });
 
-      setTasks((prev) => prev.filter((task) => task.id !== taskToDelete.id));
+      setTasks((prev) => prev.filter((task: any) => task.id !== taskToDelete.id));
       toast({ title: "Task Deleted", description: "The task has been removed." });
     } catch (error) {
       console.error("Failed to delete task:", error);
@@ -592,7 +594,7 @@ export default function PersonDetailPageContent({ personId }: PersonDetailPageCo
   const handleBulkStatusChange = async (nextStatus: Task["status"]) => {
     if (selectedTasks.length === 0) return;
     await Promise.all(
-      selectedTasks.map((task) => handleTaskStatusChange(task, nextStatus))
+      selectedTasks.map((task: any) => handleTaskStatusChange(task, nextStatus))
     );
     setBulkStatusValue("");
   };
@@ -607,7 +609,9 @@ export default function PersonDetailPageContent({ personId }: PersonDetailPageCo
             task.sourceSessionType === "meeting" || task.sourceSessionType === "chat";
           if (isSessionTask && task.sourceSessionId) {
             params.set("sourceSessionId", task.sourceSessionId);
-            params.set("sourceSessionType", task.sourceSessionType);
+            if (task.sourceSessionType) {
+              params.set("sourceSessionType", task.sourceSessionType);
+            }
           }
           if (task.sourceTaskId) {
             params.set("sourceTaskId", task.sourceTaskId);
@@ -620,8 +624,8 @@ export default function PersonDetailPageContent({ personId }: PersonDetailPageCo
         })
       );
 
-      const selectedIdSet = new Set(selectedTasks.map((task) => task.id));
-      setTasks((prev) => prev.filter((task) => !selectedIdSet.has(task.id)));
+      const selectedIdSet = new Set(selectedTasks.map((task: any) => task.id));
+      setTasks((prev) => prev.filter((task: any) => !selectedIdSet.has(task.id)));
       setSelectedTaskIds(new Set());
       toast({ title: "Tasks Deleted", description: `${selectedTasks.length} task(s) removed.` });
     } catch (error) {
@@ -1057,7 +1061,7 @@ export default function PersonDetailPageContent({ personId }: PersonDetailPageCo
           }}
           task={taskForDetailView}
           onSave={handleSaveTaskDetails}
-          people={currentPersonData ? [currentPersonData] : []}
+          people={currentPersonData ? ([currentPersonData] as any) : []}
           workspaceId={workspaceId}
           boards={boards}
           currentBoardId={taskForDetailView?.addedToBoardId ?? null}
@@ -1104,4 +1108,5 @@ export default function PersonDetailPageContent({ personId }: PersonDetailPageCo
     </div>
   );
 }
+
 

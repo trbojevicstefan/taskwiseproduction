@@ -29,7 +29,7 @@ export default function MeetingDetailPageContent({ meetingId }: { meetingId: str
       );
       if (duplicates.length === 0) return;
       await Promise.all(
-        duplicates.map((duplicate) =>
+        duplicates.map((duplicate: any) =>
           updateMeeting(duplicate.id, { chatSessionId: null })
         )
       );
@@ -45,7 +45,7 @@ export default function MeetingDetailPageContent({ meetingId }: { meetingId: str
       setIsNavigating(true);
       try {
         const sessionFromMeeting = meeting.chatSessionId
-          ? sessions.find((session) => session.id === meeting.chatSessionId)
+          ? sessions.find((session: any) => session.id === meeting.chatSessionId)
           : undefined;
         const sessionFromLookup = sessions.find(
           (session) => session.sourceMeetingId === meeting.id
@@ -97,14 +97,14 @@ export default function MeetingDetailPageContent({ meetingId }: { meetingId: str
 
   useEffect(() => {
     if (hasRefreshed || isLoadingMeetingHistory) return;
-    const exists = meetings.some((meeting) => meeting.id === meetingId);
+    const exists = meetings.some((meeting: any) => meeting.id === meetingId);
     if (!exists) {
       setHasRefreshed(true);
       void loadMeetingById(meetingId);
     }
   }, [hasRefreshed, isLoadingMeetingHistory, loadMeetingById, meetingId, meetings]);
 
-  const exists = meetings.some((meeting) => meeting.id === meetingId);
+  const exists = meetings.some((meeting: any) => meeting.id === meetingId);
   if (!exists && (isLoadingMeetingHistory || !hasRefreshed)) {
     return (
       <div className="flex items-center justify-center py-20 text-muted-foreground">
@@ -138,3 +138,4 @@ export default function MeetingDetailPageContent({ meetingId }: { meetingId: str
     </div>
   );
 }
+

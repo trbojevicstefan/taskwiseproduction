@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { apiError } from "@/lib/api-route";
 import { randomUUID } from "crypto";
 import { getSessionUserId } from "@/lib/server-auth";
 import { getGoogleAccessTokenForUser } from "@/lib/google-auth";
@@ -8,17 +9,14 @@ const isValidEmail = (value: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)
 export async function POST(request: Request) {
   const userId = await getSessionUserId();
   if (!userId) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return apiError(401, "request_error", "Unauthorized");
   }
 
   const body = await request.json().catch(() => ({}));
   const { title, description, startTime, endTime, attendees } = body || {};
 
   if (!title || !startTime || !endTime) {
-    return NextResponse.json(
-      { error: "Missing title, start time, or end time." },
-      { status: 400 }
-    );
+    return apiError(400, "request_error", "Missing title, start time, or end time.");
   }
 
   const attendeeList = Array.isArray(attendees)
@@ -26,16 +24,13 @@ export async function POST(request: Request) {
     : [];
 
   if (attendeeList.length === 0) {
-    return NextResponse.json(
-      { error: "At least one attendee email is required." },
-      { status: 400 }
-    );
+    return apiError(400, "request_error", "At least one attendee email is required.");
   }
 
   try {
     const accessToken = await getGoogleAccessTokenForUser(userId);
     if (!accessToken) {
-      return NextResponse.json({ error: "Google not connected." }, { status: 404 });
+      return apiError(404, "request_error", "Google not connected.");
     }
 
     const response = await fetch(
@@ -51,7 +46,7 @@ export async function POST(request: Request) {
           description: typeof description === "string" ? description.trim() : "",
           start: { dateTime: startTime },
           end: { dateTime: endTime },
-          attendees: attendeeList.map((email) => ({ email })),
+          attendees: attendeeList.map((email: any) => ({ email })),
           conferenceData: {
             createRequest: {
               requestId: randomUUID(),
@@ -76,3 +71,6 @@ export async function POST(request: Request) {
     );
   }
 }
+
+
+

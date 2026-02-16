@@ -70,7 +70,7 @@ export default function HeaderNav() {
           (meeting) =>
             meeting.ingestSource === "fathom" && !meeting.fathomNotificationReadAt
         )
-        .sort((a, b) => {
+        .sort((a: any, b: any) => {
           const aTime = getTimeValue(a.lastActivityAt) || getTimeValue(a.createdAt);
           const bTime = getTimeValue(b.lastActivityAt) || getTimeValue(b.createdAt);
           return bTime - aTime;
@@ -82,7 +82,7 @@ export default function HeaderNav() {
   const hasMoreNotifications = unreadCount > visibleNotificationCount;
 
   const handleOpenNotification = async (meetingId: string) => {
-    const meeting = unreadFathomMeetings.find((item) => item.id === meetingId);
+    const meeting = unreadFathomMeetings.find((item: any) => item.id === meetingId);
     if (meeting) {
       await updateMeeting(meeting.id, {
         fathomNotificationReadAt: new Date().toISOString(),
@@ -112,7 +112,7 @@ export default function HeaderNav() {
         })
       );
 
-      const failedCount = results.filter((wasUpdated) => !wasUpdated).length;
+      const failedCount = results.filter((wasUpdated: any) => !wasUpdated).length;
       if (failedCount === 0) {
         toast({
           title: "Notifications cleared",
@@ -277,7 +277,7 @@ export default function HeaderNav() {
                 </DropdownMenuItem>
             )}
             {unreadCount > 0 ? (
-                visibleNotifications.map((meeting) => (
+                visibleNotifications.map((meeting: any) => (
                     <DropdownMenuItem
                         key={meeting.id}
                         onClick={() => handleOpenNotification(meeting.id)}
@@ -349,3 +349,5 @@ export default function HeaderNav() {
     </div>
   );
 }
+
+

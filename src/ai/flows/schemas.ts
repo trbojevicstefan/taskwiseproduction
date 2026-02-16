@@ -41,9 +41,14 @@ export type TaskType = z.infer<typeof BaseTaskSchema> & {
   subtasks?: TaskType[];
 };
 
-export const TaskSchema: z.ZodType<TaskType> = BaseTaskSchema.extend({
-  subtasks: z.array(z.lazy(() => TaskSchema)).optional(),
-});
+type TaskTypeInput = z.input<typeof BaseTaskSchema> & {
+  subtasks?: TaskTypeInput[];
+};
+
+export const TaskSchema: z.ZodType<TaskType, z.ZodTypeDef, TaskTypeInput> =
+  BaseTaskSchema.extend({
+    subtasks: z.array(z.lazy(() => TaskSchema)).optional(),
+  });
 
 export const PersonSchema = z.object({
   name: z.string().describe("The full name of the person identified."),

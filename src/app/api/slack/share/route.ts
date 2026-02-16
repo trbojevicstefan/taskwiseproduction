@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { apiError } from "@/lib/api-route";
 import { getSessionUserId } from "@/lib/server-auth";
 import { findUserById } from "@/lib/db/users";
 import { getValidSlackToken } from "@/lib/slack";
@@ -37,7 +38,7 @@ const openDirectMessage = async (accessToken: string, userId: string) => {
 export async function POST(request: Request) {
   const userId = await getSessionUserId();
   if (!userId) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return apiError(401, "request_error", "Unauthorized");
   }
 
   const body = (await request.json().catch(() => ({}))) as SharePayload;
@@ -47,21 +48,15 @@ export async function POST(request: Request) {
   const targetUserId = body.userId;
 
   if (!tasks.length) {
-    return NextResponse.json({ error: "No tasks to share." }, { status: 400 });
+    return apiError(400, "request_error", "No tasks to share.");
   }
   if (!channelId && !targetUserId) {
-    return NextResponse.json(
-      { error: "Missing Slack channel or user." },
-      { status: 400 }
-    );
+    return apiError(400, "request_error", "Missing Slack channel or user.");
   }
 
   const user = await findUserById(userId);
   if (!user?.slackTeamId) {
-    return NextResponse.json(
-      { error: "Slack is not connected." },
-      { status: 400 }
-    );
+    return apiError(400, "request_error", "Slack is not connected.");
   }
 
   try {
@@ -104,9 +99,8 @@ export async function POST(request: Request) {
     });
   } catch (error) {
     console.error("Slack share failed:", error);
-    return NextResponse.json(
-      { error: "Failed to share tasks to Slack." },
-      { status: 500 }
-    );
+    return apiError(500, "request_error", "Failed to share tasks to Slack.");
   }
 }
+
+

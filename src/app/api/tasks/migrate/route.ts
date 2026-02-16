@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
+import { apiError } from "@/lib/api-route";
 import { getDb } from "@/lib/db";
 import { getSessionUserId } from "@/lib/server-auth";
-import { buildIdQuery } from "@/lib/mongo-id";
 import { syncTasksForSource } from "@/lib/task-sync";
 import { getWorkspaceIdForUser } from "@/lib/workspace";
 import type { ExtractedTaskSchema } from "@/types/chat";
@@ -9,20 +9,19 @@ import type { ExtractedTaskSchema } from "@/types/chat";
 export async function POST() {
   const userId = await getSessionUserId();
   if (!userId) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return apiError(401, "request_error", "Unauthorized");
   }
 
   const db = await getDb();
-  const userIdQuery = buildIdQuery(userId);
   const workspaceId = await getWorkspaceIdForUser(db, userId);
   const meetings = await db
-    .collection<any>("meetings")
-    .find({ userId: userIdQuery })
+    .collection("meetings")
+    .find({ userId })
     .project({ _id: 1, id: 1, title: 1, extractedTasks: 1, chatSessionId: 1 })
     .toArray();
   const chatSessions = await db
-    .collection<any>("chatSessions")
-    .find({ userId: userIdQuery })
+    .collection("chatSessions")
+    .find({ userId })
     .project({ _id: 1, id: 1, title: 1, suggestedTasks: 1, sourceMeetingId: 1 })
     .toArray();
 
@@ -52,15 +51,15 @@ export async function POST() {
   }
 
   const skipChatIds = new Set<string>(meetingLinkedChatIds);
-  chatSessions.forEach((session) => {
+  chatSessions.forEach((session: any) => {
     if (session.sourceMeetingId) {
       if (session._id) skipChatIds.add(String(session._id));
       if (session.id) skipChatIds.add(String(session.id));
     }
   });
   if (skipChatIds.size) {
-    const cleanup = await db.collection<any>("tasks").deleteMany({
-      userId: userIdQuery,
+    const cleanup = await db.collection("tasks").deleteMany({
+      userId,
       sourceSessionType: "chat",
       sourceSessionId: { $in: Array.from(skipChatIds) },
     });

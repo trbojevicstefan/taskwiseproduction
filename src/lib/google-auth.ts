@@ -1,4 +1,5 @@
 import { findUserById, updateUserById } from "@/lib/db/users";
+import { recordExternalApiFailure } from "@/lib/observability-metrics";
 
 const GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token";
 const TOKEN_SKEW_MS = 60_000;
@@ -19,7 +20,8 @@ const getEnv = (key: string) => {
 };
 
 export const getGoogleAccessTokenForUser = async (
-  userId: string
+  userId: string,
+  context?: { correlationId?: string | null }
 ): Promise<string | null> => {
   const user = await findUserById(userId);
   if (!user || !user.googleConnected) {
@@ -47,14 +49,38 @@ export const getGoogleAccessTokenForUser = async (
     grant_type: "refresh_token",
   });
 
-  const response = await fetch(GOOGLE_TOKEN_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: body.toString(),
-  });
+  const refreshStartedAtMs = Date.now();
+  let response: Response;
+  try {
+    response = await fetch(GOOGLE_TOKEN_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: body.toString(),
+    });
+  } catch (error) {
+    void recordExternalApiFailure({
+      provider: "google",
+      operation: "oauth.token.refresh",
+      userId,
+      correlationId: context?.correlationId,
+      durationMs: Date.now() - refreshStartedAtMs,
+      error,
+    });
+    throw error;
+  }
 
   if (!response.ok) {
     const payload = await response.json().catch(() => ({}));
+    void recordExternalApiFailure({
+      provider: "google",
+      operation: "oauth.token.refresh",
+      userId,
+      correlationId: context?.correlationId,
+      durationMs: Date.now() - refreshStartedAtMs,
+      statusCode: response.status,
+      error: payload?.error || "Failed to refresh Google access token.",
+      metadata: payload,
+    });
     throw new Error(payload.error || "Failed to refresh Google access token.");
   }
 
@@ -71,17 +97,48 @@ export const getGoogleAccessTokenForUser = async (
   return data.access_token;
 };
 
-export const revokeGoogleTokensForUser = async (userId: string) => {
+export const revokeGoogleTokensForUser = async (
+  userId: string,
+  context?: { correlationId?: string | null }
+) => {
   const user = await findUserById(userId);
   if (!user) return;
 
   const tokenToRevoke = user.googleRefreshToken || user.googleAccessToken;
   if (tokenToRevoke) {
-    await fetch("https://oauth2.googleapis.com/revoke", {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({ token: tokenToRevoke }).toString(),
-    });
+    const revokeStartedAtMs = Date.now();
+    let response: Response;
+    try {
+      response = await fetch("https://oauth2.googleapis.com/revoke", {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ token: tokenToRevoke }).toString(),
+      });
+    } catch (error) {
+      void recordExternalApiFailure({
+        provider: "google",
+        operation: "oauth.token.revoke",
+        userId,
+        correlationId: context?.correlationId,
+        durationMs: Date.now() - revokeStartedAtMs,
+        error,
+      });
+      throw error;
+    }
+
+    if (!response.ok) {
+      const payload = await response.text().catch(() => "");
+      void recordExternalApiFailure({
+        provider: "google",
+        operation: "oauth.token.revoke",
+        userId,
+        correlationId: context?.correlationId,
+        durationMs: Date.now() - revokeStartedAtMs,
+        statusCode: response.status,
+        error: payload || response.statusText,
+      });
+      throw new Error(payload || "Failed to revoke Google token.");
+    }
   }
 
   await updateUserById(userId, {

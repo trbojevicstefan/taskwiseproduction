@@ -50,7 +50,7 @@ export const generateProgressSummary = ai.defineFlow(
         inputSchema: GenerateProgressSummaryInputSchema,
         outputSchema: GenerateProgressSummaryOutputSchema,
     },
-    async (input) => {
+    async (input: GenerateProgressSummaryInput): Promise<GenerateProgressSummaryOutput> => {
         const { output, text } = await runPromptWithFallback(progressPrompt, input);
         const raw = extractJsonValue(output, text);
         const parsed = GenerateProgressSummaryOutputSchema.safeParse(raw);

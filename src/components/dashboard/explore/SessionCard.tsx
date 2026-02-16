@@ -55,7 +55,7 @@ const SessionCard: React.FC<SessionCardProps> = ({ session, people, selectedTask
 
   const attendeeMatches = useMemo(() => {
     const attendees = session.attendees || [];
-    return attendees.map((attendee) => {
+    return attendees.map((attendee: any) => {
       const match = getBestPersonMatch(
         { name: attendee.name, email: attendee.email },
         people,
@@ -72,7 +72,7 @@ const SessionCard: React.FC<SessionCardProps> = ({ session, people, selectedTask
     if (!name) return "U";
     return name
       .split(" ")
-      .map((part) => part[0])
+      .map((part: any) => part[0])
       .join("")
       .slice(0, 2)
       .toUpperCase();
@@ -181,15 +181,18 @@ const SessionCard: React.FC<SessionCardProps> = ({ session, people, selectedTask
                 )}
                 {session.extractedTasks && session.extractedTasks.length > 0 && (
                   <div className="space-y-1 text-sm">
-                    {session.extractedTasks.map((task: ExtractedTaskSchema) => (
-                      <TaskItem
-                        key={task.id}
-                        task={task}
-                        selectedIds={selectedTaskIds}
-                        onToggle={onToggleTask}
-                        onViewDetails={(task) => onViewDetails(task, session)}
-                      />
-                    ))}
+                    {session.extractedTasks.map((task: any) => {
+                      const extractedTask = task as ExtractedTaskSchema;
+                      return (
+                        <TaskItem
+                          key={extractedTask.id}
+                          task={extractedTask}
+                          selectedIds={selectedTaskIds}
+                          onToggle={onToggleTask}
+                          onViewDetails={(task) => onViewDetails(task, session)}
+                        />
+                      );
+                    })}
                   </div>
                 )}
               </CardContent>
@@ -202,3 +205,4 @@ const SessionCard: React.FC<SessionCardProps> = ({ session, people, selectedTask
 };
 
 export default SessionCard;
+

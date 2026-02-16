@@ -1,75 +1,89 @@
 import { NextResponse } from "next/server";
+import { z } from "zod";
 import { getDb } from "@/lib/db";
 import { getSessionUserId } from "@/lib/server-auth";
-import { buildIdQuery } from "@/lib/mongo-id";
+import { apiError, mapApiError, parseJsonBody } from "@/lib/api-route";
+
+const updateProjectSchema = z
+  .object({
+    name: z.string().trim().min(1).optional(),
+    description: z.string().optional(),
+  })
+  .refine((value) => value.name !== undefined || value.description !== undefined, {
+    message: "No updates provided.",
+  });
 
 export async function PATCH(
   request: Request,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
-  const userId = await getSessionUserId();
-  if (!userId) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  try {
+    const userId = await getSessionUserId();
+    if (!userId) {
+      return apiError(401, "unauthorized", "Unauthorized");
+    }
+
+    const { id } = await params;
+    const body = await parseJsonBody(request, updateProjectSchema, "No updates provided.");
+    const update: Record<string, unknown> = {};
+
+    if (body.name !== undefined) {
+      update.name = body.name;
+    }
+    if (body.description !== undefined) {
+      update.description = body.description;
+    }
+
+    const db = await getDb();
+    const filter = {
+      userId,
+      $or: [{ _id: id }, { id }],
+    };
+    await db.collection("projects").updateOne(filter, { $set: update });
+
+    const project = await db.collection("projects").findOne(filter);
+    if (!project) {
+      return apiError(404, "not_found", "Project not found.");
+    }
+
+    return NextResponse.json({
+      ...project,
+      id: project._id,
+      _id: undefined,
+      createdAt: project.createdAt?.toISOString?.() || project.createdAt,
+    });
+  } catch (error) {
+    return mapApiError(error, "Failed to update project.");
   }
-
-  const body = await request.json().catch(() => ({}));
-  const update: Record<string, unknown> = {};
-
-  if (typeof body.name === "string") {
-    update.name = body.name.trim();
-  }
-  if (typeof body.description === "string") {
-    update.description = body.description;
-  }
-
-  if (Object.keys(update).length === 0) {
-    return NextResponse.json({ error: "No updates provided." }, { status: 400 });
-  }
-
-  const db = await getDb();
-  const idQuery = buildIdQuery(params.id);
-  const userIdQuery = buildIdQuery(userId);
-  const filter = {
-    userId: userIdQuery,
-    $or: [{ _id: idQuery }, { id: params.id }],
-  };
-  await db.collection<any>("projects").updateOne(filter, { $set: update });
-
-  const project = await db.collection<any>("projects").findOne(filter);
-
-  return NextResponse.json({
-    ...project,
-    id: project?._id,
-    _id: undefined,
-    createdAt: project?.createdAt?.toISOString?.() || project?.createdAt,
-  });
 }
 
 export async function DELETE(
   _request: Request,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
-  const userId = await getSessionUserId();
-  if (!userId) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  try {
+    const userId = await getSessionUserId();
+    if (!userId) {
+      return apiError(401, "unauthorized", "Unauthorized");
+    }
 
-  const db = await getDb();
-  const idQuery = buildIdQuery(params.id);
-  const userIdQuery = buildIdQuery(userId);
-  const filter = {
-    userId: userIdQuery,
-    $or: [{ _id: idQuery }, { id: params.id }],
-  };
-  const result = await db
-    .collection<any>("projects")
-    .deleteOne(filter);
-  if (!result.deletedCount) {
-    return NextResponse.json({ error: "Project not found." }, { status: 404 });
-  }
-  await db
-    .collection<any>("tasks")
-    .deleteMany({ userId: userIdQuery, projectId: idQuery });
+    const { id } = await params;
+    const db = await getDb();
+    const filter = {
+      userId,
+      $or: [{ _id: id }, { id }],
+    };
+    const result = await db.collection("projects").deleteOne(filter);
+    if (!result.deletedCount) {
+      return apiError(404, "not_found", "Project not found.");
+    }
+    await db
+      .collection("tasks")
+      .deleteMany({ userId, projectId: id });
 
-  return NextResponse.json({ ok: true });
+    return NextResponse.json({ ok: true });
+  } catch (error) {
+    return mapApiError(error, "Failed to delete project.");
+  }
 }
+

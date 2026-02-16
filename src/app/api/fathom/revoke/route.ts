@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { apiError } from "@/lib/api-route";
 import { getSessionUserId } from "@/lib/server-auth";
 import {
   deleteFathomInstallation,
@@ -11,7 +12,7 @@ import { updateUserById } from "@/lib/db/users";
 export async function POST() {
   const userId = await getSessionUserId();
   if (!userId) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return apiError(401, "request_error", "Unauthorized");
   }
 
   const installation = await getFathomInstallation(userId);
@@ -32,3 +33,5 @@ export async function POST() {
 
   return NextResponse.json({ success: true });
 }
+
+

@@ -20,6 +20,11 @@ if (process.env.NODE_ENV === "development") {
     global._mongoClientPromise = client.connect();
   }
   clientPromise = global._mongoClientPromise;
+} else if (process.env.NODE_ENV === "test") {
+  // Unit tests should be able to import modules that depend on getDb() without
+  // requiring a live Mongo instance at module-load time.
+  client = new MongoClient(uri);
+  clientPromise = Promise.resolve(client);
 } else {
   client = new MongoClient(uri);
   clientPromise = client.connect();

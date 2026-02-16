@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
+import { apiError } from "@/lib/api-route";
 import { randomUUID } from "crypto";
 import { getDb } from "@/lib/db";
 import { getSessionUserId } from "@/lib/server-auth";
-import { buildIdQuery } from "@/lib/mongo-id";
 
 const serializeStatus = (status: any) => ({
   ...status,
@@ -21,17 +21,17 @@ export async function GET(
   const { workspaceId, boardId } = await Promise.resolve(params);
   const userId = await getSessionUserId();
   if (!userId) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return apiError(401, "request_error", "Unauthorized");
   }
 
   if (!workspaceId || !boardId) {
-    return NextResponse.json({ error: "Workspace ID and board ID are required." }, { status: 400 });
+    return apiError(400, "request_error", "Workspace ID and board ID are required.");
   }
 
   const db = await getDb();
-  const userIdQuery = buildIdQuery(userId);
+  const userIdQuery = userId;
   const statuses = await db
-    .collection<any>("boardStatuses")
+    .collection("boardStatuses")
     .find({ userId: userIdQuery, workspaceId, boardId })
     .sort({ order: 1, createdAt: 1 })
     .toArray();
@@ -48,17 +48,17 @@ export async function POST(
   const { workspaceId, boardId } = await Promise.resolve(params);
   const userId = await getSessionUserId();
   if (!userId) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return apiError(401, "request_error", "Unauthorized");
   }
 
   if (!workspaceId || !boardId) {
-    return NextResponse.json({ error: "Workspace ID and board ID are required." }, { status: 400 });
+    return apiError(400, "request_error", "Workspace ID and board ID are required.");
   }
 
   const body = await request.json().catch(() => ({}));
   const label = typeof body.label === "string" ? body.label.trim() : "";
   if (!label) {
-    return NextResponse.json({ error: "Status label is required." }, { status: 400 });
+    return apiError(400, "request_error", "Status label is required.");
   }
 
   const category =
@@ -70,9 +70,9 @@ export async function POST(
       : "todo";
 
   const db = await getDb();
-  const userIdQuery = buildIdQuery(userId);
+  const userIdQuery = userId;
   const lastStatus = await db
-    .collection<any>("boardStatuses")
+    .collection("boardStatuses")
     .find({ userId: userIdQuery, workspaceId, boardId })
     .sort({ order: -1 })
     .limit(1)
@@ -94,7 +94,10 @@ export async function POST(
     updatedAt: now,
   };
 
-  await db.collection<any>("boardStatuses").insertOne(status);
+  await db.collection("boardStatuses").insertOne(status);
 
   return NextResponse.json(serializeStatus(status));
 }
+
+
+

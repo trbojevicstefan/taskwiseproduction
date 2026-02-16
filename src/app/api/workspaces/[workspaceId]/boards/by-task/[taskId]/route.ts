@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
 import { getSessionUserId } from "@/lib/server-auth";
-import { buildIdQuery } from "@/lib/mongo-id";
 
 export async function GET(
   _request: Request,
@@ -27,10 +26,10 @@ export async function GET(
   }
 
   const db = await getDb();
-  const userIdQuery = buildIdQuery(userId);
-  const taskIdQuery = buildIdQuery(taskId);
+  const userIdQuery = userId;
+  const taskIdQuery = taskId;
   const normalizedTaskId = taskId && taskId.includes(":") ? taskId.split(":").slice(1).join(":") : null;
-  const normalizedTaskIdQuery = normalizedTaskId ? buildIdQuery(normalizedTaskId) : null;
+  const normalizedTaskIdQuery = normalizedTaskId || null;
   const orConditions: any[] = [];
   orConditions.push({ taskId: taskIdQuery });
   if (normalizedTaskIdQuery) orConditions.push({ taskId: normalizedTaskIdQuery });
@@ -39,13 +38,13 @@ export async function GET(
   if (normalizedTaskIdQuery) orConditions.push({ taskCanonicalId: normalizedTaskIdQuery });
 
   const items = await db
-    .collection<any>("boardItems")
+    .collection("boardItems")
     .find({ userId: userIdQuery, workspaceId, $or: orConditions })
     .sort({ updatedAt: -1, createdAt: -1 })
     .toArray();
 
   const boardIds = Array.from(
-    new Set(items.map((item) => String(item.boardId)).filter(Boolean))
+    new Set(items.map((item: any) => String(item.boardId)).filter(Boolean))
   );
 
   return NextResponse.json({
@@ -53,3 +52,5 @@ export async function GET(
     boardIds,
   });
 }
+
+

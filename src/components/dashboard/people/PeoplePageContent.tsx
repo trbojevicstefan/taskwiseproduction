@@ -55,22 +55,22 @@ export default function PeoplePageContent() {
   const [isSlackSyncDialogOpen, setIsSlackSyncDialogOpen] = useState(false);
 
   const visiblePeople = useMemo(
-    () => people.filter((person) => !person.isBlocked),
+    () => people.filter((person: any) => !person.isBlocked),
     [people]
   );
   const blockedPeople = useMemo(
-    () => people.filter((person) => person.isBlocked),
+    () => people.filter((person: any) => person.isBlocked),
     [people]
   );
 
   const potentialMatches = useMemo(() => getPotentialPersonMatches(people), [people]);
 
   const matchSources = useMemo(() => {
-    const candidates = people.filter((person) => !person.isBlocked && !person.slackId);
+    const candidates = people.filter((person: any) => !person.isBlocked && !person.slackId);
     const term = sourceSearch.trim().toLowerCase();
     if (!term) return candidates;
-    return candidates.filter((person) =>
-      [person.name, person.email].some((value) =>
+    return candidates.filter((person: any) =>
+      [person.name, person.email].some((value: any) =>
         value?.toLowerCase().includes(term)
       )
     );
@@ -82,8 +82,8 @@ export default function PeoplePageContent() {
     );
     const term = targetSearch.trim().toLowerCase();
     if (!term) return candidates;
-    return candidates.filter((person) =>
-      [person.name, person.email].some((value) =>
+    return candidates.filter((person: any) =>
+      [person.name, person.email].some((value: any) =>
         value?.toLowerCase().includes(term)
       )
     );
@@ -91,7 +91,7 @@ export default function PeoplePageContent() {
 
   const rankedSuggestions = useMemo(() => {
     if (!selectedSourceId) return [];
-    const source = people.find((person) => person.id === selectedSourceId);
+    const source = people.find((person: any) => person.id === selectedSourceId);
     if (!source) return [];
     return getRankedPersonMatches(
       { name: source.name, email: source.email },
@@ -137,7 +137,7 @@ export default function PeoplePageContent() {
   };
 
   const visiblePeopleIds = useMemo(
-    () => visiblePeople.map((person) => person.id),
+    () => visiblePeople.map((person: any) => person.id),
     [visiblePeople]
   );
 
@@ -162,7 +162,7 @@ export default function PeoplePageContent() {
     if (!user?.uid) return;
     try {
       await Promise.all(
-        Array.from(selectedPeopleIds).map((personId) =>
+        Array.from(selectedPeopleIds).map((personId: any) =>
           updatePerson(user.uid, personId, { isBlocked: nextBlocked })
         )
       );
@@ -449,7 +449,7 @@ export default function PeoplePageContent() {
 
             {viewMode === "grid" ? (
               <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
-                {visiblePeople.map((person) => {
+                {visiblePeople.map((person: any) => {
                   const personId = String(person.id);
                   const counts = getTaskCounts(person);
                   return (
@@ -491,7 +491,7 @@ export default function PeoplePageContent() {
                   <span>Email</span>
                   <span>Tasks</span>
                 </div>
-                {visiblePeople.map((person) => {
+                {visiblePeople.map((person: any) => {
                   const personId = String(person.id);
                   const counts = getTaskCounts(person);
                   return (
@@ -528,7 +528,7 @@ export default function PeoplePageContent() {
                   <Badge variant="destructive">{blockedPeople.length}</Badge>
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
-                  {blockedPeople.map((person) => (
+                  {blockedPeople.map((person: any) => (
                     <Card key={person.id} className="border-dashed">
                       <CardContent className="p-5 flex items-center gap-4">
                         <Avatar className="h-12 w-12 border">
@@ -639,7 +639,7 @@ export default function PeoplePageContent() {
                     No discovered people to match.
                   </div>
                 )}
-                {matchSources.map((person) => (
+                {matchSources.map((person: any) => (
                   <div
                     key={person.id}
                     className={cn(
@@ -689,7 +689,7 @@ export default function PeoplePageContent() {
               {selectedSourceId && rankedSuggestions.length > 0 && (
                 <div className="rounded-md border p-3 bg-muted/30 space-y-2">
                   <p className="text-xs font-semibold uppercase text-muted-foreground">Suggested matches</p>
-                  {rankedSuggestions.map((match) => (
+                  {rankedSuggestions.map((match: any) => (
                     <button
                       key={match.person.id}
                       className={cn(
@@ -714,7 +714,7 @@ export default function PeoplePageContent() {
                 </div>
               )}
               <div className="space-y-2">
-                {matchTargets.map((person) => (
+                {matchTargets.map((person: any) => (
                   <button
                     key={person.id}
                     className={cn(
@@ -770,5 +770,6 @@ export default function PeoplePageContent() {
     </div>
   );
 }
+
 
 

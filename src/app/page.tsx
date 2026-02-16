@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 // src/app/page.tsx
 
 import React from "react";
@@ -120,7 +120,7 @@ function ExploreTabs() {
                     "Ship public beta by Jul 20",
                     "Draft investor follow-up deck",
                     "Create Q3 timeline",
-                  ].map((t) => (
+                  ].map((t: any) => (
                     <li key={t} className="flex items-center gap-2">
                       <span className="h-2 w-2 rounded-full bg-gradient-to-r from-[#FF4D4D] via-[#FF9900] to-[#FF2E97]" />
                       {t}
@@ -260,7 +260,7 @@ export default function TaskwiseAIPage() {
         subtitle="Sync tasks to Asana, Jira, Trello, Notion, Linear, and calendars. Import from Zoom, Google Meet, Teams; attach CRM context from HubSpot or Salesforce."
       >
         <div className="grid grid-cols-2 gap-4 sm:grid-cols-4 lg:grid-cols-6">
-          {["Zoom","Meet","Teams","Slack","Notion","Asana","Trello","Jira","Linear","Google Calendar","HubSpot","Salesforce"].map((name) => (
+          {["Zoom","Meet","Teams","Slack","Notion","Asana","Trello","Jira","Linear","Google Calendar","HubSpot","Salesforce"].map((name: any) => (
             <div key={name} className="flex items-center justify-center rounded-xl border border-white/10 bg-white/5 px-3 py-4 text-sm text-white/70 backdrop-blur">
               {name}
             </div>
@@ -274,7 +274,7 @@ export default function TaskwiseAIPage() {
             { tier: "Starter", price: "$0", blurb: "100 min / mo, basic export" },
             { tier: "Pro", price: "$19", blurb: "1,000 min / mo, integrations" },
             { tier: "Team", price: "$49", blurb: "Unlimited internal users, SSO" },
-          ].map((p) => (
+          ].map((p: any) => (
             <div key={p.tier} className="rounded-2xl border border-white/10 bg-white/5 p-6 text-white backdrop-blur flex flex-col">
               <div className="mb-2 text-sm text-white/60">{p.tier}</div>
               <div className="mb-1 text-3xl font-semibold">{p.price}<span className="text-base font-normal text-white/60">/mo</span></div>
@@ -307,3 +307,4 @@ export default function TaskwiseAIPage() {
     </main>
   );
 }
+

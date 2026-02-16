@@ -62,10 +62,11 @@ export function parseJsonOutput<T extends z.ZodTypeAny>(
   if (!result.success) {
     const issueSummary = result.error.issues
       .slice(0, 3)
-      .map((issue) => `${issue.path.length ? issue.path.join('.') : 'root'}: ${issue.message}`)
+      .map((issue: any) => `${issue.path.length ? issue.path.join('.') : 'root'}: ${issue.message}`)
       .join('; ');
     const label = context ? ` (${context})` : '';
     throw new Error(`AI returned invalid JSON${label}: ${issueSummary || 'unknown schema error'}`);
   }
   return result.data;
 }
+

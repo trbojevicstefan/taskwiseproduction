@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
+import { apiError } from "@/lib/api-route";
 import { getDb } from "@/lib/db";
 import { getSessionUserId } from "@/lib/server-auth";
-import { buildIdQuery } from "@/lib/mongo-id";
-import { normalizePersonNameKey } from "@/lib/transcript-utils";
+import { publishDomainEvent } from "@/lib/domain-events";
 
 const serializeTask = (task: any) => ({
   ...task,
@@ -25,20 +25,17 @@ export async function PATCH(
   const { workspaceId, boardId, itemId } = await Promise.resolve(params);
   const userId = await getSessionUserId();
   if (!userId) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return apiError(401, "request_error", "Unauthorized");
   }
 
   if (!workspaceId || !boardId || !itemId) {
-    return NextResponse.json(
-      { error: "Workspace ID, board ID, and item ID are required." },
-      { status: 400 }
-    );
+    return apiError(400, "request_error", "Workspace ID, board ID, and item ID are required.");
   }
 
   const body = await request.json().catch(() => ({}));
   const db = await getDb();
-  const userIdQuery = buildIdQuery(userId);
-  const itemIdQuery = buildIdQuery(itemId);
+  const userIdQuery = userId;
+  const itemIdQuery = itemId;
   const filter = {
     userId: userIdQuery,
     workspaceId,
@@ -46,24 +43,31 @@ export async function PATCH(
     $or: [{ _id: itemIdQuery }, { id: itemId }],
   };
 
-  const item = await db.collection<any>("boardItems").findOne(filter);
+  const item = await db.collection("boardItems").findOne(filter);
   if (!item) {
-    return NextResponse.json({ error: "Board item not found." }, { status: 404 });
+    return apiError(404, "request_error", "Board item not found.");
   }
 
   const itemUpdate: Record<string, any> = { updatedAt: new Date() };
+  const taskUpdates =
+    body.taskUpdates && typeof body.taskUpdates === "object"
+      ? body.taskUpdates
+      : {};
+  if (typeof taskUpdates.title === "string" && !taskUpdates.title.trim()) {
+    return apiError(400, "request_error", "Task title is required.");
+  }
   let statusCategory: string | null = null;
 
   if (typeof body.statusId === "string") {
-    const statusIdQuery = buildIdQuery(body.statusId);
-    const status = await db.collection<any>("boardStatuses").findOne({
+    const statusIdQuery = body.statusId;
+    const status = await db.collection("boardStatuses").findOne({
       userId: userIdQuery,
       workspaceId,
       boardId,
       $or: [{ _id: statusIdQuery }, { id: body.statusId }],
     });
     if (!status) {
-      return NextResponse.json({ error: "Status not found." }, { status: 404 });
+      return apiError(404, "request_error", "Status not found.");
     }
     itemUpdate.statusId = status._id?.toString?.() || status._id || body.statusId;
     statusCategory = status.category;
@@ -74,72 +78,32 @@ export async function PATCH(
   }
 
   if (Object.keys(itemUpdate).length > 1) {
-    await db.collection<any>("boardItems").updateOne(filter, { $set: itemUpdate });
+    await db.collection("boardItems").updateOne(filter, { $set: itemUpdate });
   }
 
-  const taskIdQuery = buildIdQuery(item.taskId);
   const taskFilter = {
     userId: userIdQuery,
-    $or: [{ _id: taskIdQuery }, { id: item.taskId }],
+    $or: [{ _id: item.taskId }, { id: item.taskId }],
   };
-  const taskUpdate: Record<string, any> = {};
-  const taskUpdates = body.taskUpdates || {};
 
-  if (typeof taskUpdates.title === "string") {
-    const title = taskUpdates.title.trim();
-    if (!title) {
-      return NextResponse.json({ error: "Task title is required." }, { status: 400 });
-    }
-    taskUpdate.title = title;
-  }
+  await publishDomainEvent(db, {
+    type: "board.item.updated",
+    userId,
+    payload: {
+      taskId: String(item.taskId),
+      statusCategory,
+      workspaceId,
+      boardId,
+      taskUpdates,
+    },
+  });
 
-  if (typeof taskUpdates.description === "string") {
-    taskUpdate.description = taskUpdates.description;
-  }
-
-  if (typeof taskUpdates.priority === "string") {
-    taskUpdate.priority = taskUpdates.priority;
-  }
-
-  if (typeof taskUpdates.dueAt === "string" || taskUpdates.dueAt === null) {
-    taskUpdate.dueAt = taskUpdates.dueAt;
-  }
-
-  if (typeof taskUpdates.assignee === "object" || taskUpdates.assignee === null) {
-    taskUpdate.assignee = taskUpdates.assignee;
-  }
-
-  if (typeof taskUpdates.assigneeName === "string" || taskUpdates.assigneeName === null) {
-    taskUpdate.assigneeName = taskUpdates.assigneeName;
-    const rawName =
-      taskUpdates.assigneeName ||
-      taskUpdates.assignee?.name ||
-      null;
-    taskUpdate.assigneeNameKey = rawName ? normalizePersonNameKey(rawName) : null;
-  }
-
-  if (
-    taskUpdates.status === "todo" ||
-    taskUpdates.status === "inprogress" ||
-    taskUpdates.status === "done" ||
-    taskUpdates.status === "recurring"
-  ) {
-    taskUpdate.status = taskUpdates.status;
-  } else if (statusCategory) {
-    taskUpdate.status = statusCategory;
-  }
-
-  if (Object.keys(taskUpdate).length) {
-    taskUpdate.lastUpdated = new Date();
-    await db.collection<any>("tasks").updateOne(taskFilter, { $set: taskUpdate });
-  }
-
-  const task = await db.collection<any>("tasks").findOne(taskFilter);
+  const task = await db.collection("tasks").findOne(taskFilter);
   if (!task) {
-    return NextResponse.json({ error: "Task not found." }, { status: 404 });
+    return apiError(404, "request_error", "Task not found.");
   }
 
-  const updatedItem = await db.collection<any>("boardItems").findOne(filter);
+  const updatedItem = await db.collection("boardItems").findOne(filter);
 
   return NextResponse.json({
     ...serializeTask(task),
@@ -164,19 +128,16 @@ export async function DELETE(
   const { workspaceId, boardId, itemId } = await Promise.resolve(params);
   const userId = await getSessionUserId();
   if (!userId) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return apiError(401, "request_error", "Unauthorized");
   }
 
   if (!workspaceId || !boardId || !itemId) {
-    return NextResponse.json(
-      { error: "Workspace ID, board ID, and item ID are required." },
-      { status: 400 }
-    );
+    return apiError(400, "request_error", "Workspace ID, board ID, and item ID are required.");
   }
 
   const db = await getDb();
-  const userIdQuery = buildIdQuery(userId);
-  const itemIdQuery = buildIdQuery(itemId);
+  const userIdQuery = userId;
+  const itemIdQuery = itemId;
   const filter = {
     userId: userIdQuery,
     workspaceId,
@@ -184,9 +145,9 @@ export async function DELETE(
     $or: [{ _id: itemIdQuery }, { id: itemId }],
   };
 
-  const result = await db.collection<any>("boardItems").deleteOne(filter);
+  const result = await db.collection("boardItems").deleteOne(filter);
   if (!result.deletedCount) {
-    return NextResponse.json({ error: "Board item not found." }, { status: 404 });
+    return apiError(404, "request_error", "Board item not found.");
   }
 
   return NextResponse.json({ ok: true });

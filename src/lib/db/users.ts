@@ -41,12 +41,12 @@ const normalizeEmail = (email: string) => email.trim().toLowerCase();
 
 export const findUserByEmail = async (email: string): Promise<DbUser | null> => {
   const db = await getDb();
-  return db.collection<DbUser>(USERS_COLLECTION).findOne({ email: normalizeEmail(email) });
+  return db.collection(USERS_COLLECTION).findOne({ email: normalizeEmail(email) });
 };
 
 export const findUserById = async (id: string): Promise<DbUser | null> => {
   const db = await getDb();
-  return db.collection<DbUser>(USERS_COLLECTION).findOne({ _id: new ObjectId(id) });
+  return db.collection(USERS_COLLECTION).findOne({ _id: new ObjectId(id) });
 };
 
 export const createUser = async ({
@@ -96,7 +96,7 @@ export const createUser = async ({
     briefGenerationCount: 0,
   };
 
-  const result = await db.collection<DbUser>(USERS_COLLECTION).insertOne(doc as DbUser);
+  const result = await db.collection(USERS_COLLECTION).insertOne(doc as DbUser);
   return { ...doc, _id: result.insertedId };
 };
 
@@ -109,7 +109,7 @@ export const updateUserById = async (id: string, update: Partial<DbUser>) => {
   const now = new Date();
   const { _id, passwordHash, createdAt, ...safeUpdate } = update;
 
-  await db.collection<DbUser>(USERS_COLLECTION).updateOne(
+  await db.collection(USERS_COLLECTION).updateOne(
     { _id: new ObjectId(id) },
     {
       $set: {
@@ -124,7 +124,8 @@ export const findUserByFathomWebhookToken = async (
   token: string
 ): Promise<DbUser | null> => {
   const db = await getDb();
-  return db.collection<DbUser>(USERS_COLLECTION).findOne({
+  return db.collection(USERS_COLLECTION).findOne({
     fathomWebhookToken: token,
   });
 };
+

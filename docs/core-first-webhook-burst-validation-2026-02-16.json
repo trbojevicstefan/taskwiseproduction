@@ -1,0 +1,67 @@
+﻿{
+  "generatedAt": "2026-02-16T15:27:47.234Z",
+  "config": {
+    "rounds": 2,
+    "requestsPerRound": 80,
+    "concurrency": 20,
+    "latencyTargetMs": 1500,
+    "timeoutThresholdMs": 3000,
+    "stabilitySpreadLimit": 1.35
+  },
+  "summary": {
+    "totalRequests": 160,
+    "successCount": 160,
+    "errorCount": 0,
+    "timeoutCount": 0,
+    "statusCounts": {
+      "202": 160
+    },
+    "latencyMs": {
+      "p50": 931.9908000000014,
+      "p95": 1895.3294000000005,
+      "p99": 2033.8428000000004
+    },
+    "p95Stability": {
+      "perRound": [
+        1963.732899999999,
+        1847.2701000000015
+      ],
+      "min": 1847.2701000000015,
+      "max": 1963.732899999999,
+      "spread": 1.063
+    }
+  },
+  "rounds": [
+    {
+      "round": 1,
+      "sampleSize": 80,
+      "p50": 991.2755999999999,
+      "p95": 1963.732899999999,
+      "p99": 2047.065199999999,
+      "avg": 1067.61,
+      "timeoutCount": 0,
+      "statusCounts": {
+        "202": 80
+      }
+    },
+    {
+      "round": 2,
+      "sampleSize": 80,
+      "p50": 911.8815999999988,
+      "p95": 1847.2701000000015,
+      "p99": 1990.5277999999998,
+      "avg": 886.69,
+      "timeoutCount": 0,
+      "statusCounts": {
+        "202": 80
+      }
+    }
+  ],
+  "checks": {
+    "p95WithinTarget": false,
+    "noTimeouts": true,
+    "allAccepted": true,
+    "stableP95Spread": true
+  },
+  "passed": false
+}

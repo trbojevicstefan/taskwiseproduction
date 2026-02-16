@@ -1,6 +1,7 @@
 import crypto from "crypto";
 import { ObjectId } from "mongodb";
 import { getDb } from "@/lib/db";
+import { recordExternalApiFailure } from "@/lib/observability-metrics";
 
 export interface SlackInstallationDoc {
   _id: string;
@@ -59,7 +60,7 @@ export const consumeSlackOAuthState = async (
 ): Promise<string | null> => {
   const db = await getDb();
   const record = await db
-    .collection<{ _id: string; userId: string; createdAt: Date }>(
+    .collection(
       OAUTH_STATE_COLLECTION
     )
     .findOne({ _id: state });
@@ -73,7 +74,7 @@ export const getSlackInstallation = async (
 ): Promise<SlackInstallationDoc | null> => {
   const db = await getDb();
   return db
-    .collection<SlackInstallationDoc>(INSTALLATIONS_COLLECTION)
+    .collection(INSTALLATIONS_COLLECTION)
     .findOne({ _id: teamId });
 };
 
@@ -82,7 +83,7 @@ export const saveSlackInstallation = async (
 ) => {
   const db = await getDb();
   await db
-    .collection<SlackInstallationDoc>(INSTALLATIONS_COLLECTION)
+    .collection(INSTALLATIONS_COLLECTION)
     .updateOne(
       { _id: installation.teamId },
       { $set: installation },
@@ -110,11 +111,24 @@ const refreshSlackToken = async (installation: SlackInstallationDoc) => {
     refresh_token: installation.refreshToken,
   });
 
-  const response = await fetch("https://slack.com/api/oauth.v2.access", {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: params,
-  });
+  let response: Response;
+  try {
+    response = await fetch("https://slack.com/api/oauth.v2.access", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: params,
+    });
+  } catch (error) {
+    void recordExternalApiFailure({
+      provider: "slack",
+      operation: "oauth.token.refresh",
+      error,
+      metadata: {
+        slackTeamId: installation.teamId,
+      },
+    });
+    throw error;
+  }
 
   const payload = (await response.json()) as {
     ok: boolean;
@@ -125,6 +139,15 @@ const refreshSlackToken = async (installation: SlackInstallationDoc) => {
   };
 
   if (!payload.ok || !payload.access_token) {
+    void recordExternalApiFailure({
+      provider: "slack",
+      operation: "oauth.token.refresh",
+      statusCode: response.status,
+      error: payload.error || "Failed to refresh Slack token.",
+      metadata: {
+        slackTeamId: installation.teamId,
+      },
+    });
     throw new Error(payload.error || "Failed to refresh Slack token.");
   }
 
@@ -164,7 +187,8 @@ export const getSlackUserTeamId = async (
 ): Promise<string | null> => {
   const db = await getDb();
   const user = await db
-    .collection<{ _id: ObjectId; slackTeamId?: string | null }>("users")
+    .collection("users")
     .findOne({ _id: new ObjectId(userId) });
   return user?.slackTeamId || null;
 };
+

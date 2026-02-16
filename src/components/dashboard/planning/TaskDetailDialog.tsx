@@ -178,14 +178,14 @@ export default function TaskDetailDialog({
     const rawEmail = rawAssignee?.email?.toLowerCase?.() || null;
     const rawName = task.assigneeName || rawAssignee?.name || null;
     const byId = rawId
-      ? people.find((person) => person.id === rawId) || null
+      ? people.find((person: any) => person.id === rawId) || null
       : null;
     const byEmail = rawEmail
-      ? people.find((person) => {
+      ? people.find((person: any) => {
           const email = person.email?.toLowerCase?.();
           if (email && email === rawEmail) return true;
           return (person.aliases || []).some(
-            (alias) => alias?.toLowerCase?.() === rawEmail
+            (alias: any) => alias?.toLowerCase?.() === rawEmail
           );
         }) || null
       : null;
@@ -289,7 +289,7 @@ export default function TaskDetailDialog({
   const buildUpdatedTask = (overrides: Partial<DisplayTask> = {}): DisplayTask => {
     const selectedPerson =
       assigneeSelection && assigneeSelection !== UNASSIGNED_VALUE
-        ? people.find((person) => person.id === assigneeSelection) || null
+        ? people.find((person: any) => person.id === assigneeSelection) || null
         : null;
     const baseAssignee = task?.assignee ?? null;
     const nextAssignee =
@@ -521,7 +521,7 @@ export default function TaskDetailDialog({
     try {
       await onMoveToBoard(value);
       setResolvedBoardId(value);
-      const boardName = boards.find((board) => board.id === value)?.name;
+      const boardName = boards.find((board: any) => board.id === value)?.name;
       toast({
         title: "Moved to board",
         description: boardName ? `Now on ${boardName}.` : "Task moved.",
@@ -555,7 +555,7 @@ export default function TaskDetailDialog({
         ? assigneeSelection
         : null;
     const selectedPerson = selectionId
-      ? people.find((person) => person.id === selectionId) || null
+      ? people.find((person: any) => person.id === selectionId) || null
       : null;
     const rawAssignee = task?.assignee || null;
     const rawName =
@@ -566,13 +566,13 @@ export default function TaskDetailDialog({
       null;
     const rawId = rawAssignee?.uid || rawAssignee?.id || null;
     const rawEmail = rawAssignee?.email?.toLowerCase?.() || null;
-    const byId = rawId ? people.find((person) => person.id === rawId) : null;
+    const byId = rawId ? people.find((person: any) => person.id === rawId) : null;
     const byEmail = rawEmail
-      ? people.find((person) => {
+      ? people.find((person: any) => {
           const email = person.email?.toLowerCase?.();
           if (email && email === rawEmail) return true;
           return (person.aliases || []).some(
-            (alias) => alias?.toLowerCase?.() === rawEmail
+            (alias: any) => alias?.toLowerCase?.() === rawEmail
           );
         })
       : null;
@@ -603,7 +603,7 @@ export default function TaskDetailDialog({
 
   const selectedPerson = useMemo(() => {
     if (assigneeSelection && assigneeSelection !== UNASSIGNED_VALUE) {
-      return people.find((person) => person.id === assigneeSelection) || null;
+      return people.find((person: any) => person.id === assigneeSelection) || null;
     }
     return null;
   }, [assigneeSelection, people, UNASSIGNED_VALUE]);
@@ -693,7 +693,7 @@ export default function TaskDetailDialog({
       listItems = [];
     };
 
-    lines.forEach((line) => {
+    lines.forEach((line: any) => {
       const trimmed = line.trim();
       if (!trimmed) {
         flushList();
@@ -736,7 +736,7 @@ export default function TaskDetailDialog({
     if (!value) return "U";
     const parts = value.trim().split(/\s+/).filter(Boolean);
     if (parts.length === 0) return value.slice(0, 2).toUpperCase();
-    return parts.slice(0, 2).map((part) => part[0]).join("").toUpperCase();
+    return parts.slice(0, 2).map((part: any) => part[0]).join("").toUpperCase();
   };
 
   if (!isOpen) return null;
@@ -911,7 +911,7 @@ export default function TaskDetailDialog({
                               No subtasks yet.
                             </p>
                           )}
-                          {(subtasks || []).map((subtask) => (
+                          {(subtasks || []).map((subtask: any) => (
                             <div
                               key={subtask.id}
                               className="rounded-md border bg-muted/30 px-3 py-2 text-xs"
@@ -957,7 +957,7 @@ export default function TaskDetailDialog({
                         {(comments || []).length === 0 && (
                           <p className="text-xs text-muted-foreground">No comments yet.</p>
                         )}
-                        {(comments || []).map((comment) => (
+                        {(comments || []).map((comment: any) => (
                           <div key={comment.id} className="rounded-md border bg-muted/30 p-3 text-xs">
                             <div className="flex items-center justify-between text-muted-foreground">
                               <span className="font-semibold text-foreground">
@@ -1061,7 +1061,7 @@ export default function TaskDetailDialog({
                         </SelectTrigger>
                         <SelectContent>
                           <SelectItem value={UNASSIGNED_VALUE}>Unassigned</SelectItem>
-                          {people.map((person) => (
+                          {people.map((person: any) => (
                             <SelectItem key={person.id} value={person.id}>
                               {person.name}
                             </SelectItem>
@@ -1100,7 +1100,7 @@ export default function TaskDetailDialog({
                         </SelectTrigger>
                         <SelectContent>
                           {hasBoards ? (
-                            boards.map((board) => (
+                            boards.map((board: any) => (
                               <SelectItem key={board.id} value={board.id}>
                                 {board.name}
                               </SelectItem>
@@ -1187,3 +1187,4 @@ export default function TaskDetailDialog({
 }
 
     
+

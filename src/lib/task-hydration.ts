@@ -1,5 +1,4 @@
 import { getDb } from "@/lib/db";
-import { buildIdQuery } from "@/lib/mongo-id";
 import { normalizeTask } from "@/lib/data";
 import type { ExtractedTaskSchema, TaskReferenceSchema } from "@/types/chat";
 import { TASK_LIST_PROJECTION } from "@/lib/task-projections";
@@ -22,7 +21,7 @@ const collectTaskLookupKeys = (lists: TaskLike[][]) => {
   const taskIds = new Set<string>();
   const sourceTaskIds = new Set<string>();
 
-  lists.forEach((items) => {
+  lists.forEach((items: any) => {
     walkTaskItems(items, (item: any) => {
       const canonicalId = item.taskId || item.taskCanonicalId || item._id;
       if (canonicalId) {
@@ -102,16 +101,15 @@ export const hydrateTaskReferenceLists = async (
 
   const { taskIds, sourceTaskIds } = collectTaskLookupKeys(lists);
   if (!taskIds.size && !sourceTaskIds.size) {
-    return lists.map((items) => items.map((item: any) => normalizeTask(item)));
+    return lists.map((items: any) => items.map((item: any) => normalizeTask(item)));
   }
 
   const db = await getDb();
-  const userIdQuery = buildIdQuery(userId);
   const orClauses: any[] = [];
 
   if (taskIds.size) {
     const ids = Array.from(taskIds);
-    orClauses.push({ _id: { $in: ids.map((id) => buildIdQuery(id)) } });
+    orClauses.push({ _id: { $in: ids } });
     orClauses.push({ id: { $in: ids } });
   }
   if (sourceTaskIds.size) {
@@ -119,14 +117,14 @@ export const hydrateTaskReferenceLists = async (
   }
 
   if (!orClauses.length) {
-    return lists.map((items) => items.map((item: any) => normalizeTask(item)));
+    return lists.map((items: any) => items.map((item: any) => normalizeTask(item)));
   }
 
   const canonicalTasks = await db
     .collection("tasks")
     .find(
       {
-        userId: userIdQuery,
+        userId,
         $or: orClauses,
       },
       { projection: TASK_LIST_PROJECTION }
@@ -141,9 +139,13 @@ export const hydrateTaskReferenceLists = async (
     }
   });
 
-  return lists.map((items) =>
+  return lists.map((items: any) =>
     items
       .map((item: any) => toHydratedTask(item, canonicalMap))
-      .filter((item): item is ExtractedTaskSchema => item !== null)
+      .filter(
+        (item: ExtractedTaskSchema | null): item is ExtractedTaskSchema =>
+          item !== null
+      )
   );
 };
+

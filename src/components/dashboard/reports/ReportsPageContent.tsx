@@ -133,7 +133,7 @@ const flattenMeetingTasks = (
     null;
 
   const walk = (tasks: any[]): any[] =>
-    tasks.flatMap((task) => {
+    tasks.flatMap((task: any) => {
       const base = {
         ...task,
         createdAt,
@@ -172,19 +172,19 @@ export default function ReportsPageContent() {
 
   const peopleById = useMemo(() => {
     const map = new Map<string, Person>();
-    people.forEach((person) => map.set(person.id, person));
+    people.forEach((person: any) => map.set(person.id, person));
     return map;
   }, [people]);
 
   const personNameKeyToId = useMemo(() => {
     const map = new Map<string, string>();
-    people.forEach((person) => {
+    people.forEach((person: any) => {
       const nameKey = normalizePersonNameKey(person.name || "");
       if (nameKey && !map.has(nameKey)) {
         map.set(nameKey, person.id);
       }
       if (Array.isArray(person.aliases)) {
-        person.aliases.forEach((alias) => {
+        person.aliases.forEach((alias: any) => {
           const aliasKey = normalizePersonNameKey(alias || "");
           if (aliasKey && !map.has(aliasKey)) {
             map.set(aliasKey, person.id);
@@ -197,12 +197,12 @@ export default function ReportsPageContent() {
 
   const personEmailToId = useMemo(() => {
     const map = new Map<string, string>();
-    people.forEach((person) => {
+    people.forEach((person: any) => {
       if (person.email) {
         map.set(person.email.toLowerCase(), person.id);
       }
       if (Array.isArray(person.aliases)) {
-        person.aliases.forEach((alias) => {
+        person.aliases.forEach((alias: any) => {
           if (alias && alias.includes("@")) {
             map.set(alias.toLowerCase(), person.id);
           }
@@ -222,7 +222,7 @@ export default function ReportsPageContent() {
       return time >= rangeStart.getTime() && time <= now.getTime();
     };
 
-    const meetingDates = meetings.map((meeting) => ({
+    const meetingDates = meetings.map((meeting: any) => ({
       meeting,
       date: toDateValue(meeting.startTime) || toDateValue(meeting.lastActivityAt),
     }));
@@ -231,7 +231,7 @@ export default function ReportsPageContent() {
     const meetingsThisWeek = meetingDates.filter(({ date }) => date && isSameWeek(date, now)).length;
     const meetingsThisMonth = meetingDates.filter(({ date }) => date && isSameMonth(date, now)).length;
 
-    const meetingDerivedTasks = meetings.flatMap((meeting) =>
+    const meetingDerivedTasks = meetings.flatMap((meeting: any) =>
       flattenMeetingTasks(meeting.extractedTasks || [], meeting)
     );
     const sessionIdsWithTasks = new Set(
@@ -239,17 +239,17 @@ export default function ReportsPageContent() {
         .filter(
           (task) => task.sourceSessionType === "meeting" || task.sourceSessionType === "chat"
         )
-        .map((task) => (task.sourceSessionId ? String(task.sourceSessionId) : ""))
+        .map((task: any) => (task.sourceSessionId ? String(task.sourceSessionId) : ""))
         .filter(Boolean)
     );
-    const fallbackMeetingTasks = meetingDerivedTasks.filter((task) => {
+    const fallbackMeetingTasks = meetingDerivedTasks.filter((task: any) => {
       const sessionId = task.sourceSessionId ? String(task.sourceSessionId) : "";
       return !sessionId || !sessionIdsWithTasks.has(sessionId);
     });
     const reportTasks =
       tasks.length === 0 ? meetingDerivedTasks : [...tasks, ...fallbackMeetingTasks];
 
-    const tasksInRange = reportTasks.filter((task) => {
+    const tasksInRange = reportTasks.filter((task: any) => {
       const createdAt = toDateValue(task.createdAt);
       if (!createdAt) return true;
       return isInRange(createdAt);
@@ -280,13 +280,13 @@ export default function ReportsPageContent() {
     const isAssigned = (task: any) => Boolean(resolveAssigneeId(task));
 
     const totalTasks = tasksInRange.length;
-    const completedTasks = tasksInRange.filter((task) => normalizeStatus(task.status) === "done").length;
-    const openTasks = tasksInRange.filter((task) => normalizeStatus(task.status) !== "done").length;
-    const unassignedTasks = tasksInRange.filter((task) => !isAssigned(task)).length;
+    const completedTasks = tasksInRange.filter((task: any) => normalizeStatus(task.status) === "done").length;
+    const openTasks = tasksInRange.filter((task: any) => normalizeStatus(task.status) !== "done").length;
+    const unassignedTasks = tasksInRange.filter((task: any) => !isAssigned(task)).length;
     const completionRate = totalTasks === 0 ? 0 : Math.round((completedTasks / totalTasks) * 100);
 
     const tasksByPriority = tasksInRange
-      .filter((task) => normalizeStatus(task.status) !== "done")
+      .filter((task: any) => normalizeStatus(task.status) !== "done")
       .reduce(
         (acc, task) => {
           acc[normalizePriority(task.priority)] += 1;
@@ -305,8 +305,8 @@ export default function ReportsPageContent() {
     );
 
     const uniqueAttendees = new Set<string>();
-    meetingsInRange.forEach((meeting) => {
-      (meeting.attendees || []).forEach((person) => {
+    meetingsInRange.forEach((meeting: any) => {
+      (meeting.attendees || []).forEach((person: any) => {
         if (person.email) uniqueAttendees.add(person.email.toLowerCase());
         else if (person.name) uniqueAttendees.add(person.name.toLowerCase());
       });
@@ -331,24 +331,24 @@ export default function ReportsPageContent() {
     }, {});
 
     const topAssigneeList = Object.entries(topAssignees)
-      .sort((a, b) => b[1] - a[1])
+      .sort((a: any, b: any) => b[1] - a[1])
       .slice(0, 5);
 
     const recentMeetings = [...meetingsInRange]
-      .sort((a, b) => {
+      .sort((a: any, b: any) => {
         const dateA = toDateValue(a.lastActivityAt)?.getTime() || 0;
         const dateB = toDateValue(b.lastActivityAt)?.getTime() || 0;
         return dateB - dateA;
       })
       .slice(0, 5);
 
-    const overdueTasks = tasksInRange.filter((task) => {
+    const overdueTasks = tasksInRange.filter((task: any) => {
       if (!task.dueAt) return false;
       const dueDate = toDateValue(task.dueAt);
       return dueDate ? dueDate < now && normalizeStatus(task.status) !== "done" : false;
     });
 
-    const dueSoonTasks = tasksInRange.filter((task) => {
+    const dueSoonTasks = tasksInRange.filter((task: any) => {
       if (!task.dueAt) return false;
       const dueDate = toDateValue(task.dueAt);
       if (!dueDate) return false;
@@ -397,19 +397,19 @@ export default function ReportsPageContent() {
     ).length;
 
     const bestMeetings = meetingsInRange
-      .map((meeting) => {
+      .map((meeting: any) => {
         const tasksCount = meeting.extractedTasks?.length || 0;
         const completedCount =
-          meeting.extractedTasks?.filter((task) => (task.status || "todo") === "done").length || 0;
+          meeting.extractedTasks?.filter((task: any) => (task.status || "todo") === "done").length || 0;
         const completionRate = tasksCount > 0 ? Math.round((completedCount / tasksCount) * 100) : 0;
         return { meeting, completionRate, tasksCount };
       })
-      .sort((a, b) => b.completionRate - a.completionRate)
+      .sort((a: any, b: any) => b.completionRate - a.completionRate)
       .slice(0, 5);
 
     const sentimentLeaders = meetingsInRange
-      .filter((meeting) => meeting.overallSentiment != null)
-      .sort((a, b) => (b.overallSentiment || 0) - (a.overallSentiment || 0))
+      .filter((meeting: any) => meeting.overallSentiment != null)
+      .sort((a: any, b: any) => (b.overallSentiment || 0) - (a.overallSentiment || 0))
       .slice(0, 5);
 
     return {
@@ -455,7 +455,7 @@ export default function ReportsPageContent() {
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
-            {(Object.keys(rangeLabel) as ReportRange[]).map((key) => (
+            {(Object.keys(rangeLabel) as ReportRange[]).map((key: ReportRange) => (
               <DropdownMenuItem key={key} onClick={() => setRange(key)}>
                 {rangeLabel[key]}
               </DropdownMenuItem>
@@ -651,7 +651,7 @@ export default function ReportsPageContent() {
               ) : metrics.recentMeetings.length === 0 ? (
                 <p className="text-sm text-muted-foreground">No meetings yet.</p>
               ) : (
-                metrics.recentMeetings.map((meeting) => {
+                metrics.recentMeetings.map((meeting: any) => {
                   const date = toDateValue(meeting.lastActivityAt);
                   return (
                     <Link
@@ -774,7 +774,7 @@ export default function ReportsPageContent() {
               ) : metrics.sentimentLeaders.length === 0 ? (
                 <p className="text-sm text-muted-foreground">No sentiment data yet.</p>
               ) : (
-                metrics.sentimentLeaders.map((meeting) => (
+                metrics.sentimentLeaders.map((meeting: any) => (
                   <Link
                     key={meeting.id}
                     href={`/meetings/${meeting.id}`}
@@ -818,4 +818,7 @@ export default function ReportsPageContent() {
     </div>
   );
 }
+
+
+
 

@@ -1,9 +1,9 @@
-import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getSessionUserId } from "@/lib/server-auth";
 import { findUserById, updateUserById } from "@/lib/db/users";
 import { generateResearchBrief } from "@/ai/flows/generate-research-brief-flow";
 import { generateTaskAssistance } from "@/ai/flows/generate-task-assistance-flow";
+import { apiError, apiSuccess, mapApiError, parseJsonBody } from "@/lib/api-route";
 
 const BRIEF_LIMIT_PER_MONTH = 10;
 
@@ -48,50 +48,45 @@ const getBriefQuota = (
 };
 
 export async function GET() {
-  const userId = await getSessionUserId();
-  if (!userId) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  try {
+    const userId = await getSessionUserId();
+    if (!userId) {
+      return apiError(401, "unauthorized", "Unauthorized");
+    }
 
-  const user = await findUserById(userId);
-  if (!user) {
-    return NextResponse.json({ error: "User not found." }, { status: 404 });
-  }
+    const user = await findUserById(userId);
+    if (!user) {
+      return apiError(404, "not_found", "User not found.");
+    }
 
-  return NextResponse.json({ briefQuota: getBriefQuota(user) });
+    return apiSuccess({ briefQuota: getBriefQuota(user) });
+  } catch (error) {
+    return mapApiError(error, "Failed to fetch task insights quota.");
+  }
 }
 
 export async function POST(request: Request) {
-  const userId = await getSessionUserId();
-  if (!userId) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
-  const body = await request.json().catch(() => null);
-  const parsed = requestSchema.safeParse(body);
-  if (!parsed.success) {
-    return NextResponse.json({ error: "Invalid request payload." }, { status: 400 });
-  }
-
-  const user = await findUserById(userId);
-  if (!user) {
-    return NextResponse.json({ error: "User not found." }, { status: 404 });
-  }
-
-  const payload = parsed.data;
-  const quota = getBriefQuota(user);
-
-  if (payload.mode === "brief") {
-    if (quota.remaining <= 0) {
-      return NextResponse.json(
-        {
-          error: "Monthly AI Brief limit reached (10/10).",
-          briefQuota: quota,
-        },
-        { status: 429 }
-      );
+  try {
+    const userId = await getSessionUserId();
+    if (!userId) {
+      return apiError(401, "unauthorized", "Unauthorized");
     }
-    try {
+
+    const payload = await parseJsonBody(request, requestSchema, "Invalid request payload.");
+    const user = await findUserById(userId);
+    if (!user) {
+      return apiError(404, "not_found", "User not found.");
+    }
+
+    const quota = getBriefQuota(user);
+
+    if (payload.mode === "brief") {
+      if (quota.remaining <= 0) {
+        return apiError(429, "quota_exceeded", "Monthly AI Brief limit reached (10/10).", {
+          briefQuota: quota,
+        });
+      }
+
       const brief = await generateResearchBrief({
         taskTitle: payload.taskTitle,
         taskDescription: payload.taskDescription,
@@ -107,7 +102,7 @@ export async function POST(request: Request) {
         briefGenerationCount: nextUsed,
       });
 
-      return NextResponse.json({
+      return apiSuccess({
         mode: "brief",
         researchBrief: brief.researchBrief,
         briefQuota: {
@@ -116,30 +111,19 @@ export async function POST(request: Request) {
           remaining: Math.max(0, BRIEF_LIMIT_PER_MONTH - nextUsed),
         },
       });
-    } catch (error) {
-      console.error("Failed to generate task brief:", error);
-      return NextResponse.json(
-        { error: "Failed to generate brief. Please try again." },
-        { status: 500 }
-      );
     }
-  }
-  try {
+
     const assistance = await generateTaskAssistance({
       taskTitle: payload.taskTitle,
       taskDescription: payload.taskDescription,
     });
 
-    return NextResponse.json({
+    return apiSuccess({
       mode: "assistance",
       assistanceMarkdown: assistance.assistanceMarkdown,
       briefQuota: quota,
     });
   } catch (error) {
-    console.error("Failed to generate task assistance:", error);
-    return NextResponse.json(
-      { error: "Failed to generate assistance. Please try again." },
-      { status: 500 }
-    );
+    return mapApiError(error, "Failed to generate task insight.");
   }
 }

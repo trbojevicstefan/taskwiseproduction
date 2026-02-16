@@ -65,7 +65,7 @@ const PasteActionDialog = () => {
                  const meetingWithCorrectTasks = {
                      ...meeting,
                      extractedTasks: result.tasks,
-                     allTaskLevels: result.allTaskLevels,
+                     allTaskLevels: result.allTaskLevels as any,
                  };
                  
                  const newMeeting = await createNewMeeting(meetingWithCorrectTasks);
@@ -75,15 +75,15 @@ const PasteActionDialog = () => {
                     const newChat = await createNewChatSession({
                         title: `Chat about "${newMeeting.title}"`,
                         sourceMeetingId: newMeeting.id,
-                        initialTasks: newMeeting.extractedTasks, // Use tasks from the new meeting
+                        initialTasks: newMeeting.extractedTasks as any, // Use tasks from the new meeting
                         initialPeople: newMeeting.attendees,
-                        allTaskLevels: result.allTaskLevels,
+                        allTaskLevels: result.allTaskLevels as any,
                     });
                     const newPlan = await createNewPlanningSession(
                         newMeeting.summary,
-                        newMeeting.extractedTasks, // Use tasks from the new meeting
+                        newMeeting.extractedTasks as any, // Use tasks from the new meeting
                         `Plan from "${newMeeting.title}"`,
-                        result.allTaskLevels,
+                        result.allTaskLevels as any,
                         newMeeting.id
                     );
                     

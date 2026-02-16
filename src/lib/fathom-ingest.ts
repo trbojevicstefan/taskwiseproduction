@@ -13,14 +13,9 @@ import type { DbUser } from "@/lib/db/users";
 import {
   applyCompletionTargets,
   buildCompletionSuggestions,
-  filterTasksForSessionSync,
   mergeCompletionSuggestions,
 } from "@/lib/task-completion";
-import { buildIdQuery } from "@/lib/mongo-id";
-import { upsertPeopleFromAttendees } from "@/lib/people-sync";
-import { syncTasksForSource } from "@/lib/task-sync";
-import { ensureDefaultBoard } from "@/lib/boards";
-import { ensureBoardItemsForTasks } from "@/lib/board-items";
+import { runMeetingIngestionCommand } from "@/lib/services/meeting-ingestion-command";
 import { postMeetingAutomationToSlack } from "@/lib/slack-automation";
 
 type FathomIngestResult =
@@ -29,7 +24,7 @@ type FathomIngestResult =
   | { status: "no_transcript" };
 
 const pickFirst = (...values: Array<string | null | undefined>) =>
-  values.find((value) => value && value.trim()) || null;
+  values.find((value: any) => value && value.trim()) || null;
 
 const toDateOrNull = (value: any) => {
   if (!value) return null;
@@ -137,7 +132,7 @@ const applyAutoApprovalFlags = (
   minMatchRatio: number
 ) => {
   const walk = (items: ExtractedTaskSchema[]): ExtractedTaskSchema[] =>
-    items.map((task) => {
+    items.map((task: any) => {
       const nextTask = {
         ...task,
         subtasks: task.subtasks ? walk(task.subtasks) : task.subtasks,
@@ -163,12 +158,11 @@ export const ingestFathomMeeting = async ({
 }): Promise<FathomIngestResult> => {
   const db = await getDb();
   const userId = user._id.toString();
-  const userIdQuery = buildIdQuery(userId);
   const recordingIdHash = hashFathomRecordingId(userId, recordingId);
   const existing = await db
-    .collection<any>("meetings")
+    .collection("meetings")
     .findOne({
-      userId: userIdQuery,
+      userId,
       $or: [{ recordingIdHash }, { recordingId }],
     });
   if (existing) {
@@ -264,7 +258,7 @@ export const ingestFathomMeeting = async ({
       updateOps.$unset = { recordingId: "" };
     }
 
-    await db.collection<any>("meetings").updateOne(
+    await db.collection("meetings").updateOne(
       { _id: existing._id },
       updateOps
     );
@@ -310,18 +304,18 @@ export const ingestFathomMeeting = async ({
       );
       let sanitizedTaskLevels = sanitizeLevels(allTaskLevels);
 
-      const attendees = (analysisResult.attendees || []).map((person) => ({
+      const attendees = (analysisResult.attendees || []).map((person: any) => ({
         ...person,
         role: "attendee" as const,
       }));
-      const mentioned = (analysisResult.mentionedPeople || []).map((person) => ({
+      const mentioned = (analysisResult.mentionedPeople || []).map((person: any) => ({
         ...person,
         role: "mentioned" as const,
       }));
       const combinedPeople = [...attendees, ...mentioned];
       const uniquePeople = Array.from(
         new Map(
-          combinedPeople.map((person) => [person.name.toLowerCase(), person])
+          combinedPeople.map((person: any) => [person.name.toLowerCase(), person])
         ).values()
       );
 
@@ -332,7 +326,7 @@ export const ingestFathomMeeting = async ({
 
       const shouldAutoApprove = Boolean(user.autoApproveCompletedTasks);
       if (shouldAutoApprove && completionSuggestions.length) {
-        const autoApproveSuggestions = completionSuggestions.filter((task) =>
+        const autoApproveSuggestions = completionSuggestions.filter((task: any) =>
           shouldAutoApproveSuggestion(task, completionMatchThreshold)
         );
         if (autoApproveSuggestions.length) {
@@ -448,9 +442,9 @@ export const ingestFathomMeeting = async ({
       } else {
         await db.collection("planningSessions").updateMany(
           {
-            userId: userIdQuery,
+            userId,
             $or: [
-              { _id: buildIdQuery(planningSessionId) },
+              { _id: planningSessionId },
               { id: planningSessionId },
             ],
           },
@@ -469,48 +463,22 @@ export const ingestFathomMeeting = async ({
         );
       }
 
-      await db.collection<any>("meetings").updateOne(
+      await db.collection("meetings").updateOne(
         { _id: existing._id },
         { $set: meetingUpdate }
       );
 
-      if (uniquePeople.length) {
-        try {
-          await upsertPeopleFromAttendees({
-            db,
-            userId,
-            attendees: uniquePeople,
-            sourceSessionId: existing._id.toString(),
-          });
-        } catch (error) {
-          console.error("Failed to upsert people from Fathom attendees:", error);
-        }
-      }
-
-      const syncTasks = filterTasksForSessionSync(
-        finalizedTasks,
-        "meeting",
-        existing._id.toString()
-      );
-      await syncTasksForSource(db, syncTasks, {
+      await runMeetingIngestionCommand(db, {
+        mode: "flagged-event",
         userId,
-        workspaceId,
-        sourceSessionId: existing._id.toString(),
-        sourceSessionType: "meeting",
-        sourceSessionName: meetingTitle,
-        origin: "meeting",
-        taskState: "active",
-      });
-
-      if (workspaceId) {
-        const defaultBoard = await ensureDefaultBoard(db, userId, workspaceId);
-        await ensureBoardItemsForTasks(db, {
-          userId,
+        payload: {
+          meetingId: String(existing._id),
           workspaceId,
-          boardId: defaultBoard._id,
-          tasks: syncTasks,
-        });
-      }
+          title: meetingTitle,
+          attendees: uniquePeople,
+          extractedTasks: finalizedTasks,
+        },
+      });
 
       // Now that tasks are synced and board items exist, attach canonical ids to chat session suggested tasks
       if (chatSessionId) {
@@ -519,10 +487,9 @@ export const ingestFathomMeeting = async ({
             .map((t: any) => t.id)
             .filter(Boolean);
           if (sourceIds.length) {
-            const userIdQuery2 = buildIdQuery(userId);
             const tasks = await db
               .collection("tasks")
-              .find({ userId: userIdQuery2, sourceTaskId: { $in: sourceIds } })
+              .find({ userId, sourceTaskId: { $in: sourceIds } })
               .project({ _id: 1, sourceTaskId: 1 })
               .toArray();
             const map = new Map(tasks.map((r: any) => [String(r.sourceTaskId), String(r._id)]));
@@ -532,8 +499,8 @@ export const ingestFathomMeeting = async ({
             }));
             await db.collection("chatSessions").updateMany(
               {
-                userId: userIdQuery,
-                $or: [{ _id: buildIdQuery(chatSessionId) }, { id: chatSessionId }],
+                userId,
+                $or: [{ _id: chatSessionId }, { id: chatSessionId }],
               },
               {
                 $set: {
@@ -556,34 +523,22 @@ export const ingestFathomMeeting = async ({
 
       await postMeetingAutomationToSlack({
         user,
-        meetingTitle,
+        meetingTitle: meetingTitle || "Meeting",
         meetingSummary,
         tasks: finalizedTasks,
       });
     } else if (Array.isArray(existing.extractedTasks) && existing.extractedTasks.length) {
-      const syncTasks = filterTasksForSessionSync(
-        existing.extractedTasks as ExtractedTaskSchema[],
-        "meeting",
-        existing._id.toString()
-      );
-      await syncTasksForSource(db, syncTasks, {
+      await runMeetingIngestionCommand(db, {
+        mode: "flagged-event",
         userId,
-        workspaceId,
-        sourceSessionId: existing._id.toString(),
-        sourceSessionType: "meeting",
-        sourceSessionName: existing.title || "Meeting",
-        origin: "meeting",
-        taskState: "active",
-      });
-      if (workspaceId) {
-        const defaultBoard = await ensureDefaultBoard(db, userId, workspaceId);
-        await ensureBoardItemsForTasks(db, {
-          userId,
+        payload: {
+          meetingId: String(existing._id),
           workspaceId,
-          boardId: defaultBoard._id,
-          tasks: syncTasks,
-        });
-      }
+          title: existing.title || "Meeting",
+          attendees: [],
+          extractedTasks: existing.extractedTasks as ExtractedTaskSchema[],
+        },
+      });
     }
     return { status: "duplicate", meetingId: existing._id.toString() };
   }
@@ -624,18 +579,18 @@ export const ingestFathomMeeting = async ({
   );
   let sanitizedTaskLevels = sanitizeLevels(allTaskLevels);
 
-  const attendees = (analysisResult.attendees || []).map((person) => ({
+  const attendees = (analysisResult.attendees || []).map((person: any) => ({
     ...person,
     role: "attendee" as const,
   }));
-  const mentioned = (analysisResult.mentionedPeople || []).map((person) => ({
+  const mentioned = (analysisResult.mentionedPeople || []).map((person: any) => ({
     ...person,
     role: "mentioned" as const,
   }));
   const combinedPeople = [...attendees, ...mentioned];
   const uniquePeople = Array.from(
     new Map(
-      combinedPeople.map((person) => [person.name.toLowerCase(), person])
+      combinedPeople.map((person: any) => [person.name.toLowerCase(), person])
     ).values()
   );
 
@@ -658,7 +613,7 @@ export const ingestFathomMeeting = async ({
 
   const shouldAutoApprove = Boolean(user.autoApproveCompletedTasks);
   if (shouldAutoApprove && completionSuggestions.length) {
-    const autoApproveSuggestions = completionSuggestions.filter((task) =>
+    const autoApproveSuggestions = completionSuggestions.filter((task: any) =>
       shouldAutoApproveSuggestion(task, completionMatchThreshold)
     );
     if (autoApproveSuggestions.length) {
@@ -815,10 +770,9 @@ export const ingestFathomMeeting = async ({
   // Ensure idempotent insertion: upsert by userId + recordingIdHash to avoid duplicates
   if (meeting.recordingIdHash) {
     try {
-      const userIdQuery2 = buildIdQuery(userId);
-      const filter = { userId: userIdQuery2, recordingIdHash: meeting.recordingIdHash };
+      const filter = { userId, recordingIdHash: meeting.recordingIdHash };
       const { _id: insertId } = meeting;
-      const setFields = { ...meeting };
+      const setFields: Record<string, any> = { ...meeting };
       delete setFields._id;
       // Avoid conflicting updates when using $setOnInsert for createdAt
       delete setFields.createdAt;
@@ -836,50 +790,24 @@ export const ingestFathomMeeting = async ({
     await db.collection("meetings").insertOne(meeting);
   }
   await db.collection("planningSessions").insertOne(planningSession);
-  if (uniquePeople.length) {
-    try {
-      await upsertPeopleFromAttendees({
-        db,
-        userId,
-        attendees: uniquePeople,
-        sourceSessionId: meetingId,
-      });
-    } catch (error) {
-      console.error("Failed to upsert people from Fathom attendees:", error);
-    }
-  }
-  const syncTasks = filterTasksForSessionSync(
-    finalizedTasks,
-    "meeting",
-    meetingId
-  );
-  await syncTasksForSource(db, syncTasks, {
+  await runMeetingIngestionCommand(db, {
+    mode: "flagged-event",
     userId,
-    workspaceId,
-    sourceSessionId: meetingId,
-    sourceSessionType: "meeting",
-    sourceSessionName: meetingTitle,
-    origin: "meeting",
-    taskState: "active",
-  });
-
-  if (workspaceId) {
-    const defaultBoard = await ensureDefaultBoard(db, userId, workspaceId);
-    await ensureBoardItemsForTasks(db, {
-      userId,
+    payload: {
+      meetingId,
       workspaceId,
-      boardId: defaultBoard._id,
-      tasks: syncTasks,
-    });
-  }
+      title: meetingTitle,
+      attendees: uniquePeople,
+      extractedTasks: finalizedTasks,
+    },
+  });
 
   await postMeetingAutomationToSlack({
     user,
-    meetingTitle,
+    meetingTitle: meetingTitle || "Meeting",
     meetingSummary,
     tasks: finalizedTasks,
   });
 
   return { status: "created", meetingId };
 };
-

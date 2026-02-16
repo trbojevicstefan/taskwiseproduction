@@ -6,20 +6,27 @@ import { cookies } from "next/headers";
 import { findUserByEmail, findUserById, verifyUserPassword, createUser, updateUserById } from "@/lib/db/users";
 import { GOOGLE_INTEGRATION_USER_COOKIE } from "@/lib/integration-cookies";
 
+type WorkspaceInfo = { id: string; name: string };
+
 const ensureWorkspaceId = async (user: {
   _id: { toString: () => string };
   name?: string | null;
   workspace?: { id?: string; name?: string };
-}) => {
-  if (user.workspace?.id) return user.workspace;
+}): Promise<WorkspaceInfo> => {
+  if (user.workspace?.id) {
+    return {
+      id: user.workspace.id,
+      name: user.workspace.name || `${user.name || "Workspace"}'s Workspace`,
+    };
+  }
   const workspaceName =
     user.workspace?.name || `${user.name || "Workspace"}'s Workspace`;
-  const workspace = { id: randomUUID(), name: workspaceName };
+  const workspace: WorkspaceInfo = { id: randomUUID(), name: workspaceName };
   await updateUserById(user._id.toString(), { workspace });
   return workspace;
 };
 
-const providers = [
+const providers: any[] = [
   CredentialsProvider({
     name: "Credentials",
     credentials: {

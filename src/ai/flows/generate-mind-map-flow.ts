@@ -23,13 +23,25 @@ const BaseTaskSchema = z.object({
   dueAt: z.string().optional().describe('The due date and time for the item in ISO 8601 format (YYYY-MM-DDTHH:mm:ss.sssZ), if mentioned.'),
 });
 
-type TaskType = z.infer<typeof BaseTaskSchema> & {
+type TaskType = {
+  id?: string;
+  title: string;
+  description?: string;
+  priority?: "high" | "medium" | "low";
+  dueAt?: string;
   subtasks?: TaskType[];
 };
 
-const TaskSchema: z.ZodType<TaskType> = BaseTaskSchema.extend({
-  subtasks: z.array(z.lazy(() => TaskSchema)).optional().describe('A list of sub-topics or sub-items related to this main topic. Only create sub-items if they represent distinct, meaningful steps.'),
-});
+const TaskSchema: z.ZodType<TaskType> = z.lazy(() =>
+  BaseTaskSchema.extend({
+    subtasks: z
+      .array(TaskSchema)
+      .optional()
+      .describe(
+        "A list of sub-topics or sub-items related to this main topic. Only create sub-items if they represent distinct, meaningful steps."
+      ),
+  })
+);
 
 const GenerateMindMapOutputSchema = z.object({
   rootTask: TaskSchema.describe('The single root node of the mind map, containing the entire nested structure of topics and sub-items.'),
@@ -89,7 +101,7 @@ const generateMindMapFlow = ai.defineFlow(
     const rootTask = normalizeAiTasks([rawObject.rootTask], 'Root topic')[0];
 
     if (rootTask) {
-        const filteredRoot = filterTaskRecursive(rootTask);
+        const filteredRoot = filterTaskRecursive(rootTask as any);
         if (filteredRoot) {
             return { rootTask: filteredRoot as TaskType };
         }

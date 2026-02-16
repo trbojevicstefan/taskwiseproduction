@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
+import { apiError } from "@/lib/api-route";
 import { getDb } from "@/lib/db";
 import { getSessionUserId } from "@/lib/server-auth";
-import { buildIdQuery } from "@/lib/mongo-id";
 
 const serializeStatus = (status: any) => ({
   ...status,
@@ -24,14 +24,11 @@ export async function PATCH(
   const { workspaceId, boardId, statusId } = await Promise.resolve(params);
   const userId = await getSessionUserId();
   if (!userId) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return apiError(401, "request_error", "Unauthorized");
   }
 
   if (!workspaceId || !boardId || !statusId) {
-    return NextResponse.json(
-      { error: "Workspace ID, board ID, and status ID are required." },
-      { status: 400 }
-    );
+    return apiError(400, "request_error", "Workspace ID, board ID, and status ID are required.");
   }
 
   const body = await request.json().catch(() => ({}));
@@ -40,7 +37,7 @@ export async function PATCH(
   if (typeof body.label === "string") {
     const label = body.label.trim();
     if (!label) {
-      return NextResponse.json({ error: "Status label is required." }, { status: 400 });
+      return apiError(400, "request_error", "Status label is required.");
     }
     update.label = label;
   }
@@ -67,12 +64,12 @@ export async function PATCH(
   }
 
   if (Object.keys(update).length === 1) {
-    return NextResponse.json({ error: "No updates provided." }, { status: 400 });
+    return apiError(400, "request_error", "No updates provided.");
   }
 
   const db = await getDb();
-  const userIdQuery = buildIdQuery(userId);
-  const statusIdQuery = buildIdQuery(statusId);
+  const userIdQuery = userId;
+  const statusIdQuery = statusId;
   const filter = {
     userId: userIdQuery,
     workspaceId,
@@ -80,13 +77,13 @@ export async function PATCH(
     $or: [{ _id: statusIdQuery }, { id: statusId }],
   };
 
-  const existing = await db.collection<any>("boardStatuses").findOne(filter);
+  const existing = await db.collection("boardStatuses").findOne(filter);
   if (!existing) {
-    return NextResponse.json({ error: "Status not found." }, { status: 404 });
+    return apiError(404, "request_error", "Status not found.");
   }
 
-  await db.collection<any>("boardStatuses").updateOne(filter, { $set: update });
-  const status = await db.collection<any>("boardStatuses").findOne(filter);
+  await db.collection("boardStatuses").updateOne(filter, { $set: update });
+  const status = await db.collection("boardStatuses").findOne(filter);
 
   return NextResponse.json(serializeStatus(status));
 }
@@ -104,19 +101,16 @@ export async function DELETE(
   const { workspaceId, boardId, statusId } = await Promise.resolve(params);
   const userId = await getSessionUserId();
   if (!userId) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return apiError(401, "request_error", "Unauthorized");
   }
 
   if (!workspaceId || !boardId || !statusId) {
-    return NextResponse.json(
-      { error: "Workspace ID, board ID, and status ID are required." },
-      { status: 400 }
-    );
+    return apiError(400, "request_error", "Workspace ID, board ID, and status ID are required.");
   }
 
   const db = await getDb();
-  const userIdQuery = buildIdQuery(userId);
-  const statusIdQuery = buildIdQuery(statusId);
+  const userIdQuery = userId;
+  const statusIdQuery = statusId;
   const filter = {
     userId: userIdQuery,
     workspaceId,
@@ -124,7 +118,7 @@ export async function DELETE(
     $or: [{ _id: statusIdQuery }, { id: statusId }],
   };
 
-  const existingTask = await db.collection<any>("boardItems").findOne({
+  const existingTask = await db.collection("boardItems").findOne({
     userId: userIdQuery,
     workspaceId,
     boardId,
@@ -132,16 +126,16 @@ export async function DELETE(
   });
 
   if (existingTask) {
-    return NextResponse.json(
-      { error: "Status is still used by tasks." },
-      { status: 400 }
-    );
+    return apiError(400, "request_error", "Status is still used by tasks.");
   }
 
-  const result = await db.collection<any>("boardStatuses").deleteOne(filter);
+  const result = await db.collection("boardStatuses").deleteOne(filter);
   if (!result.deletedCount) {
-    return NextResponse.json({ error: "Status not found." }, { status: 404 });
+    return apiError(404, "request_error", "Status not found.");
   }
 
   return NextResponse.json({ ok: true });
 }
+
+
+

@@ -1,159 +1,143 @@
-import { NextResponse } from "next/server";
-import { randomUUID } from "crypto";
-import { getSessionUserId } from "@/lib/server-auth";
-import { findUserById } from "@/lib/db/users";
+import { ApiRouteError, apiError, apiSuccess, mapApiError } from "@/lib/api-route";
 import { getDb } from "@/lib/db";
-import { getValidSlackToken } from "@/lib/slack";
+import { runSlackUsersSyncJob } from "@/lib/jobs/handlers/slack-users-sync-job";
+import { enqueueJob } from "@/lib/jobs/store";
+import { kickJobWorker } from "@/lib/jobs/worker";
+import { recordRouteMetric } from "@/lib/observability-metrics";
+import { createLogger, getRequestCorrelationId } from "@/lib/observability";
+import { getSessionUserId } from "@/lib/server-auth";
+import { z } from "zod";
 
-type SlackMember = {
-  id: string;
-  name: string;
-  realName: string;
-  email?: string;
-  image?: string;
-  title?: string;
-};
+const bodySchema = z
+  .object({
+    selectedIds: z.array(z.string()).optional(),
+    sync: z.boolean().optional(),
+  })
+  .partial()
+  .optional();
 
-const fetchSlackMembers = async (accessToken: string): Promise<SlackMember[]> => {
-  const members: SlackMember[] = [];
-  let cursor = "";
-
-  do {
-    const params = new URLSearchParams({ limit: "200" });
-    if (cursor) params.set("cursor", cursor);
-    const response = await fetch(
-      `https://slack.com/api/users.list?${params.toString()}`,
-      { headers: { Authorization: `Bearer ${accessToken}` } }
-    );
-    const payload = (await response.json()) as {
-      ok: boolean;
-      error?: string;
-      members?: Array<{
-        id: string;
-        deleted?: boolean;
-        is_bot?: boolean;
-        is_app_user?: boolean;
-        name?: string;
-        real_name?: string;
-        profile?: { email?: string; image_192?: string; title?: string };
-      }>;
-      response_metadata?: { next_cursor?: string };
-    };
-
-    if (!payload.ok) {
-      throw new Error(payload.error || "Slack API error.");
-    }
-
-    const pageMembers =
-      payload.members
-        ?.filter(
-          (member) =>
-            !member.deleted &&
-            !member.is_bot &&
-            !member.is_app_user &&
-            member.profile?.email
-        )
-        .map((member) => ({
-          id: member.id,
-          name: member.real_name || member.name || "Slack User",
-          realName: member.real_name || member.name || "Slack User",
-          email: member.profile?.email,
-          image: member.profile?.image_192,
-          title: member.profile?.title,
-        })) || [];
-
-    members.push(...pageMembers);
-    cursor = payload.response_metadata?.next_cursor || "";
-  } while (cursor);
-
-  return members;
-};
+const ROUTE = "/api/slack/users/sync";
 
 export async function POST(request: Request) {
-  const userId = await getSessionUserId();
-  if (!userId) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
-  const user = await findUserById(userId);
-  if (!user?.slackTeamId) {
-    return NextResponse.json(
-      { error: "Slack is not connected." },
-      { status: 400 }
-    );
-  }
+  const correlationId = getRequestCorrelationId(request);
+  const logger = createLogger({
+    scope: "api.route",
+    route: ROUTE,
+    method: "POST",
+    correlationId,
+  });
+  const startedAtMs = Date.now();
+  logger.info("api.request.started");
+  let metricUserId: string | null = null;
+  const emitMetric = (
+    statusCode: number,
+    outcome: "success" | "error",
+    metadata?: Record<string, unknown>
+  ) => {
+    void recordRouteMetric({
+      correlationId,
+      userId: metricUserId,
+      route: ROUTE,
+      method: "POST",
+      statusCode,
+      durationMs: Date.now() - startedAtMs,
+      outcome,
+      metadata,
+    });
+  };
 
   try {
-    let selectedIds: Set<string> | null = null;
-    try {
-      const payload = await request.json();
-      if (Array.isArray(payload?.selectedIds)) {
-        selectedIds = new Set(
-          payload.selectedIds.filter((id: unknown) => typeof id === "string")
-        );
-      }
-    } catch (error) {
-      console.warn("Slack sync request body not provided or invalid:", error);
-    }
-
-    const accessToken = await getValidSlackToken(user.slackTeamId);
-    const members = await fetchSlackMembers(accessToken);
-    const membersToSync = selectedIds
-      ? members.filter((member) => selectedIds?.has(member.id))
-      : members;
-    const db = await getDb();
-
-    let created = 0;
-    let updated = 0;
-
-    for (const member of membersToSync) {
-      if (!member.email) continue;
-      const existing = await db.collection<any>("people").findOne({
-        userId,
-        email: member.email,
+    const userId = await getSessionUserId();
+    if (!userId) {
+      emitMetric(401, "error", { reason: "unauthorized" });
+      logger.warn("api.request.unauthorized", {
+        durationMs: Date.now() - startedAtMs,
       });
+      return apiError(401, "unauthorized", "Unauthorized", undefined, {
+        correlationId,
+      });
+    }
+    metricUserId = userId;
 
-      if (existing) {
-        await db.collection<any>("people").updateOne(
-          { _id: existing._id, userId },
-          {
-            $set: {
-              slackId: member.id,
-              ...(existing.name ? {} : { name: member.realName }),
-              ...(existing.title ? {} : { title: member.title || null }),
-              ...(existing.avatarUrl ? {} : { avatarUrl: member.image || null }),
-              lastSeenAt: new Date(),
-            },
-          }
-        );
-        updated += 1;
-      } else {
-        const now = new Date();
-        await db.collection<any>("people").insertOne({
-          _id: randomUUID(),
-          userId,
-          name: member.realName,
-          email: member.email,
-          title: member.title || null,
-          avatarUrl: member.image || null,
-          slackId: member.id,
-          firefliesId: null,
-          phantomBusterId: null,
-          aliases: [],
-          sourceSessionIds: [],
-          createdAt: now,
-          lastSeenAt: now,
-        });
-        created += 1;
-      }
+    const rawBody = await request
+      .json()
+      .catch(() => ({}));
+    const parsedBody = bodySchema.safeParse(rawBody);
+    if (!parsedBody.success) {
+      throw new ApiRouteError(
+        400,
+        "invalid_payload",
+        "Invalid request payload.",
+        parsedBody.error.flatten()
+      );
     }
 
-    return NextResponse.json({ success: true, created, updated });
-  } catch (error) {
-    console.error("Slack user sync failed:", error);
-    return NextResponse.json(
-      { error: "Failed to sync Slack users." },
-      { status: 500 }
+    const body = parsedBody.data;
+    const runSync = new URL(request.url).searchParams.get("sync") === "1" || Boolean(body?.sync);
+
+    if (runSync) {
+      const result = await runSlackUsersSyncJob({
+        userId,
+        selectedIds: body?.selectedIds,
+        correlationId,
+        logger,
+      });
+      logger.info("api.request.succeeded", {
+        execution: "sync",
+        status: 200,
+        durationMs: Date.now() - startedAtMs,
+      });
+      emitMetric(200, "success", {
+        execution: "sync",
+        selectedCount: body?.selectedIds?.length || 0,
+      });
+      return apiSuccess(result, { correlationId });
+    }
+
+    const db = await getDb();
+    const job = await enqueueJob(db, {
+      type: "slack-users-sync",
+      userId,
+      correlationId,
+      payload: {
+        selectedIds: body?.selectedIds,
+      },
+    });
+    void kickJobWorker();
+
+    const response = apiSuccess(
+      {
+        jobId: job._id,
+        status: job.status,
+      },
+      { status: 202, correlationId }
     );
+    logger.info("api.request.succeeded", {
+      execution: "queued",
+      status: 202,
+      durationMs: Date.now() - startedAtMs,
+      jobId: job._id,
+      jobType: job.type,
+      selectedCount: body?.selectedIds?.length || 0,
+    });
+    emitMetric(202, "success", {
+      execution: "queued",
+      jobId: job._id,
+      jobType: job.type,
+      selectedCount: body?.selectedIds?.length || 0,
+    });
+    return response;
+  } catch (error) {
+    const statusCode = error instanceof ApiRouteError ? error.status : 500;
+    emitMetric(statusCode, "error");
+    return mapApiError(error, "Failed to sync Slack users.", {
+      correlationId,
+      logger,
+      context: {
+        route: ROUTE,
+        method: "POST",
+        durationMs: Date.now() - startedAtMs,
+      },
+    });
   }
 }

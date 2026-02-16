@@ -157,7 +157,7 @@ export default function SidebarNav() {
   const allHistoryItems = useMemo(() => {
     return [
       ...chatSessions.map(s => ({...s, type: 'chat', icon: s.sourceMeetingId ? Video : MessageCircleIcon})),
-    ].sort((a,b) => {
+    ].sort((a: any, b: any) => {
         const timeA = a.lastActivityAt?.toMillis ? a.lastActivityAt.toMillis() : (a.lastActivityAt ? new Date(a.lastActivityAt).getTime() : 0);
         const timeB = b.lastActivityAt?.toMillis ? b.lastActivityAt.toMillis() : (b.lastActivityAt ? new Date(b.lastActivityAt).getTime() : 0);
         return timeB - timeA;
@@ -469,7 +469,7 @@ export default function SidebarNav() {
       <ScrollArea className="flex-grow">
       <div className="p-2 space-y-1">
         <SidebarMenu>
-            {mainNavItems.map((item) => {
+            {mainNavItems.map((item: any) => {
               const isActive = pathname.startsWith(item.href);
               return (
               <SidebarMenuItem key={item.href}>
@@ -576,3 +576,5 @@ export default function SidebarNav() {
     </nav>
   );
 }
+
+

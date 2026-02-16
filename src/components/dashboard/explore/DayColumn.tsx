@@ -118,7 +118,7 @@ const DayColumn: React.FC<DayColumnProps> = ({
                                 isExpanded={isActive}
                             />
                         ))}
-                        {day.calendarEvents.map((event) => (
+                        {day.calendarEvents.map((event: any) => (
                             <CalendarEventCard key={event.id} event={event} />
                         ))}
                     </div>
@@ -131,3 +131,4 @@ const DayColumn: React.FC<DayColumnProps> = ({
 };
 
 export default DayColumn;
+

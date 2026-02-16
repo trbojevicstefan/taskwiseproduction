@@ -158,6 +158,10 @@ export default function SettingsPageContent() {
   const [isSaving, setIsSaving] = useState(false);
   const [workspaceName, setWorkspaceName] = useState('');
   const [isSavingWorkspace, setIsSavingWorkspace] = useState(false);
+  const [inviteEmail, setInviteEmail] = useState("");
+  const [workspaceInviteLink, setWorkspaceInviteLink] = useState("");
+  const [isCreatingWorkspaceInvite, setIsCreatingWorkspaceInvite] = useState(false);
+  const [hasCopiedWorkspaceInvite, setHasCopiedWorkspaceInvite] = useState(false);
   const [hasCopied, setHasCopied] = useState(false);
   const [autoApproveCompleted, setAutoApproveCompleted] = useState(false);
   const [completionMatchThreshold, setCompletionMatchThreshold] = useState(60);
@@ -170,6 +174,7 @@ export default function SettingsPageContent() {
   const [selectedAvatarUrl, setSelectedAvatarUrl] = useState('');
   const [customAvatarUrl, setCustomAvatarUrl] = useState('');
   const randomSeed = useMemo(() => user?.uid || Math.random().toString(36).substring(7), [user]);
+  const workspaceInviteInputRef = useRef<HTMLInputElement>(null);
   const webhookUrlInputRef = useRef<HTMLInputElement>(null);
   const [isCreatingFathomWebhook, setIsCreatingFathomWebhook] = useState(false);
   const [isFathomLogsOpen, setIsFathomLogsOpen] = useState(false);
@@ -356,13 +361,70 @@ export default function SettingsPageContent() {
     }
     setIsSavingWorkspace(true);
     try {
-      await updateUserProfile({ workspace: { name: workspaceName.trim() } });
+      await updateUserProfile({ workspace: { name: workspaceName.trim() } as any });
       toast({ title: 'Workspace Updated', description: 'Your workspace name has been saved.' });
     } catch (error) {
       console.error("Failed to save workspace:", error);
       toast({ title: 'Error', description: 'Could not save workspace settings.', variant: 'destructive' });
     } finally {
       setIsSavingWorkspace(false);
+    }
+  };
+
+  const handleCreateWorkspaceInvite = async () => {
+    setIsCreatingWorkspaceInvite(true);
+    try {
+      const response = await fetch("/api/workspace-invitations", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          invitedEmail: inviteEmail.trim() || null,
+        }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(payload?.error || "Could not create invite link.");
+      }
+
+      const invitationUrl = payload?.invitation?.invitationUrl || "";
+      if (!invitationUrl) {
+        throw new Error("Invite link was not returned.");
+      }
+
+      setWorkspaceInviteLink(invitationUrl);
+      toast({
+        title: "Invitation Created",
+        description: "Share this link to let someone join your workspace.",
+      });
+    } catch (error) {
+      console.error("Failed to create workspace invitation:", error);
+      toast({
+        title: "Invite Failed",
+        description:
+          error instanceof Error ? error.message : "Could not create invite link.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsCreatingWorkspaceInvite(false);
+    }
+  };
+
+  const handleCopyWorkspaceInvite = async () => {
+    const value = workspaceInviteInputRef.current?.value || workspaceInviteLink;
+    if (!value) return;
+
+    try {
+      await navigator.clipboard.writeText(value);
+      setHasCopiedWorkspaceInvite(true);
+      setTimeout(() => setHasCopiedWorkspaceInvite(false), 2500);
+      toast({ title: "Copied!", description: "Workspace invite link copied." });
+    } catch (error) {
+      console.error("Failed to copy workspace invite link:", error);
+      toast({
+        title: "Copy Failed",
+        description: "Could not copy invite link.",
+        variant: "destructive",
+      });
     }
   };
 
@@ -763,6 +825,70 @@ export default function SettingsPageContent() {
                         disabled={isSavingWorkspace || authLoading}
                       />
                     </div>
+                    <div className="rounded-lg border border-border/60 bg-muted/20 p-4 space-y-3">
+                      <div className="flex items-center gap-2 text-sm font-medium">
+                        <Users className="h-4 w-4 text-primary" />
+                        Workspace Invitations
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        Create an invite link so another account can join this workspace.
+                      </p>
+                      <div className="grid grid-cols-1 md:grid-cols-[1fr_auto] gap-2 items-end">
+                        <div>
+                          <Label htmlFor="workspaceInviteEmail">
+                            Invite Email (optional)
+                          </Label>
+                          <Input
+                            id="workspaceInviteEmail"
+                            type="email"
+                            placeholder="name@company.com"
+                            value={inviteEmail}
+                            onChange={(e) => setInviteEmail(e.target.value)}
+                            disabled={isCreatingWorkspaceInvite || authLoading}
+                            className="mt-1"
+                          />
+                        </div>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          onClick={handleCreateWorkspaceInvite}
+                          disabled={isCreatingWorkspaceInvite || authLoading}
+                        >
+                          {isCreatingWorkspaceInvite ? (
+                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          ) : (
+                            <Send className="mr-2 h-4 w-4" />
+                          )}
+                          Create Invite Link
+                        </Button>
+                      </div>
+                      {workspaceInviteLink ? (
+                        <div className="grid grid-cols-1 md:grid-cols-[1fr_auto] gap-2 items-end">
+                          <div>
+                            <Label htmlFor="workspaceInviteLink">Invite Link</Label>
+                            <Input
+                              ref={workspaceInviteInputRef}
+                              id="workspaceInviteLink"
+                              value={workspaceInviteLink}
+                              readOnly
+                              className="mt-1"
+                            />
+                          </div>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            onClick={handleCopyWorkspaceInvite}
+                          >
+                            {hasCopiedWorkspaceInvite ? (
+                              <Check className="mr-2 h-4 w-4 text-green-500" />
+                            ) : (
+                              <Copy className="mr-2 h-4 w-4" />
+                            )}
+                            {hasCopiedWorkspaceInvite ? "Copied!" : "Copy Link"}
+                          </Button>
+                        </div>
+                      ) : null}
+                    </div>
                   </CardContent>
                   <CardFooter>
                     <Button onClick={handleWorkspaceSave} disabled={isSavingWorkspace || authLoading}>
@@ -877,7 +1003,7 @@ export default function SettingsPageContent() {
                             />
                           </SelectTrigger>
                           <SelectContent>
-                            {slackChannels.map((channel) => (
+                            {slackChannels.map((channel: any) => (
                               <SelectItem key={channel.id} value={channel.id}>
                                 # {channel.name}
                               </SelectItem>
@@ -1120,7 +1246,7 @@ export default function SettingsPageContent() {
             {!isLoadingFathomLogs && fathomLogs.length === 0 && (
               <div className="text-sm text-muted-foreground">No logs yet.</div>
             )}
-            {fathomLogs.map((log) => (
+            {fathomLogs.map((log: any) => (
               <div
                 key={log.id || `${log.event}-${log.createdAt}`}
                 className="rounded-lg border bg-muted/30 p-3"
@@ -1278,7 +1404,7 @@ export default function SettingsPageContent() {
                     No webhooks found yet.
                   </div>
                 )}
-                {fathomWebhooks.map((webhook) => {
+                {fathomWebhooks.map((webhook: any) => {
                   const webhookId = String(
                     webhook?.id ||
                       webhook?.webhook_id ||
@@ -1350,3 +1476,4 @@ export default function SettingsPageContent() {
     </>
   );
 }
+
