@@ -25,6 +25,7 @@ import { motion } from 'framer-motion';
 import type { ExtractedTaskSchema } from '@/types/chat';
 import TaskDetailDialog from '@/components/dashboard/planning/TaskDetailDialog';
 import DashboardHeader from '../DashboardHeader';
+import DashboardScreenSkeleton from "@/components/dashboard/DashboardScreenSkeleton";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { useRouter } from 'next/navigation';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -641,12 +642,7 @@ export default function PersonDetailPageContent({ personId }: PersonDetailPageCo
   };
   
   if (isLoading) {
-      return (
-        <div className="flex items-center justify-center py-20">
-            <Loader2 className="h-10 w-10 animate-spin text-primary" />
-            <p className="ml-3 text-muted-foreground">Loading person details...</p>
-        </div>
-      );
+      return <DashboardScreenSkeleton className="py-8" />;
   }
 
   if (!person) {

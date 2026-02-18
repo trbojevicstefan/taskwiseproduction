@@ -10,6 +10,7 @@ import { useChatHistory } from '@/contexts/ChatHistoryContext';
 import { useToast } from '@/hooks/use-toast';
 import type { Meeting } from '@/types/meeting';
 import { MeetingDetailSheet } from './MeetingsPageContent';
+import DashboardScreenSkeleton from "@/components/dashboard/DashboardScreenSkeleton";
 
 export default function MeetingDetailPageContent({ meetingId }: { meetingId: string }) {
   const router = useRouter();
@@ -106,11 +107,7 @@ export default function MeetingDetailPageContent({ meetingId }: { meetingId: str
 
   const exists = meetings.some((meeting: any) => meeting.id === meetingId);
   if (!exists && (isLoadingMeetingHistory || !hasRefreshed)) {
-    return (
-      <div className="flex items-center justify-center py-20 text-muted-foreground">
-        Loading meeting...
-      </div>
-    );
+    return <DashboardScreenSkeleton className="py-8" />;
   }
 
   if (!exists) {

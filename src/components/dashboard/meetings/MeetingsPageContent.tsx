@@ -100,6 +100,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { isValid } from 'date-fns';
 import DashboardHeader from "../DashboardHeader";
+import DashboardScreenSkeleton from "@/components/dashboard/DashboardScreenSkeleton";
 import { useMeetingHistory } from "@/contexts/MeetingHistoryContext";
 import { useChatHistory } from "@/contexts/ChatHistoryContext";
 import { format, formatDistanceToNow, isSameWeek, isToday, isYesterday } from 'date-fns';
@@ -1984,11 +1985,7 @@ export function MeetingDetailSheet({
 
   if (isLoadingMeetingHistory && id) {
     if (isPageVariant) {
-      return (
-        <div className="flex items-center justify-center py-24">
-          <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
-        </div>
-      );
+      return <DashboardScreenSkeleton className="py-8" />;
     }
     return (
       <Sheet open={true} onOpenChange={onClose}>
@@ -2996,11 +2993,7 @@ export default function MeetingsPageContent() {
   }, [filteredMeetings]);
 
   if (isLoadingMeetingHistory) {
-    return (
-      <div className="flex items-center justify-center h-full">
-        <Loader2 className="h-10 w-10 animate-spin text-primary" />
-      </div>
-    );
+    return <DashboardScreenSkeleton />;
   }
 
   if (meetings.length === 0 && !isLoadingMeetingHistory) {

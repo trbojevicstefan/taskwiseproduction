@@ -12,7 +12,6 @@ import {
   GripVertical,
   LayoutGrid,
   List as ListIcon,
-  Loader2,
   MoreHorizontal,
   Palette,
   Plus,
@@ -31,6 +30,7 @@ import {
   startOfWeek,
 } from "date-fns";
 import DashboardHeader from "@/components/dashboard/DashboardHeader";
+import DashboardScreenSkeleton from "@/components/dashboard/DashboardScreenSkeleton";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
@@ -2444,11 +2444,7 @@ function AssigneeDropdown({
     </div>
   );
   if (isLoading) {
-    return (
-      <div className="flex h-full items-center justify-center">
-        <Loader2 className="h-10 w-10 animate-spin text-primary" />
-      </div>
-    );
+    return <DashboardScreenSkeleton />;
   }
 
   return (

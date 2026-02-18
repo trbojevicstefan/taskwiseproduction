@@ -47,6 +47,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { Input } from '@/components/ui/input';
 import React, { useState, useMemo, useCallback } from 'react';
+import WorkspaceSwitcher from './WorkspaceSwitcher';
 
 
 const baseNavItems = [
@@ -467,6 +468,13 @@ export default function SidebarNav() {
   return (
     <nav className="flex flex-col h-full">
       <ScrollArea className="flex-grow">
+      <div className={cn("p-2 pb-1", isCollapsed ? "flex justify-center" : "")}>
+        <WorkspaceSwitcher
+          isCollapsed={isCollapsed}
+          triggerClassName={cn(!isCollapsed && "w-full max-w-none justify-between")}
+          contentAlign="start"
+        />
+      </div>
       <div className="p-2 space-y-1">
         <SidebarMenu>
             {mainNavItems.map((item: any) => {

@@ -12,6 +12,7 @@ import { useIntegrations } from '@/contexts/IntegrationsContext';
 import { addPerson, mergePeople, onPeopleSnapshot, updatePerson } from '@/lib/data';
 import type { PersonWithTaskCount } from '@/types/person';
 import DashboardHeader from '../DashboardHeader';
+import DashboardScreenSkeleton from "@/components/dashboard/DashboardScreenSkeleton";
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/hooks/use-toast';
 import { Badge } from '@/components/ui/badge';
@@ -394,10 +395,7 @@ export default function PeoplePageContent() {
         </Alert>
 
         {isLoading ? (
-          <div className="flex items-center justify-center py-20">
-            <Loader2 className="h-10 w-10 animate-spin text-primary" />
-            <p className="ml-3 text-muted-foreground">Loading people...</p>
-          </div>
+          <DashboardScreenSkeleton className="px-0 py-2" />
         ) : visiblePeople.length === 0 && !(showBlocked && blockedPeople.length > 0) ? (
           <Card>
             <CardHeader>

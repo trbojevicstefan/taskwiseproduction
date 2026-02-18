@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState, useEffect } from "react";
-import { Check, ChevronDown, Loader2 } from "lucide-react";
+import { Building2, Check, ChevronDown, Loader2 } from "lucide-react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import {
@@ -15,8 +15,19 @@ import {
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import { buildWorkspaceRoute } from "@/components/dashboard/workspace-route";
+import { cn } from "@/lib/utils";
 
-export const WorkspaceSwitcher = () => {
+type WorkspaceSwitcherProps = {
+  isCollapsed?: boolean;
+  triggerClassName?: string;
+  contentAlign?: "start" | "center" | "end";
+};
+
+export const WorkspaceSwitcher = ({
+  isCollapsed = false,
+  triggerClassName,
+  contentAlign = "end",
+}: WorkspaceSwitcherProps) => {
   const { user, switchWorkspace } = useAuth();
   const { toast } = useToast();
   const router = useRouter();
@@ -77,16 +88,27 @@ export const WorkspaceSwitcher = () => {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button variant="outline" size="sm" className="max-w-[220px] justify-between gap-2">
-          <span className="truncate">{activeWorkspaceName}</span>
+        <Button
+          variant="outline"
+          size="sm"
+          className={cn(
+            isCollapsed ? "h-8 w-8 px-0 justify-center" : "max-w-[220px] justify-between gap-2",
+            triggerClassName
+          )}
+        >
+          {isCollapsed ? (
+            <Building2 className="h-4 w-4" />
+          ) : (
+            <span className="truncate">{activeWorkspaceName}</span>
+          )}
           {pendingWorkspaceId ? (
             <Loader2 className="h-4 w-4 animate-spin" />
           ) : (
-            <ChevronDown className="h-4 w-4" />
+            <ChevronDown className={cn("h-4 w-4", isCollapsed && "hidden")} />
           )}
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-[260px]">
+      <DropdownMenuContent align={contentAlign} className="w-[260px]">
         <DropdownMenuLabel>Switch workspace</DropdownMenuLabel>
         <DropdownMenuSeparator />
         {memberships.length ? (

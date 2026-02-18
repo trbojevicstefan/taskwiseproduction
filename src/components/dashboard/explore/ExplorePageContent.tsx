@@ -10,6 +10,7 @@ import { Loader2, Calendar, ChevronLeft, ChevronRight, ListFilter, Users, Video 
 import { Button } from '@/components/ui/button';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuRadioGroup, DropdownMenuRadioItem } from '@/components/ui/dropdown-menu';
 import DashboardHeader from '../DashboardHeader';
+import DashboardScreenSkeleton from "@/components/dashboard/DashboardScreenSkeleton";
 import DayColumn from './DayColumn';
 import type { ExtractedTaskSchema } from '@/types/chat';
 import type { Meeting } from '@/types/meeting';
@@ -404,12 +405,7 @@ export default function ExplorePageContent() {
 
 
   if (isLoadingMeetingHistory) {
-    return (
-      <div className="flex items-center justify-center h-full">
-        <Loader2 className="h-10 w-10 animate-spin text-primary" />
-        <p className="ml-3 text-muted-foreground">Loading your calendar...</p>
-      </div>
-    );
+    return <DashboardScreenSkeleton />;
   }
 
   const weekRangeText = `${format(startOfWeek(currentDate, { weekStartsOn: 1 }), 'MMM d')} - ${format(endOfWeek(currentDate, { weekStartsOn: 1 }), 'MMM d, yyyy')}`;

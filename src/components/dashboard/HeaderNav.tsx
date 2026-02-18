@@ -23,7 +23,6 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 import { useToast } from '@/hooks/use-toast';
 import { useIsMobile } from '@/hooks/use-mobile'; // Import the hook
 import { useMeetingHistory } from '@/contexts/MeetingHistoryContext';
-import WorkspaceSwitcher from './WorkspaceSwitcher';
 
 const INITIAL_NOTIFICATION_LIMIT = 5;
 const NOTIFICATION_PAGE_SIZE = 5;
@@ -164,8 +163,6 @@ export default function HeaderNav() {
 
   return (
     <div className="flex items-center gap-2 sm:gap-4">
-        <WorkspaceSwitcher />
-        
         {/* Help Button - Hidden on Mobile */}
         <div className="hidden sm:flex">
             <TooltipProvider>
