@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+﻿import { NextResponse } from "next/server";
 import { apiError } from "@/lib/api-route";
 import { requireWorkspaceRouteAccess } from "@/lib/workspace-route-access";
 
@@ -24,11 +24,11 @@ export async function PATCH(
   if (!boardId || !statusId) {
     return apiError(400, "request_error", "Board ID and status ID are required.");
   }
-  const access = await requireWorkspaceRouteAccess(workspaceId, "member");
+  const access = await requireWorkspaceRouteAccess(workspaceId, "member", { adminVisibilityKey: "boards" });
   if (!access.ok) {
     return access.response;
   }
-  const { db, userId } = access;
+  const { db } = access;
 
   const body = await request.json().catch(() => ({}));
   const update: Record<string, any> = { updatedAt: new Date() };
@@ -66,10 +66,8 @@ export async function PATCH(
     return apiError(400, "request_error", "No updates provided.");
   }
 
-  const userIdQuery = userId;
   const statusIdQuery = statusId;
   const filter = {
-    userId: userIdQuery,
     workspaceId,
     boardId,
     $or: [{ _id: statusIdQuery }, { id: statusId }],
@@ -100,23 +98,20 @@ export async function DELETE(
   if (!boardId || !statusId) {
     return apiError(400, "request_error", "Board ID and status ID are required.");
   }
-  const access = await requireWorkspaceRouteAccess(workspaceId, "member");
+  const access = await requireWorkspaceRouteAccess(workspaceId, "member", { adminVisibilityKey: "boards" });
   if (!access.ok) {
     return access.response;
   }
-  const { db, userId } = access;
+  const { db } = access;
 
-  const userIdQuery = userId;
   const statusIdQuery = statusId;
   const filter = {
-    userId: userIdQuery,
     workspaceId,
     boardId,
     $or: [{ _id: statusIdQuery }, { id: statusId }],
   };
 
   const existingTask = await db.collection("boardItems").findOne({
-    userId: userIdQuery,
     workspaceId,
     boardId,
     statusId,
@@ -133,6 +128,7 @@ export async function DELETE(
 
   return NextResponse.json({ ok: true });
 }
+
 
 
 

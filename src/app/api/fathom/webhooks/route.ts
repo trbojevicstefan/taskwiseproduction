@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { apiError } from "@/lib/api-route";
+import { getDb } from "@/lib/db";
 import {
   deleteFathomWebhook,
   getFathomInstallation,
@@ -8,11 +9,21 @@ import {
 } from "@/lib/fathom";
 import { getFathomIntegrationLogs } from "@/lib/fathom-logs";
 import { getSessionUserId } from "@/lib/server-auth";
+import { resolveWorkspaceScopeForUser } from "@/lib/workspace-scope";
 
 export async function GET() {
   const userId = await getSessionUserId();
   if (!userId) {
     return apiError(401, "request_error", "Unauthorized");
+  }
+  try {
+    const db = await getDb();
+    await resolveWorkspaceScopeForUser(db, userId, {
+      minimumRole: "member",
+      adminVisibilityKey: "integrations",
+    });
+  } catch (error: any) {
+    return apiError(error?.status || 403, "request_error", error?.message || "Forbidden");
   }
 
   const installation = await getFathomInstallation(userId);
@@ -62,6 +73,15 @@ export async function DELETE(request: Request) {
   const userId = await getSessionUserId();
   if (!userId) {
     return apiError(401, "request_error", "Unauthorized");
+  }
+  try {
+    const db = await getDb();
+    await resolveWorkspaceScopeForUser(db, userId, {
+      minimumRole: "member",
+      adminVisibilityKey: "integrations",
+    });
+  } catch (error: any) {
+    return apiError(error?.status || 403, "request_error", error?.message || "Forbidden");
   }
 
   const body = await request.json().catch(() => ({}));

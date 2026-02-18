@@ -22,6 +22,28 @@ export interface WorkspaceMembershipSummary {
   updatedAt?: string | null;
 }
 
+export interface WorkspaceAdminAccess {
+  tasks: boolean;
+  people: boolean;
+  projects: boolean;
+  chatSessions: boolean;
+  boards: boolean;
+  integrations: boolean;
+}
+
+export interface WorkspaceIntegrationProviderSummary {
+  connected: boolean;
+  connectedByUserId: string | null;
+  connectedByEmail: string | null;
+  connectedByCurrentUser: boolean;
+}
+
+export interface WorkspaceIntegrationsSummary {
+  slack: WorkspaceIntegrationProviderSummary;
+  google: WorkspaceIntegrationProviderSummary;
+  fathom: WorkspaceIntegrationProviderSummary;
+}
+
 export interface AppUser extends Person {
   uid: string;
   plan?: string;
@@ -45,6 +67,9 @@ export interface AppUser extends Person {
   slackAutoShareChannelId?: string | null;
   googleConnected?: boolean;
   googleEmail?: string | null;
+  activeWorkspaceRole?: "owner" | "admin" | "member" | null;
+  activeWorkspaceAdminAccess?: WorkspaceAdminAccess | null;
+  workspaceIntegrations?: WorkspaceIntegrationsSummary;
 }
 
 type UserProfileUpdate = Partial<
@@ -60,7 +85,13 @@ type UserProfileUpdate = Partial<
     | "firefliesWebhookToken"
   >
 > & {
-  workspace?: { id?: string; name: string };
+  workspace?: {
+    id?: string;
+    name: string;
+    settings?: {
+      adminAccess?: Partial<WorkspaceAdminAccess>;
+    };
+  };
 };
 
 interface AuthContextType {

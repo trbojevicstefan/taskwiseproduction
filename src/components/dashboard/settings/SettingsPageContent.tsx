@@ -66,6 +66,24 @@ type WorkspaceMemberPermissions = {
   canRemoveMembers: boolean;
 };
 
+type WorkspaceAdminAccess = {
+  tasks: boolean;
+  people: boolean;
+  projects: boolean;
+  chatSessions: boolean;
+  boards: boolean;
+  integrations: boolean;
+};
+
+const DEFAULT_WORKSPACE_ADMIN_ACCESS: WorkspaceAdminAccess = {
+  tasks: true,
+  people: true,
+  projects: true,
+  chatSessions: true,
+  boards: true,
+  integrations: true,
+};
+
 const IntegrationCard: React.FC<{
   icon: React.ElementType;
   title: string;
@@ -80,6 +98,7 @@ const IntegrationCard: React.FC<{
     disabled?: boolean;
     ariaLabel?: string;
   };
+  statusNote?: string | null;
 }> = ({
   icon: Icon,
   title,
@@ -90,6 +109,7 @@ const IntegrationCard: React.FC<{
   onDisconnect,
   extraActions,
   settingsAction,
+  statusNote,
 }) => {
   return (
     <div className="flex items-center justify-between p-4 rounded-lg bg-card border border-border/50 hover:border-primary/50 transition-colors">
@@ -100,6 +120,9 @@ const IntegrationCard: React.FC<{
         <div>
           <h4 className="font-semibold text-foreground">{title}</h4>
           <p className="text-sm text-muted-foreground">{description}</p>
+          {statusNote ? (
+            <p className="mt-1 text-xs text-muted-foreground">{statusNote}</p>
+          ) : null}
         </div>
       </div>
       {isLoading ? (
@@ -194,6 +217,9 @@ export default function SettingsPageContent() {
       canUpdateMembers: false,
       canRemoveMembers: false,
     });
+  const [workspaceAdminAccess, setWorkspaceAdminAccess] = useState<WorkspaceAdminAccess>(
+    DEFAULT_WORKSPACE_ADMIN_ACCESS
+  );
   const [isLoadingWorkspaceMembers, setIsLoadingWorkspaceMembers] = useState(false);
   const [pendingWorkspaceMemberId, setPendingWorkspaceMemberId] = useState<string | null>(null);
   const [hasCopied, setHasCopied] = useState(false);
@@ -218,6 +244,38 @@ export default function SettingsPageContent() {
   );
   const canManageWorkspaceMembers =
     activeWorkspaceMembership?.role === "owner" || activeWorkspaceMembership?.role === "admin";
+  const canManageWorkspaceSettings = canManageWorkspaceMembers;
+  const integrationsBlockedForAdmin =
+    activeWorkspaceMembership?.role === "admin" &&
+    Boolean(user?.activeWorkspaceAdminAccess) &&
+    !Boolean(user?.activeWorkspaceAdminAccess?.integrations);
+  const workspaceSlack = user?.workspaceIntegrations?.slack;
+  const workspaceGoogle = user?.workspaceIntegrations?.google;
+  const workspaceFathom = user?.workspaceIntegrations?.fathom;
+  const formatIntegrationOwner = (email: string | null | undefined) =>
+    email || "another workspace admin";
+  const slackStatusNote =
+    workspaceSlack?.connected && !workspaceSlack.connectedByCurrentUser
+      ? `Connected in this workspace by ${formatIntegrationOwner(
+          workspaceSlack.connectedByEmail
+        )}.`
+      : null;
+  const slackConnectedViaWorkspaceOnly =
+    Boolean(workspaceSlack?.connected) &&
+    !workspaceSlack?.connectedByCurrentUser &&
+    !Boolean(user?.slackTeamId);
+  const googleStatusNote =
+    workspaceGoogle?.connected && !workspaceGoogle.connectedByCurrentUser
+      ? `Connected in this workspace by ${formatIntegrationOwner(
+          workspaceGoogle.connectedByEmail
+        )}.`
+      : null;
+  const fathomStatusNote =
+    workspaceFathom?.connected && !workspaceFathom.connectedByCurrentUser
+      ? `Connected in this workspace by ${formatIntegrationOwner(
+          workspaceFathom.connectedByEmail
+        )}.`
+      : null;
   const workspaceInviteInputRef = useRef<HTMLInputElement>(null);
   const webhookUrlInputRef = useRef<HTMLInputElement>(null);
   const [isCreatingFathomWebhook, setIsCreatingFathomWebhook] = useState(false);
@@ -330,12 +388,20 @@ export default function SettingsPageContent() {
       setCompletionMatchThreshold(thresholdValue);
       setSlackAutomationEnabled(Boolean(user.slackAutoShareEnabled));
       setSlackAutomationChannelId(user.slackAutoShareChannelId || "");
+      setWorkspaceAdminAccess({
+        ...DEFAULT_WORKSPACE_ADMIN_ACCESS,
+        ...(user.activeWorkspaceAdminAccess || {}),
+      });
     }
   }, [user]);
 
   const loadSlackChannels = useCallback(
     async (showErrorToast = true): Promise<SlackChannel[]> => {
       if (!isSlackConnected) {
+        setSlackChannels([]);
+        return [];
+      }
+      if (slackConnectedViaWorkspaceOnly) {
         setSlackChannels([]);
         return [];
       }
@@ -369,7 +435,7 @@ export default function SettingsPageContent() {
         setIsLoadingSlackChannels(false);
       }
     },
-    [isSlackConnected, toast]
+    [isSlackConnected, slackConnectedViaWorkspaceOnly, toast]
   );
 
   useEffect(() => {
@@ -405,8 +471,18 @@ export default function SettingsPageContent() {
     }
     setIsSavingWorkspace(true);
     try {
-      await updateUserProfile({ workspace: { name: workspaceName.trim() } as any });
-      toast({ title: 'Workspace Updated', description: 'Your workspace name has been saved.' });
+      await updateUserProfile({
+        workspace: {
+          name: workspaceName.trim(),
+          settings: {
+            adminAccess: workspaceAdminAccess,
+          },
+        } as any,
+      });
+      toast({
+        title: 'Workspace Updated',
+        description: 'Workspace settings and admin visibility controls were saved.',
+      });
     } catch (error) {
       console.error("Failed to save workspace:", error);
       toast({ title: 'Error', description: 'Could not save workspace settings.', variant: 'destructive' });
@@ -1015,7 +1091,7 @@ export default function SettingsPageContent() {
                         value={workspaceName}
                         onChange={(e) => setWorkspaceName(e.target.value)}
                         className="mt-1"
-                        disabled={isSavingWorkspace || authLoading}
+                        disabled={isSavingWorkspace || authLoading || !canManageWorkspaceSettings}
                       />
                     </div>
                     <div className="rounded-lg border border-border/60 bg-muted/20 p-4 space-y-3">
@@ -1215,9 +1291,83 @@ export default function SettingsPageContent() {
                         </div>
                       )}
                     </div>
+                    <div className="rounded-lg border border-border/60 bg-muted/20 p-4 space-y-3">
+                      <div className="flex items-center gap-2 text-sm font-medium">
+                        <SettingsIcon className="h-4 w-4 text-primary" />
+                        Admin Visibility Controls
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        Configure what admins can view inside this workspace.
+                      </p>
+                      {!canManageWorkspaceSettings ? (
+                        <p className="text-xs text-muted-foreground">
+                          Admin or owner access is required to update these controls.
+                        </p>
+                      ) : null}
+                      <div className="space-y-3">
+                        {[
+                          {
+                            key: "tasks" as const,
+                            label: "Tasks",
+                            description: "Task list, planning, and task-level activity.",
+                          },
+                          {
+                            key: "people" as const,
+                            label: "People",
+                            description: "People directory, person profiles, and assigned items.",
+                          },
+                          {
+                            key: "projects" as const,
+                            label: "Projects",
+                            description: "Project list and project-linked planning views.",
+                          },
+                          {
+                            key: "chatSessions" as const,
+                            label: "Chat Records",
+                            description: "Workspace chat sessions and generated records.",
+                          },
+                          {
+                            key: "boards" as const,
+                            label: "Boards",
+                            description: "Board layouts, columns, and board item visibility.",
+                          },
+                          {
+                            key: "integrations" as const,
+                            label: "Integrations",
+                            description: "Workspace-shared integration status and controls.",
+                          },
+                        ].map((control) => (
+                          <div
+                            key={control.key}
+                            className="flex items-center justify-between gap-4 rounded-md border bg-background/60 p-3"
+                          >
+                            <div className="space-y-1">
+                              <p className="text-sm font-medium">{control.label}</p>
+                              <p className="text-xs text-muted-foreground">
+                                {control.description}
+                              </p>
+                            </div>
+                            <Switch
+                              checked={workspaceAdminAccess[control.key]}
+                              onCheckedChange={(checked) =>
+                                setWorkspaceAdminAccess((current) => ({
+                                  ...current,
+                                  [control.key]: checked,
+                                }))
+                              }
+                              disabled={!canManageWorkspaceSettings || isSavingWorkspace || authLoading}
+                              aria-label={`Admins can view ${control.label}`}
+                            />
+                          </div>
+                        ))}
+                      </div>
+                    </div>
                   </CardContent>
                   <CardFooter>
-                    <Button onClick={handleWorkspaceSave} disabled={isSavingWorkspace || authLoading}>
+                    <Button
+                      onClick={handleWorkspaceSave}
+                      disabled={isSavingWorkspace || authLoading || !canManageWorkspaceSettings}
+                    >
                       {isSavingWorkspace ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4"/>}
                       Save Workspace
                     </Button>
@@ -1285,7 +1435,7 @@ export default function SettingsPageContent() {
                           checked={slackAutomationEnabled}
                           onCheckedChange={handleSlackAutomationToggle}
                           aria-label="Auto-share new meetings to Slack"
-                          disabled={!isSlackConnected}
+                          disabled={!isSlackConnected || slackConnectedViaWorkspaceOnly}
                         />
                       </div>
 
@@ -1298,7 +1448,9 @@ export default function SettingsPageContent() {
                             variant="ghost"
                             size="sm"
                             onClick={() => void loadSlackChannels()}
-                            disabled={!isSlackConnected || isLoadingSlackChannels}
+                            disabled={
+                              !isSlackConnected || isLoadingSlackChannels || slackConnectedViaWorkspaceOnly
+                            }
                           >
                             {isLoadingSlackChannels ? (
                               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -1313,6 +1465,7 @@ export default function SettingsPageContent() {
                           onValueChange={handleSlackAutomationChannelChange}
                           disabled={
                             !isSlackConnected ||
+                            slackConnectedViaWorkspaceOnly ||
                             isLoadingSlackChannels ||
                             slackChannels.length === 0
                           }
@@ -1341,6 +1494,11 @@ export default function SettingsPageContent() {
                             Connect Slack in the Integrations section first.
                           </p>
                         )}
+                        {slackConnectedViaWorkspaceOnly && (
+                          <p className="text-xs text-muted-foreground">
+                            Slack automation channel settings are managed by the admin who connected Slack.
+                          </p>
+                        )}
                         {isSlackConnected &&
                           !isLoadingSlackChannels &&
                           slackChannels.length === 0 && (
@@ -1363,10 +1521,17 @@ export default function SettingsPageContent() {
                     <CardDescription>Connect TaskWiseAI with your favorite services.</CardDescription>
                   </CardHeader>
                   <CardContent className="space-y-4">
+                        {integrationsBlockedForAdmin ? (
+                          <div className="rounded-md border border-border/60 bg-muted/20 p-4 text-sm text-muted-foreground">
+                            Workspace policy currently hides integrations for admins in this workspace.
+                          </div>
+                        ) : (
+                          <>
                         <IntegrationCard 
                             icon={Bot}
                             title="Google Workspace"
                             description="Connect Meet, Calendar, and Drive for meeting ingestion."
+                            statusNote={googleStatusNote}
                             isConnected={isGoogleTasksConnected}
                             isLoading={isLoadingGoogleConnection}
                             onConnect={connectGoogleTasks}
@@ -1393,6 +1558,7 @@ export default function SettingsPageContent() {
                             icon={Slack}
                             title="Slack"
                             description="Post meeting summaries and tasks to channels."
+                            statusNote={slackStatusNote}
                             isConnected={isSlackConnected}
                             isLoading={isLoadingSlackConnection}
                             onConnect={connectSlack}
@@ -1406,6 +1572,7 @@ export default function SettingsPageContent() {
                             icon={Video}
                             title="Fathom"
                             description="Sync meetings and transcripts from Fathom."
+                            statusNote={fathomStatusNote}
                             isConnected={isFathomConnected}
                             isLoading={isLoadingFathomConnection}
                             onConnect={connectFathom}
@@ -1421,6 +1588,8 @@ export default function SettingsPageContent() {
                               </Button>
                             ) : null}
                         />
+                          </>
+                        )}
                   </CardContent>
                 </Card>
 

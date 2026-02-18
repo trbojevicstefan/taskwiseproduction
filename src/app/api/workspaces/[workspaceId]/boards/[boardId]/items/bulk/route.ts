@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+﻿import { NextResponse } from "next/server";
 import { apiError } from "@/lib/api-route";
 import { normalizePersonNameKey } from "@/lib/transcript-utils";
 import { requireWorkspaceRouteAccess } from "@/lib/workspace-route-access";
@@ -17,11 +17,11 @@ export async function POST(
   if (!boardId) {
     return apiError(400, "request_error", "Board ID is required.");
   }
-  const access = await requireWorkspaceRouteAccess(workspaceId, "member");
+  const access = await requireWorkspaceRouteAccess(workspaceId, "member", { adminVisibilityKey: "boards" });
   if (!access.ok) {
     return access.response;
   }
-  const { db, userId } = access;
+  const { db } = access;
 
   const body = await request.json().catch(() => ({}));
   const taskIds = Array.isArray(body.taskIds)
@@ -31,7 +31,6 @@ export async function POST(
     return apiError(400, "request_error", "taskIds is required.");
   }
 
-  const userIdQuery = userId;
   const taskIdFilters = taskIds.flatMap((id: any) => [
     { _id: id },
     { id },
@@ -60,7 +59,6 @@ export async function POST(
   if (typeof body.statusId === "string") {
     const statusIdQuery = body.statusId;
     const status = await db.collection("boardStatuses").findOne({
-      userId: userIdQuery,
       workspaceId,
       boardId,
       $or: [{ _id: statusIdQuery }, { id: body.statusId }],
@@ -76,7 +74,7 @@ export async function POST(
   if (Object.keys(taskUpdate).length > 1) {
     await db.collection("tasks").updateMany(
       {
-        userId: userIdQuery,
+        workspaceId,
         $or: taskIdFilters,
       },
       { $set: taskUpdate }
@@ -86,7 +84,7 @@ export async function POST(
   if (statusIdValue) {
     const lastItem = await db
       .collection("boardItems")
-      .find({ userId: userIdQuery, workspaceId, boardId, statusId: statusIdValue })
+      .find({ workspaceId, boardId, statusId: statusIdValue })
       .sort({ rank: -1 })
       .limit(1)
       .toArray();
@@ -96,7 +94,7 @@ export async function POST(
       nextRank += 1000;
       return {
         updateOne: {
-          filter: { userId: userIdQuery, workspaceId, boardId, taskId },
+          filter: { workspaceId, boardId, taskId },
           update: {
             $set: {
               statusId: statusIdValue,
@@ -114,6 +112,7 @@ export async function POST(
 
   return NextResponse.json({ ok: true });
 }
+
 
 
 

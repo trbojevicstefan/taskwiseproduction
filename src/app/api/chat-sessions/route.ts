@@ -11,7 +11,7 @@ import {
 import { getDb } from "@/lib/db";
 import { attachCorrelationIdHeader, serializeError } from "@/lib/observability";
 import { getSessionUserId } from "@/lib/server-auth";
-import { getWorkspaceIdForUser } from "@/lib/workspace";
+import { resolveWorkspaceScopeForUser } from "@/lib/workspace-scope";
 
 const ROUTE = "/api/chat-sessions";
 
@@ -113,11 +113,28 @@ export async function GET(request?: Request) {
     const cursor = decodeChatSessionCursor(searchParams?.get("cursor") || null);
 
     const db = await getDb();
-    const filters: Record<string, any> = { userId };
+    const { workspaceId, workspaceMemberUserIds } = await resolveWorkspaceScopeForUser(db, userId, {
+      minimumRole: "member",
+      adminVisibilityKey: "chatSessions",
+      includeMemberUserIds: true,
+    });
+    const filters: Record<string, any> = {
+      $or: [
+        { workspaceId },
+        {
+          workspaceId: { $exists: false },
+          userId: { $in: workspaceMemberUserIds },
+        },
+      ],
+    };
     if (paginateRequested && cursor) {
-      filters.$or = [
-        { lastActivityAt: { $lt: cursor.date } },
-        { lastActivityAt: cursor.date, _id: { $lt: cursor.id } },
+      filters.$and = [
+        {
+          $or: [
+            { lastActivityAt: { $lt: cursor.date } },
+            { lastActivityAt: cursor.date, _id: { $lt: cursor.id } },
+          ],
+        },
       ];
     }
 
@@ -137,7 +154,8 @@ export async function GET(request?: Request) {
           userId,
           pageSessions.map((session: any) =>
             Array.isArray(session.suggestedTasks) ? session.suggestedTasks : []
-          )
+          ),
+          { workspaceId }
         );
         pageSessions.forEach((session: any, index: number) => {
           session.suggestedTasks = hydratedTaskLists[index] || [];
@@ -240,7 +258,9 @@ export async function POST(request: Request) {
     );
     const now = new Date();
     const db = await getDb();
-    const workspaceId = await getWorkspaceIdForUser(db, userId);
+    const { workspaceId } = await resolveWorkspaceScopeForUser(db, userId, {
+      minimumRole: "member",
+    });
     const session = {
       _id: randomUUID(),
       userId,

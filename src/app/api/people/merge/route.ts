@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { apiError } from "@/lib/api-route";
 import { getDb } from "@/lib/db";
 import { getSessionUserId } from "@/lib/server-auth";
+import { resolveWorkspaceScopeForUser } from "@/lib/workspace-scope";
 
 const serializePerson = (person: any) => ({
   ...person,
@@ -26,15 +27,26 @@ export async function POST(request: Request) {
   }
 
   const db = await getDb();
+  const { workspaceId, workspaceMemberUserIds } = await resolveWorkspaceScopeForUser(db, userId, {
+    minimumRole: "admin",
+    includeMemberUserIds: true,
+  });
+  const workspaceFallbackScope = {
+    $or: [
+      { workspaceId },
+      {
+        workspaceId: { $exists: false },
+        userId: { $in: workspaceMemberUserIds },
+      },
+    ],
+  };
 
   const source = await db.collection("people").findOne({
-    userId,
-    $or: [{ _id: sourceId }, { id: sourceId }, { slackId: sourceId }],
-  });
+    $and: [workspaceFallbackScope as any, { $or: [{ _id: sourceId }, { id: sourceId }, { slackId: sourceId }] }],
+  } as any);
   const target = await db.collection("people").findOne({
-    userId,
-    $or: [{ _id: targetId }, { id: targetId }, { slackId: targetId }],
-  });
+    $and: [workspaceFallbackScope as any, { $or: [{ _id: targetId }, { id: targetId }, { slackId: targetId }] }],
+  } as any);
 
   if (!source || !target) {
     return apiError(404, "request_error", "Person not found.");
@@ -81,7 +93,20 @@ export async function POST(request: Request) {
   };
 
   await db.collection("tasks").updateMany(
-    { userId, "assignee.uid": { $in: sourceAssigneeIds } },
+    {
+      $and: [
+        {
+          $or: [
+            { workspaceId },
+            {
+              workspaceId: { $exists: false },
+              userId: { $in: workspaceMemberUserIds },
+            },
+          ],
+        },
+        { "assignee.uid": { $in: sourceAssigneeIds } },
+      ],
+    } as any,
     { $set: { assignee: targetAssignee, assigneeName: targetAssignee.name } }
   );
 

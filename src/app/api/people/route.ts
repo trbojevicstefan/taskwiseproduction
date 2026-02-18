@@ -12,6 +12,7 @@ import { getDb } from "@/lib/db";
 import { attachCorrelationIdHeader } from "@/lib/observability";
 import { getSessionUserId } from "@/lib/server-auth";
 import { normalizePersonNameKey } from "@/lib/transcript-utils";
+import { resolveWorkspaceScopeForUser } from "@/lib/workspace-scope";
 import type { ExtractedTaskSchema } from "@/types/chat";
 
 const ROUTE = "/api/people";
@@ -59,15 +60,39 @@ export async function GET(request?: Request) {
     setMetricUserId(userId);
 
     const db = await getDb();
+    const { workspaceId, workspaceMemberUserIds } = await resolveWorkspaceScopeForUser(db, userId, {
+      minimumRole: "member",
+      adminVisibilityKey: "people",
+      includeMemberUserIds: true,
+    });
+
+    const workspaceFallbackScope = {
+      $or: [
+        { workspaceId },
+        {
+          workspaceId: { $exists: false },
+          userId: { $in: workspaceMemberUserIds },
+        },
+      ],
+    };
+
     const people = await db
       .collection("people")
-      .find({ userId })
+      .find(workspaceFallbackScope as any)
       .sort({ lastSeenAt: -1 })
       .toArray();
 
     const tasks = await db
       .collection("tasks")
-      .find({ userId })
+      .find({
+        $or: [
+          { workspaceId },
+          {
+            workspaceId: { $exists: false },
+            userId: { $in: workspaceMemberUserIds },
+          },
+        ],
+      } as any)
       .project({
         _id: 1,
         status: 1,
@@ -82,12 +107,28 @@ export async function GET(request?: Request) {
       .toArray();
     const meetings = await db
       .collection("meetings")
-      .find({ userId })
+      .find({
+        $or: [
+          { workspaceId },
+          {
+            workspaceId: { $exists: false },
+            userId: { $in: workspaceMemberUserIds },
+          },
+        ],
+      } as any)
       .project({ _id: 1, extractedTasks: 1 })
       .toArray();
     const chatSessions = await db
       .collection("chatSessions")
-      .find({ userId })
+      .find({
+        $or: [
+          { workspaceId },
+          {
+            workspaceId: { $exists: false },
+            userId: { $in: workspaceMemberUserIds },
+          },
+        ],
+      } as any)
       .project({ _id: 1, suggestedTasks: 1 })
       .toArray();
 
@@ -309,7 +350,20 @@ export async function POST(request: Request) {
     }
 
     const db = await getDb();
-    const existing = await db.collection("people").findOne({ userId, name });
+    const { workspaceId, workspaceMemberUserIds } = await resolveWorkspaceScopeForUser(db, userId, {
+      minimumRole: "member",
+      includeMemberUserIds: true,
+    });
+    const existing = await db.collection("people").findOne({
+      name,
+      $or: [
+        { workspaceId },
+        {
+          workspaceId: { $exists: false },
+          userId: { $in: workspaceMemberUserIds },
+        },
+      ],
+    } as any);
     const now = new Date();
 
     if (existing) {
@@ -317,7 +371,7 @@ export async function POST(request: Request) {
       if (sourceSessionId) updatedSourceSessions.add(sourceSessionId);
 
       await db.collection("people").updateOne(
-        { _id: existing._id, userId },
+        { _id: existing._id },
         {
           $set: {
             lastSeenAt: now,
@@ -331,7 +385,6 @@ export async function POST(request: Request) {
 
       const refreshed = await db.collection("people").findOne({
         _id: existing._id,
-        userId,
       });
       logger.info("api.request.succeeded", {
         status: 200,
@@ -352,6 +405,7 @@ export async function POST(request: Request) {
     const person = {
       _id: randomUUID(),
       userId,
+      workspaceId,
       name,
       email: body.email || null,
       title: body.title || null,

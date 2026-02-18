@@ -14,6 +14,14 @@ export interface WorkspaceDoc {
   settings?: {
     defaultBoardTemplate?: string | null;
     timezone?: string | null;
+    adminAccess?: {
+      tasks?: boolean;
+      people?: boolean;
+      projects?: boolean;
+      chatSessions?: boolean;
+      boards?: boolean;
+      integrations?: boolean;
+    } | null;
   } | null;
 }
 

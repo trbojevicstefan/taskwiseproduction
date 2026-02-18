@@ -4,6 +4,7 @@ import { z } from "zod";
 import { getDb } from "@/lib/db";
 import { getSessionUserId } from "@/lib/server-auth";
 import { apiError, mapApiError, parseJsonBody } from "@/lib/api-route";
+import { resolveWorkspaceScopeForUser } from "@/lib/workspace-scope";
 
 const createProjectSchema = z.object({
   name: z.string().trim().min(1),
@@ -18,9 +19,23 @@ export async function GET() {
     }
 
     const db = await getDb();
+    const { workspaceId, workspaceMemberUserIds } = await resolveWorkspaceScopeForUser(db, userId, {
+      minimumRole: "member",
+      adminVisibilityKey: "projects",
+      includeMemberUserIds: true,
+    });
+
     const projects = await db
       .collection("projects")
-      .find({ userId })
+      .find({
+        $or: [
+          { workspaceId },
+          {
+            workspaceId: { $exists: false },
+            userId: { $in: workspaceMemberUserIds },
+          },
+        ],
+      })
       .sort({ createdAt: -1 })
       .toArray();
 
@@ -45,15 +60,19 @@ export async function POST(request: Request) {
     }
 
     const body = await parseJsonBody(request, createProjectSchema, "Project name is required.");
+    const db = await getDb();
+    const { workspaceId } = await resolveWorkspaceScopeForUser(db, userId, {
+      minimumRole: "member",
+    });
+
     const project = {
       _id: randomUUID(),
       name: body.name,
       description: body.description || undefined,
       userId,
+      workspaceId,
       createdAt: new Date(),
     };
-
-    const db = await getDb();
     await db.collection("projects").insertOne(project);
 
     return NextResponse.json({

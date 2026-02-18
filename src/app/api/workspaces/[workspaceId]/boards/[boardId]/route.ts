@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+﻿import { NextResponse } from "next/server";
 import { apiError } from "@/lib/api-route";
 import { requireWorkspaceRouteAccess } from "@/lib/workspace-route-access";
 
@@ -24,11 +24,11 @@ export async function PATCH(
   if (!boardId) {
     return apiError(400, "request_error", "Board ID is required.");
   }
-  const access = await requireWorkspaceRouteAccess(workspaceId, "member");
+  const access = await requireWorkspaceRouteAccess(workspaceId, "member", { adminVisibilityKey: "boards" });
   if (!access.ok) {
     return access.response;
   }
-  const { db, userId } = access;
+  const { db } = access;
 
   const body = await request.json().catch(() => ({}));
   const update: Record<string, any> = { updatedAt: new Date() };
@@ -53,10 +53,8 @@ export async function PATCH(
     update.isDefault = body.isDefault;
   }
 
-  const userIdQuery = userId;
   const boardIdQuery = boardId;
   const filter = {
-    userId: userIdQuery,
     workspaceId,
     $or: [{ _id: boardIdQuery }, { id: boardId }],
   };
@@ -84,16 +82,14 @@ export async function DELETE(
   if (!boardId) {
     return apiError(400, "request_error", "Board ID is required.");
   }
-  const access = await requireWorkspaceRouteAccess(workspaceId, "member");
+  const access = await requireWorkspaceRouteAccess(workspaceId, "member", { adminVisibilityKey: "boards" });
   if (!access.ok) {
     return access.response;
   }
-  const { db, userId } = access;
+  const { db } = access;
 
-  const userIdQuery = userId;
   const boardIdQuery = boardId;
   const filter = {
-    userId: userIdQuery,
     workspaceId,
     $or: [{ _id: boardIdQuery }, { id: boardId }],
   };
@@ -104,18 +100,17 @@ export async function DELETE(
   }
 
   await db.collection("boardStatuses").deleteMany({
-    userId: userIdQuery,
     workspaceId,
     boardId,
   });
   await db.collection("boardItems").deleteMany({
-    userId: userIdQuery,
     workspaceId,
     boardId,
   });
 
   return NextResponse.json({ ok: true });
 }
+
 
 
 

@@ -36,7 +36,7 @@ export const ensureBoardItemsForTasks = async (
 
   const statuses = await db
     .collection("boardStatuses")
-    .find({ userId, workspaceId, boardId })
+    .find({ workspaceId, boardId })
     .sort({ order: 1 })
     .toArray();
   if (!statuses.length) return { created: 0 };
@@ -53,7 +53,7 @@ export const ensureBoardItemsForTasks = async (
   const canonicalMap = new Map();
   const foundTasks = await db
     .collection("tasks")
-    .find({ userId, sourceTaskId: { $in: taskIds } })
+    .find({ workspaceId, sourceTaskId: { $in: taskIds } })
     .project({ _id: 1, sourceTaskId: 1 })
     .toArray();
   foundTasks.forEach((t: any) => {
@@ -74,7 +74,6 @@ export const ensureBoardItemsForTasks = async (
   const existing = await db
     .collection("boardItems")
     .find({
-      userId,
       workspaceId,
       boardId,
       $or: [{ taskId: { $in: lookupTaskIds } }, { taskCanonicalId: { $in: lookupTaskIds } }],
@@ -95,7 +94,7 @@ export const ensureBoardItemsForTasks = async (
     const statusId = String(status._id?.toString?.() || status._id);
     const lastItem = await db
       .collection("boardItems")
-      .find({ userId, workspaceId, boardId, statusId })
+      .find({ workspaceId, boardId, statusId })
       .sort({ rank: -1 })
       .limit(1)
       .toArray();
@@ -141,7 +140,6 @@ export const ensureBoardItemsForTasks = async (
         newItems.map((item: any) => ({
           updateOne: {
             filter: {
-              userId,
               workspaceId,
               boardId,
               taskId: item.taskId,

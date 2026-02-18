@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+﻿import { NextResponse } from "next/server";
 import { apiError } from "@/lib/api-route";
 import { randomUUID } from "crypto";
 import { TASK_LIST_PROJECTION } from "@/lib/task-projections";
@@ -47,15 +47,14 @@ export async function GET(
   if (!boardId) {
     return apiError(400, "request_error", "Board ID is required.");
   }
-  const access = await requireWorkspaceRouteAccess(workspaceId, "member");
+  const access = await requireWorkspaceRouteAccess(workspaceId, "member", { adminVisibilityKey: "boards" });
   if (!access.ok) {
     return access.response;
   }
-  const { db, userId } = access;
+  const { db } = access;
 
-  const userIdQuery = userId;
   const pipeline = [
-    { $match: { userId: userIdQuery, workspaceId, boardId } },
+    { $match: { workspaceId, boardId } },
     {
       $lookup: {
         from: "tasks",
@@ -64,7 +63,7 @@ export async function GET(
           {
             $match: {
               $expr: { $eq: ["$_id", "$$lookupTaskId"] },
-              userId: userIdQuery,
+              workspaceId,
               taskState: { $ne: "archived" },
             },
           },
@@ -104,18 +103,16 @@ export async function POST(
   if (!boardId) {
     return apiError(400, "request_error", "Board ID is required.");
   }
-  const access = await requireWorkspaceRouteAccess(workspaceId, "member");
+  const access = await requireWorkspaceRouteAccess(workspaceId, "member", { adminVisibilityKey: "boards" });
   if (!access.ok) {
     return access.response;
   }
   const { db, userId } = access;
 
   const body = await request.json().catch(() => ({}));
-  const userIdQuery = userId;
 
   const statusIdQuery = body.statusId || "";
   let status = await db.collection("boardStatuses").findOne({
-    userId: userIdQuery,
     workspaceId,
     boardId,
     $or: [{ _id: statusIdQuery }, { id: body.statusId }],
@@ -124,7 +121,7 @@ export async function POST(
   if (!status) {
     const fallbackStatus = await db
       .collection("boardStatuses")
-      .find({ userId: userIdQuery, workspaceId, boardId })
+      .find({ workspaceId, boardId })
       .sort({ order: 1 })
       .limit(1)
       .toArray();
@@ -148,14 +145,13 @@ export async function POST(
     orConds.push({ taskCanonicalId: taskIdQuery });
     if (normalizedTaskIdQuery) orConds.push({ taskCanonicalId: normalizedTaskIdQuery });
     const existingItem = await db.collection("boardItems").findOne({
-      userId: userIdQuery,
       workspaceId,
       boardId,
       $or: orConds,
     });
     if (existingItem) {
       task = await db.collection("tasks").findOne({
-        userId: userIdQuery,
+        workspaceId,
         $or: [{ _id: taskIdQuery }, { id: taskId }],
       });
       if (!task) {
@@ -209,14 +205,14 @@ export async function POST(
   } else {
     const taskIdQuery = taskId;
     task = await db.collection("tasks").findOne({
-      userId: userIdQuery,
+      workspaceId,
       $or: [{ _id: taskIdQuery }, { id: taskId }],
     });
     if (!task) {
       return apiError(404, "request_error", "Task not found.");
     }
     await db.collection("tasks").updateOne(
-      { userId: userIdQuery, _id: task._id },
+      { _id: task._id, workspaceId },
       {
         $set: {
           status: status.category || task.status || "todo",
@@ -227,13 +223,12 @@ export async function POST(
       }
     );
     task = await db.collection("tasks").findOne({
-      userId: userIdQuery,
+      workspaceId,
       _id: task._id,
     });
   }
 
   const rank = await getNextRank(db, {
-    userId: userIdQuery,
     workspaceId,
     boardId,
     statusId: statusIdValue,
@@ -260,7 +255,6 @@ export async function POST(
       throw error;
     }
     const existingItem = await db.collection("boardItems").findOne({
-      userId: userIdQuery,
       workspaceId,
       boardId,
       taskId: taskProjectionId,
@@ -287,3 +281,4 @@ export async function POST(
     boardUpdatedAt: item.updatedAt,
   });
 }
+

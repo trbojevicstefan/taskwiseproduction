@@ -106,7 +106,6 @@ export const ensureDefaultBoard = async (
   workspaceId: string
 ) => {
   const existing = await db.collection("boards").findOne({
-    userId,
     workspaceId,
     isDefault: true,
   });

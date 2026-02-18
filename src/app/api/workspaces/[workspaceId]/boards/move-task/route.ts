@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+﻿import { NextResponse } from "next/server";
 import { apiError } from "@/lib/api-route";
 import { randomUUID } from "crypto";
 import { requireWorkspaceRouteAccess } from "@/lib/workspace-route-access";
@@ -40,7 +40,7 @@ export async function POST(
   }
 ) {
   const { workspaceId } = await Promise.resolve(params);
-  const access = await requireWorkspaceRouteAccess(workspaceId, "member");
+  const access = await requireWorkspaceRouteAccess(workspaceId, "member", { adminVisibilityKey: "boards" });
   if (!access.ok) {
     return access.response;
   }
@@ -55,14 +55,13 @@ export async function POST(
     return apiError(400, "request_error", "Workspace ID, board ID, and task ID are required.");
   }
 
-  const userIdQuery = userId;
   const taskIdQuery = taskId;
 
   const normalizedTaskId = taskId && taskId.includes(":") ? taskId.split(":").slice(1).join(":") : null;
   const normalizedTaskIdQuery = normalizedTaskId || null;
 
   const task = await db.collection("tasks").findOne({
-    userId: userIdQuery,
+    workspaceId,
     $or: [{ _id: taskIdQuery }, { id: taskId }],
   });
   if (!task) {
@@ -71,7 +70,7 @@ export async function POST(
 
   const statuses = await db
     .collection("boardStatuses")
-    .find({ userId: userIdQuery, workspaceId, boardId })
+    .find({ workspaceId, boardId })
     .sort({ order: 1 })
     .toArray();
   if (!statuses.length) {
@@ -101,13 +100,12 @@ export async function POST(
   orConds.push({ taskCanonicalId: taskIdQuery });
   if (normalizedTaskIdQuery) orConds.push({ taskCanonicalId: normalizedTaskIdQuery });
   await db.collection("boardItems").deleteMany({
-    userId: userIdQuery,
     workspaceId,
     $or: orConds,
   });
 
   await db.collection("tasks").updateOne(
-    { userId: userIdQuery, _id: task._id },
+    { _id: task._id, workspaceId },
     {
       $set: {
         status: status.category || task.status || "todo",
@@ -119,12 +117,11 @@ export async function POST(
   );
 
   const updatedTask = await db.collection("tasks").findOne({
-    userId: userIdQuery,
+    workspaceId,
     _id: task._id,
   });
 
   const rank = await getNextRank(db, {
-    userId: userIdQuery,
     workspaceId,
     boardId,
     statusId: statusIdValue,
@@ -161,3 +158,4 @@ export async function POST(
     boardId,
   });
 }
+

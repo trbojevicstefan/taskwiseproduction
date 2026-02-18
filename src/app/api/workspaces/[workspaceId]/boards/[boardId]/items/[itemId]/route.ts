@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+﻿import { NextResponse } from "next/server";
 import { apiError } from "@/lib/api-route";
 import { publishDomainEvent } from "@/lib/domain-events";
 import { requireWorkspaceRouteAccess } from "@/lib/workspace-route-access";
@@ -25,17 +25,15 @@ export async function PATCH(
   if (!boardId || !itemId) {
     return apiError(400, "request_error", "Board ID and item ID are required.");
   }
-  const access = await requireWorkspaceRouteAccess(workspaceId, "member");
+  const access = await requireWorkspaceRouteAccess(workspaceId, "member", { adminVisibilityKey: "boards" });
   if (!access.ok) {
     return access.response;
   }
   const { db, userId } = access;
 
   const body = await request.json().catch(() => ({}));
-  const userIdQuery = userId;
   const itemIdQuery = itemId;
   const filter = {
-    userId: userIdQuery,
     workspaceId,
     boardId,
     $or: [{ _id: itemIdQuery }, { id: itemId }],
@@ -59,7 +57,6 @@ export async function PATCH(
   if (typeof body.statusId === "string") {
     const statusIdQuery = body.statusId;
     const status = await db.collection("boardStatuses").findOne({
-      userId: userIdQuery,
       workspaceId,
       boardId,
       $or: [{ _id: statusIdQuery }, { id: body.statusId }],
@@ -80,7 +77,7 @@ export async function PATCH(
   }
 
   const taskFilter = {
-    userId: userIdQuery,
+    workspaceId,
     $or: [{ _id: item.taskId }, { id: item.taskId }],
   };
 
@@ -127,16 +124,14 @@ export async function DELETE(
   if (!boardId || !itemId) {
     return apiError(400, "request_error", "Board ID and item ID are required.");
   }
-  const access = await requireWorkspaceRouteAccess(workspaceId, "member");
+  const access = await requireWorkspaceRouteAccess(workspaceId, "member", { adminVisibilityKey: "boards" });
   if (!access.ok) {
     return access.response;
   }
-  const { db, userId } = access;
+  const { db } = access;
 
-  const userIdQuery = userId;
   const itemIdQuery = itemId;
   const filter = {
-    userId: userIdQuery,
     workspaceId,
     boardId,
     $or: [{ _id: itemIdQuery }, { id: itemId }],
@@ -149,3 +144,4 @@ export async function DELETE(
 
   return NextResponse.json({ ok: true });
 }
+

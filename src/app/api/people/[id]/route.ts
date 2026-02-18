@@ -3,6 +3,7 @@ import { apiError } from "@/lib/api-route";
 import { getDb } from "@/lib/db";
 import { getSessionUserId } from "@/lib/server-auth";
 import { normalizePersonNameKey } from "@/lib/transcript-utils";
+import { resolveWorkspaceScopeForUser } from "@/lib/workspace-scope";
 
 const serializePerson = (person: any) => ({
   ...person,
@@ -23,12 +24,25 @@ export async function GET(
   }
 
   const db = await getDb();
+  const { workspaceId, workspaceMemberUserIds } = await resolveWorkspaceScopeForUser(db, userId, {
+    minimumRole: "member",
+    adminVisibilityKey: "people",
+    includeMemberUserIds: true,
+  });
+  const workspaceFallbackScope = {
+    $or: [
+      { workspaceId },
+      {
+        workspaceId: { $exists: false },
+        userId: { $in: workspaceMemberUserIds },
+      },
+    ],
+  };
   const person = await db
     .collection("people")
     .findOne({
-      userId,
-      $or: [{ _id: id }, { id }, { slackId: id }],
-    });
+      $and: [workspaceFallbackScope as any, { $or: [{ _id: id }, { id }, { slackId: id }] }],
+    } as any);
   if (!person) {
     return apiError(404, "request_error", "Person not found");
   }
@@ -87,19 +101,31 @@ export async function GET(
   const tasks = await db
     .collection("tasks")
     .find({
-      userId,
-      $or: [
-        { "assignee.uid": assigneeQuery },
-        ...(person.email ? [{ "assignee.email": person.email }] : []),
-        ...(nameKeyList.length
-          ? [
-              { assigneeNameKey: { $in: nameKeyList } },
-              { assigneeName: { $in: nameKeyList } },
-              { "assignee.name": { $in: nameKeyList } },
-            ]
-          : []),
+      $and: [
+        {
+          $or: [
+            { workspaceId },
+            {
+              workspaceId: { $exists: false },
+              userId: { $in: workspaceMemberUserIds },
+            },
+          ],
+        },
+        {
+          $or: [
+            { "assignee.uid": assigneeQuery },
+            ...(person.email ? [{ "assignee.email": person.email }] : []),
+            ...(nameKeyList.length
+              ? [
+                  { assigneeNameKey: { $in: nameKeyList } },
+                  { assigneeName: { $in: nameKeyList } },
+                  { "assignee.name": { $in: nameKeyList } },
+                ]
+              : []),
+          ],
+        },
       ],
-    })
+    } as any)
     .toArray();
 
   const taskCounts = emptyCounts();
@@ -128,12 +154,24 @@ export async function PATCH(
   const update = { ...body, lastSeenAt: new Date() };
 
   const db = await getDb();
+  const { workspaceId, workspaceMemberUserIds } = await resolveWorkspaceScopeForUser(db, userId, {
+    minimumRole: "admin",
+    includeMemberUserIds: true,
+  });
+  const workspaceFallbackScope = {
+    $or: [
+      { workspaceId },
+      {
+        workspaceId: { $exists: false },
+        userId: { $in: workspaceMemberUserIds },
+      },
+    ],
+  };
   const existing = await db
     .collection("people")
     .findOne({
-      userId,
-      $or: [{ _id: id }, { id }, { slackId: id }],
-    });
+      $and: [workspaceFallbackScope as any, { $or: [{ _id: id }, { id }, { slackId: id }] }],
+    } as any);
   if (!existing) {
     return apiError(404, "request_error", "Person not found");
   }
@@ -200,19 +238,31 @@ export async function PATCH(
   const tasks = await db
     .collection("tasks")
     .find({
-      userId,
-      $or: [
-        { "assignee.uid": assigneeQuery },
-        ...(person.email ? [{ "assignee.email": person.email }] : []),
-        ...(nameKeyList.length
-          ? [
-              { assigneeNameKey: { $in: nameKeyList } },
-              { assigneeName: { $in: nameKeyList } },
-              { "assignee.name": { $in: nameKeyList } },
-            ]
-          : []),
+      $and: [
+        {
+          $or: [
+            { workspaceId },
+            {
+              workspaceId: { $exists: false },
+              userId: { $in: workspaceMemberUserIds },
+            },
+          ],
+        },
+        {
+          $or: [
+            { "assignee.uid": assigneeQuery },
+            ...(person.email ? [{ "assignee.email": person.email }] : []),
+            ...(nameKeyList.length
+              ? [
+                  { assigneeNameKey: { $in: nameKeyList } },
+                  { assigneeName: { $in: nameKeyList } },
+                  { "assignee.name": { $in: nameKeyList } },
+                ]
+              : []),
+          ],
+        },
       ],
-    })
+    } as any)
     .toArray();
 
   const taskCounts = emptyCounts();
@@ -238,13 +288,25 @@ export async function DELETE(
   }
 
   const db = await getDb();
+  const { workspaceId, workspaceMemberUserIds } = await resolveWorkspaceScopeForUser(db, userId, {
+    minimumRole: "admin",
+    includeMemberUserIds: true,
+  });
+  const workspaceFallbackScope = {
+    $or: [
+      { workspaceId },
+      {
+        workspaceId: { $exists: false },
+        userId: { $in: workspaceMemberUserIds },
+      },
+    ],
+  };
 
   const person = await db
     .collection("people")
     .findOne({
-      userId,
-      $or: [{ _id: id }, { id }, { slackId: id }],
-    });
+      $and: [workspaceFallbackScope as any, { $or: [{ _id: id }, { id }, { slackId: id }] }],
+    } as any);
   if (!person) {
     return apiError(404, "request_error", "Person not found");
   }
@@ -253,7 +315,20 @@ export async function DELETE(
   const assigneeId = person.id ?? person._id ?? id;
   const assigneeQuery = String(assigneeId);
   await db.collection("tasks").updateMany(
-    { userId, "assignee.uid": assigneeQuery },
+    {
+      $and: [
+        {
+          $or: [
+            { workspaceId },
+            {
+              workspaceId: { $exists: false },
+              userId: { $in: workspaceMemberUserIds },
+            },
+          ],
+        },
+        { "assignee.uid": assigneeQuery },
+      ],
+    } as any,
     { $set: { assignee: null, assigneeName: null } }
   );
 
@@ -271,7 +346,7 @@ export async function DELETE(
     const nameList = Array.from(nameMatches);
     const emailList = Array.from(emailMatches);
     await db.collection("meetings").updateMany(
-      { userId },
+      workspaceFallbackScope as any,
       {
         $pull: {
           attendees: {
@@ -284,7 +359,7 @@ export async function DELETE(
       }
     );
     await db.collection("chatSessions").updateMany(
-      { userId },
+      workspaceFallbackScope as any,
       {
         $pull: {
           people: {

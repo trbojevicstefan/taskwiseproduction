@@ -3,8 +3,11 @@ import { getServerSession } from "next-auth";
 import { findUserById, updateUserById } from "@/lib/db/users";
 import { getDb } from "@/lib/db";
 import { ensureWorkspaceBootstrapForUser } from "@/lib/workspace-context";
-import { listWorkspaceMembershipsForUser } from "@/lib/workspace-memberships";
-import { listWorkspacesByIds } from "@/lib/workspaces";
+import {
+  listActiveWorkspaceMembershipsForWorkspace,
+  listWorkspaceMembershipsForUser,
+} from "@/lib/workspace-memberships";
+import { findWorkspaceById, listWorkspacesByIds } from "@/lib/workspaces";
 
 jest.mock("next-auth", () => ({
   getServerSession: jest.fn(),
@@ -25,10 +28,12 @@ jest.mock("@/lib/workspace-context", () => ({
 
 jest.mock("@/lib/workspace-memberships", () => ({
   listWorkspaceMembershipsForUser: jest.fn(),
+  listActiveWorkspaceMembershipsForWorkspace: jest.fn(),
 }));
 
 jest.mock("@/lib/workspaces", () => ({
   listWorkspacesByIds: jest.fn(),
+  findWorkspaceById: jest.fn(),
 }));
 
 const mockedGetServerSession = getServerSession as jest.MockedFunction<
@@ -45,8 +50,15 @@ const mockedListWorkspaceMembershipsForUser =
   listWorkspaceMembershipsForUser as jest.MockedFunction<
     typeof listWorkspaceMembershipsForUser
   >;
+const mockedListActiveWorkspaceMembershipsForWorkspace =
+  listActiveWorkspaceMembershipsForWorkspace as jest.MockedFunction<
+    typeof listActiveWorkspaceMembershipsForWorkspace
+  >;
 const mockedListWorkspacesByIds = listWorkspacesByIds as jest.MockedFunction<
   typeof listWorkspacesByIds
+>;
+const mockedFindWorkspaceById = findWorkspaceById as jest.MockedFunction<
+  typeof findWorkspaceById
 >;
 
 describe("GET /api/users/me compatibility", () => {
@@ -89,8 +101,15 @@ describe("GET /api/users/me compatibility", () => {
       {
         _id: "workspace-1",
         name: "Main Workspace",
+        settings: null,
       },
     ] as any);
+    mockedListActiveWorkspaceMembershipsForWorkspace.mockResolvedValue([] as any);
+    mockedFindWorkspaceById.mockResolvedValue({
+      _id: "workspace-1",
+      name: "Main Workspace",
+      settings: null,
+    } as any);
   });
 
   it("hydrates activeWorkspaceId for legacy users and returns membership summary", async () => {

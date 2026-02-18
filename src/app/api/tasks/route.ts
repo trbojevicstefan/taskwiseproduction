@@ -16,6 +16,7 @@ import { getWorkspaceIdForUser } from "@/lib/workspace";
 import { TASK_LIST_PROJECTION } from "@/lib/task-projections";
 import { assertWorkspaceAccess, ensureWorkspaceBootstrapForUser } from "@/lib/workspace-context";
 import { isWorkspaceMembershipGuardEnabled } from "@/lib/workspace-flags";
+import { resolveWorkspaceScopeForUser } from "@/lib/workspace-scope";
 
 const ROUTE = "/api/tasks";
 
@@ -116,7 +117,7 @@ export async function GET(request: Request) {
 
     const db = await getDb();
     const { searchParams } = new URL(request.url);
-    const workspaceId = searchParams.get("workspaceId");
+    const requestedWorkspaceId = searchParams.get("workspaceId");
     const parentId = searchParams.get("parentId");
     const includeSuggested = searchParams.get("includeSuggested") === "true";
     const paginateRequested =
@@ -128,14 +129,13 @@ export async function GET(request: Request) {
       paginateRequested ? MAX_TASKS_PAGE_SIZE : MAX_TASKS_LEGACY_LIMIT
     );
     const cursor = decodeTaskCursor(searchParams.get("cursor"));
-    const filters: Record<string, any> = { userId };
-    if (workspaceId) {
-      if (isWorkspaceMembershipGuardEnabled()) {
-        await ensureWorkspaceBootstrapForUser(db, userId);
-        await assertWorkspaceAccess(db, userId, workspaceId, "member");
-      }
-      filters.workspaceId = workspaceId;
-    }
+    const { workspaceId } = await resolveWorkspaceScopeForUser(db, userId, {
+      requestedWorkspaceId,
+      minimumRole: "member",
+      adminVisibilityKey: "tasks",
+    });
+
+    const filters: Record<string, any> = { workspaceId };
     if (parentId) {
       filters.parentId = parentId;
     }

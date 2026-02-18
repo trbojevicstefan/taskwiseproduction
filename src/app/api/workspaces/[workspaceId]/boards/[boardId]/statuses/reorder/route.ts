@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+﻿import { NextResponse } from "next/server";
 import { apiError } from "@/lib/api-route";
 import { requireWorkspaceRouteAccess } from "@/lib/workspace-route-access";
 
@@ -12,11 +12,11 @@ export async function POST(
   if (!boardId) {
     return apiError(400, "request_error", "Board ID is required.");
   }
-  const access = await requireWorkspaceRouteAccess(workspaceId, "member");
+  const access = await requireWorkspaceRouteAccess(workspaceId, "member", { adminVisibilityKey: "boards" });
   if (!access.ok) {
     return access.response;
   }
-  const { db, userId } = access;
+  const { db } = access;
 
   const body = await request.json().catch(() => ({}));
   const updates = Array.isArray(body.updates) ? body.updates : [];
@@ -24,13 +24,11 @@ export async function POST(
     return apiError(400, "request_error", "updates is required.");
   }
 
-  const userIdQuery = userId;
   const now = new Date();
 
   const operations = updates.map((item: any) => ({
     updateOne: {
       filter: {
-        userId: userIdQuery,
         workspaceId,
         boardId,
         $or: [{ _id: item.id }, { id: item.id }],
@@ -48,6 +46,7 @@ export async function POST(
 
   return NextResponse.json({ ok: true });
 }
+
 
 
 

@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+﻿import { NextResponse } from "next/server";
 import { apiError } from "@/lib/api-route";
 import { randomUUID } from "crypto";
 import { requireWorkspaceRouteAccess } from "@/lib/workspace-route-access";
@@ -21,16 +21,15 @@ export async function GET(
   if (!boardId) {
     return apiError(400, "request_error", "Board ID is required.");
   }
-  const access = await requireWorkspaceRouteAccess(workspaceId, "member");
+  const access = await requireWorkspaceRouteAccess(workspaceId, "member", { adminVisibilityKey: "boards" });
   if (!access.ok) {
     return access.response;
   }
-  const { db, userId } = access;
+  const { db } = access;
 
-  const userIdQuery = userId;
   const statuses = await db
     .collection("boardStatuses")
-    .find({ userId: userIdQuery, workspaceId, boardId })
+    .find({ workspaceId, boardId })
     .sort({ order: 1, createdAt: 1 })
     .toArray();
 
@@ -47,7 +46,7 @@ export async function POST(
   if (!boardId) {
     return apiError(400, "request_error", "Board ID is required.");
   }
-  const access = await requireWorkspaceRouteAccess(workspaceId, "member");
+  const access = await requireWorkspaceRouteAccess(workspaceId, "member", { adminVisibilityKey: "boards" });
   if (!access.ok) {
     return access.response;
   }
@@ -67,10 +66,9 @@ export async function POST(
       ? body.category
       : "todo";
 
-  const userIdQuery = userId;
   const lastStatus = await db
     .collection("boardStatuses")
-    .find({ userId: userIdQuery, workspaceId, boardId })
+    .find({ workspaceId, boardId })
     .sort({ order: -1 })
     .limit(1)
     .toArray();
@@ -95,6 +93,7 @@ export async function POST(
 
   return NextResponse.json(serializeStatus(status));
 }
+
 
 
 

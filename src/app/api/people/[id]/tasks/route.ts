@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
 import { getSessionUserId } from "@/lib/server-auth";
 import { normalizePersonNameKey } from "@/lib/transcript-utils";
+import { resolveWorkspaceScopeForUser } from "@/lib/workspace-scope";
 import type { ExtractedTaskSchema } from "@/types/chat";
 import type { ObjectId, Db, WithId, Document } from "mongodb";
 
@@ -172,12 +173,25 @@ export async function GET(
   }
 
   const db = await getDb();
+  const { workspaceId, workspaceMemberUserIds } = await resolveWorkspaceScopeForUser(db, userId, {
+    minimumRole: "member",
+    adminVisibilityKey: "people",
+    includeMemberUserIds: true,
+  });
   const assigneeQuery = id;
+  const workspaceFallbackScope = {
+    $or: [
+      { workspaceId },
+      {
+        workspaceId: { $exists: false },
+        userId: { $in: workspaceMemberUserIds },
+      },
+    ],
+  };
 
   const person = await (db as Db).collection<PersonDocument>("people").findOne({
-    userId,
-    $or: [{ _id: assigneeQuery }, { id }, { slackId: id }],
-  } as import("mongodb").Filter<PersonDocument>);
+    $and: [workspaceFallbackScope as any, { $or: [{ _id: assigneeQuery }, { id }, { slackId: id }] }],
+  } as any);
 
   if (!person) {
     return NextResponse.json({ error: "Person not found" }, { status: 404 });
@@ -214,21 +228,31 @@ export async function GET(
   const tasks = await (db as Db)
     .collection<TaskDocument>("tasks")
     .find({
-      userId,
-      $or: [
-        { "assignee.uid": assigneeQuery },
-        ...(person.email ? [{ "assignee.email": person.email }] : []),
-        ...(nameKeyList.length
-          ? [{ assigneeNameKey: { $in: nameKeyList } }]
-          : []),
-        ...(nameVariantList.length
-          ? [
-            { assigneeName: { $in: nameVariantList } },
-            { "assignee.name": { $in: nameVariantList } },
-          ]
-          : []),
+      $and: [
+        {
+          $or: [
+            { workspaceId },
+            {
+              workspaceId: { $exists: false },
+              userId: { $in: workspaceMemberUserIds },
+            },
+          ],
+        },
+        {
+          $or: [
+            { "assignee.uid": assigneeQuery },
+            ...(person.email ? [{ "assignee.email": person.email }] : []),
+            ...(nameKeyList.length ? [{ assigneeNameKey: { $in: nameKeyList } }] : []),
+            ...(nameVariantList.length
+              ? [
+                  { assigneeName: { $in: nameVariantList } },
+                  { "assignee.name": { $in: nameVariantList } },
+                ]
+              : []),
+          ],
+        },
       ],
-    } as import("mongodb").Filter<TaskDocument>)
+    } as any)
     .sort({ createdAt: -1 })
     .toArray();
 
@@ -247,13 +271,17 @@ export async function GET(
 
   const meetings = await (db as Db)
     .collection<MeetingDocument>("meetings")
-    .find({ userId, isHidden: { $ne: true } } as import("mongodb").Filter<MeetingDocument>)
+    .find(
+      {
+        $and: [workspaceFallbackScope as any, { isHidden: { $ne: true } }],
+      } as any
+    )
     .project({ _id: 1, title: 1, extractedTasks: 1 })
     .toArray();
 
   const chatSessions = await (db as Db)
     .collection<ChatSessionDocument>("chatSessions")
-    .find({ userId } as import("mongodb").Filter<ChatSessionDocument>)
+    .find(workspaceFallbackScope as any)
     .project({ _id: 1, title: 1, suggestedTasks: 1, sourceMeetingId: 1 })
     .toArray();
 

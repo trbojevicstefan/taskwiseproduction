@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+﻿import { NextResponse } from "next/server";
 import { apiError } from "@/lib/api-route";
 import { createBoardWithTemplate, ensureDefaultBoard } from "@/lib/boards";
 import { getBoardTemplate } from "@/lib/board-templates";
@@ -19,16 +19,14 @@ export async function GET(
   }: { params: { workspaceId: string } | Promise<{ workspaceId: string }> }
 ) {
   const { workspaceId } = await Promise.resolve(params);
-  const access = await requireWorkspaceRouteAccess(workspaceId, "member");
+  const access = await requireWorkspaceRouteAccess(workspaceId, "member", { adminVisibilityKey: "boards" });
   if (!access.ok) {
     return access.response;
   }
   const { db, userId } = access;
-
-  const userIdQuery = userId;
   let boards = await db
     .collection("boards")
-    .find({ userId: userIdQuery, workspaceId })
+    .find({ workspaceId })
     .sort({ createdAt: 1 })
     .toArray();
 
@@ -47,7 +45,7 @@ export async function POST(
   }: { params: { workspaceId: string } | Promise<{ workspaceId: string }> }
 ) {
   const { workspaceId } = await Promise.resolve(params);
-  const access = await requireWorkspaceRouteAccess(workspaceId, "member");
+  const access = await requireWorkspaceRouteAccess(workspaceId, "member", { adminVisibilityKey: "boards" });
   if (!access.ok) {
     return access.response;
   }
@@ -84,6 +82,7 @@ export async function POST(
 
   return NextResponse.json(serializeBoard(board));
 }
+
 
 
 

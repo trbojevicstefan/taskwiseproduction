@@ -67,6 +67,15 @@ export const IntegrationsProvider = ({ children }: { children: ReactNode }) => {
   const [isLoadingSlackConnection, setIsLoadingSlackConnection] = useState(true);
   const [isLoadingFathomConnection, setIsLoadingFathomConnection] = useState(true);
   const [isLoadingGoogleConnection, setIsLoadingGoogleConnection] = useState(true);
+  const workspaceSlack = user?.workspaceIntegrations?.slack;
+  const workspaceGoogle = user?.workspaceIntegrations?.google;
+  const workspaceFathom = user?.workspaceIntegrations?.fathom;
+  const slackManagedByWorkspace =
+    Boolean(workspaceSlack?.connected) && !workspaceSlack?.connectedByCurrentUser;
+  const googleManagedByWorkspace =
+    Boolean(workspaceGoogle?.connected) && !workspaceGoogle?.connectedByCurrentUser;
+  const fathomManagedByWorkspace =
+    Boolean(workspaceFathom?.connected) && !workspaceFathom?.connectedByCurrentUser;
 
   const warnDisabled = useCallback(() => {
     toast({
@@ -99,6 +108,13 @@ export const IntegrationsProvider = ({ children }: { children: ReactNode }) => {
   };
 
   const disconnectGoogleTasks = async () => {
+    if (googleManagedByWorkspace && !user?.googleConnected) {
+      toast({
+        title: "Managed by Workspace",
+        description: "Google integration is connected by another workspace admin.",
+      });
+      return;
+    }
     try {
       await fetch("/api/google/revoke", { method: "POST" });
       await refreshUserProfile();
@@ -143,6 +159,13 @@ export const IntegrationsProvider = ({ children }: { children: ReactNode }) => {
     window.location.href = "/api/slack/oauth/start";
   };
   const disconnectSlack = async () => {
+    if (slackManagedByWorkspace && !user?.slackTeamId) {
+      toast({
+        title: "Managed by Workspace",
+        description: "Slack integration is connected by another workspace admin.",
+      });
+      return;
+    }
     try {
       await fetch("/api/slack/revoke", { method: "POST" });
       await refreshUserProfile();
@@ -162,6 +185,13 @@ export const IntegrationsProvider = ({ children }: { children: ReactNode }) => {
   };
 
   const disconnectFathom = async () => {
+    if (fathomManagedByWorkspace && !user?.fathomConnected) {
+      toast({
+        title: "Managed by Workspace",
+        description: "Fathom integration is connected by another workspace admin.",
+      });
+      return;
+    }
     try {
       await fetch("/api/fathom/revoke", { method: "POST" });
       await refreshUserProfile();
@@ -202,7 +232,7 @@ export const IntegrationsProvider = ({ children }: { children: ReactNode }) => {
   return (
     <IntegrationsContext.Provider value={{
       googleTokenInfo,
-      isGoogleTasksConnected: Boolean(user?.googleConnected),
+      isGoogleTasksConnected: Boolean(user?.googleConnected || workspaceGoogle?.connected),
       isLoadingGoogleConnection,
       connectGoogleTasks,
       disconnectGoogleTasks,
@@ -213,12 +243,12 @@ export const IntegrationsProvider = ({ children }: { children: ReactNode }) => {
       trelloToken,
       connectTrello,
       disconnectTrello,
-      isSlackConnected: Boolean(user?.slackTeamId),
+      isSlackConnected: Boolean(user?.slackTeamId || workspaceSlack?.connected),
       isLoadingSlackConnection,
       slackInstallation,
       connectSlack,
       disconnectSlack,
-      isFathomConnected: Boolean(user?.fathomConnected),
+      isFathomConnected: Boolean(user?.fathomConnected || workspaceFathom?.connected),
       isLoadingFathomConnection,
       connectFathom,
       disconnectFathom,

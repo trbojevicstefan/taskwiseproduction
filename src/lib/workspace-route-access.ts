@@ -7,12 +7,18 @@ import {
 } from "@/lib/workspace-context";
 import { isWorkspaceMembershipGuardEnabled } from "@/lib/workspace-flags";
 import type { WorkspaceRole } from "@/lib/workspace-roles";
+import {
+  isWorkspaceAdminVisibilityAllowed,
+  type WorkspaceAdminVisibilityKey,
+} from "@/lib/workspace-settings";
 
 type WorkspaceRouteAccessResult =
   | {
       ok: true;
       db: Awaited<ReturnType<typeof getDb>>;
       userId: string;
+      workspace: any;
+      membership: any;
     }
   | {
       ok: false;
@@ -21,7 +27,8 @@ type WorkspaceRouteAccessResult =
 
 export const requireWorkspaceRouteAccess = async (
   workspaceId: string,
-  minimumRole: WorkspaceRole = "member"
+  minimumRole: WorkspaceRole = "member",
+  options?: { adminVisibilityKey?: WorkspaceAdminVisibilityKey }
 ): Promise<WorkspaceRouteAccessResult> => {
   const userId = await getSessionUserId();
   if (!userId) {
@@ -40,13 +47,32 @@ export const requireWorkspaceRouteAccess = async (
 
   const db = await getDb();
   if (!isWorkspaceMembershipGuardEnabled()) {
-    return { ok: true, db, userId };
+    return {
+      ok: true,
+      db,
+      userId,
+      workspace: null,
+      membership: { role: "owner", status: "active" },
+    };
   }
 
   try {
     await ensureWorkspaceBootstrapForUser(db, userId);
-    await assertWorkspaceAccess(db, userId, workspaceId, minimumRole);
-    return { ok: true, db, userId };
+    const access = await assertWorkspaceAccess(db, userId, workspaceId, minimumRole);
+    if (
+      options?.adminVisibilityKey &&
+      !isWorkspaceAdminVisibilityAllowed(
+        access.membership.role,
+        access.workspace.settings,
+        options.adminVisibilityKey
+      )
+    ) {
+      return {
+        ok: false,
+        response: apiError(403, "forbidden", "Workspace admin access is disabled."),
+      };
+    }
+    return { ok: true, db, userId, workspace: access.workspace, membership: access.membership };
   } catch (error) {
     if (error instanceof ApiRouteError) {
       return {

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { apiError } from "@/lib/api-route";
 import { randomBytes } from "crypto";
+import { getDb } from "@/lib/db";
 import { getSessionUserId } from "@/lib/server-auth";
 import {
   deleteManagedFathomWebhooks,
@@ -11,11 +12,21 @@ import {
 } from "@/lib/fathom";
 import { findUserById, updateUserById } from "@/lib/db/users";
 import { logFathomIntegration } from "@/lib/fathom-logs";
+import { resolveWorkspaceScopeForUser } from "@/lib/workspace-scope";
 
 export async function POST() {
   const userId = await getSessionUserId();
   if (!userId) {
     return apiError(401, "request_error", "Unauthorized");
+  }
+  try {
+    const db = await getDb();
+    await resolveWorkspaceScopeForUser(db, userId, {
+      minimumRole: "member",
+      adminVisibilityKey: "integrations",
+    });
+  } catch (error: any) {
+    return apiError(error?.status || 403, "request_error", error?.message || "Forbidden");
   }
 
   console.log("Fathom webhook setup requested", { userId });

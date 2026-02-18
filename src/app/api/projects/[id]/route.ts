@@ -3,6 +3,7 @@ import { z } from "zod";
 import { getDb } from "@/lib/db";
 import { getSessionUserId } from "@/lib/server-auth";
 import { apiError, mapApiError, parseJsonBody } from "@/lib/api-route";
+import { resolveWorkspaceScopeForUser } from "@/lib/workspace-scope";
 
 const updateProjectSchema = z
   .object({
@@ -35,9 +36,22 @@ export async function PATCH(
     }
 
     const db = await getDb();
+    const { workspaceId, workspaceMemberUserIds } = await resolveWorkspaceScopeForUser(db, userId, {
+      minimumRole: "member",
+      adminVisibilityKey: "projects",
+      includeMemberUserIds: true,
+    });
+    const workspaceFallbackScope = {
+      $or: [
+        { workspaceId },
+        {
+          workspaceId: { $exists: false },
+          userId: { $in: workspaceMemberUserIds },
+        },
+      ],
+    };
     const filter = {
-      userId,
-      $or: [{ _id: id }, { id }],
+      $and: [workspaceFallbackScope as any, { $or: [{ _id: id }, { id }] }],
     };
     await db.collection("projects").updateOne(filter, { $set: update });
 
@@ -69,9 +83,22 @@ export async function DELETE(
 
     const { id } = await params;
     const db = await getDb();
+    const { workspaceId, workspaceMemberUserIds } = await resolveWorkspaceScopeForUser(db, userId, {
+      minimumRole: "member",
+      adminVisibilityKey: "projects",
+      includeMemberUserIds: true,
+    });
+    const workspaceFallbackScope = {
+      $or: [
+        { workspaceId },
+        {
+          workspaceId: { $exists: false },
+          userId: { $in: workspaceMemberUserIds },
+        },
+      ],
+    };
     const filter = {
-      userId,
-      $or: [{ _id: id }, { id }],
+      $and: [workspaceFallbackScope as any, { $or: [{ _id: id }, { id }] }],
     };
     const result = await db.collection("projects").deleteOne(filter);
     if (!result.deletedCount) {
@@ -79,7 +106,10 @@ export async function DELETE(
     }
     await db
       .collection("tasks")
-      .deleteMany({ userId, projectId: id });
+      .deleteMany({
+        workspaceId,
+        $or: [{ projectId: id }, { projectId: String(id) }],
+      });
 
     return NextResponse.json({ ok: true });
   } catch (error) {

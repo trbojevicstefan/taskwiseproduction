@@ -1,6 +1,7 @@
 import { GET } from "@/app/api/tasks/route";
 import { getDb } from "@/lib/db";
 import { getSessionUserId } from "@/lib/server-auth";
+import { resolveWorkspaceScopeForUser } from "@/lib/workspace-scope";
 
 jest.mock("@/lib/db", () => ({
   getDb: jest.fn(),
@@ -8,6 +9,10 @@ jest.mock("@/lib/db", () => ({
 
 jest.mock("@/lib/server-auth", () => ({
   getSessionUserId: jest.fn(),
+}));
+
+jest.mock("@/lib/workspace-scope", () => ({
+  resolveWorkspaceScopeForUser: jest.fn(),
 }));
 
 jest.mock("@/lib/observability-metrics", () => ({
@@ -18,11 +23,19 @@ const mockedGetDb = getDb as jest.MockedFunction<typeof getDb>;
 const mockedGetSessionUserId = getSessionUserId as jest.MockedFunction<
   typeof getSessionUserId
 >;
+const mockedResolveWorkspaceScopeForUser =
+  resolveWorkspaceScopeForUser as jest.MockedFunction<typeof resolveWorkspaceScopeForUser>;
 
 describe("GET /api/tasks pagination", () => {
   beforeEach(() => {
     jest.clearAllMocks();
     mockedGetSessionUserId.mockResolvedValue("user-1");
+    mockedResolveWorkspaceScopeForUser.mockResolvedValue({
+      workspaceId: "workspace-1",
+      workspace: null as any,
+      membership: null as any,
+      workspaceMemberUserIds: ["user-1"],
+    });
   });
 
   it("returns cursor-paginated tasks when paginate=1 is provided", async () => {

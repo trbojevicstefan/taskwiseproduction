@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+﻿import { NextResponse } from "next/server";
 import { apiError } from "@/lib/api-route";
 import { requireWorkspaceRouteAccess } from "@/lib/workspace-route-access";
 
@@ -13,17 +13,16 @@ export async function GET(
   }
 ) {
   const { workspaceId, taskId } = await Promise.resolve(params);
-  const access = await requireWorkspaceRouteAccess(workspaceId, "member");
+  const access = await requireWorkspaceRouteAccess(workspaceId, "member", { adminVisibilityKey: "boards" });
   if (!access.ok) {
     return access.response;
   }
-  const { db, userId } = access;
+  const { db } = access;
 
   if (!workspaceId || !taskId) {
     return apiError(400, "request_error", "Workspace ID and task ID are required.");
   }
 
-  const userIdQuery = userId;
   const taskIdQuery = taskId;
   const normalizedTaskId = taskId && taskId.includes(":") ? taskId.split(":").slice(1).join(":") : null;
   const normalizedTaskIdQuery = normalizedTaskId || null;
@@ -36,7 +35,7 @@ export async function GET(
 
   const items = await db
     .collection("boardItems")
-    .find({ userId: userIdQuery, workspaceId, $or: orConditions })
+    .find({ workspaceId, $or: orConditions })
     .sort({ updatedAt: -1, createdAt: -1 })
     .toArray();
 
@@ -46,5 +45,6 @@ export async function GET(
 
   return NextResponse.json({ boardId: boardIds[0] || null, boardIds });
 }
+
 
 
