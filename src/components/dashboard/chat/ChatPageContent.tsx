@@ -576,7 +576,36 @@ export default function ChatPageContent() {
   useEffect(() => {
     const activeSession = getActiveSession();
     if (activeSession) {
-      if (user?.onboardingCompleted && (activeSession.people || []).length > 0) {
+      const definitelyNewPeople = (activeSession.people || []).filter((person: any) => {
+        const email =
+          typeof person.email === "string" ? person.email.trim().toLowerCase() : "";
+        if (!email) return false;
+
+        const exactEmailMatch = people.some(
+          (existing: any) =>
+            typeof existing.email === "string" &&
+            existing.email.toLowerCase() === email
+        );
+        if (exactEmailMatch) return false;
+
+        const normalizedName = (person.name || "").toLowerCase();
+        const exactNameMatch = normalizedName
+          ? people.some(
+              (existing: any) =>
+                typeof existing.name === "string" &&
+                existing.name.toLowerCase() === normalizedName
+            )
+          : false;
+        if (exactNameMatch) return false;
+
+        const fuzzyMatch = getBestPersonMatch(
+          { name: person.name, email: person.email },
+          people,
+          0.9
+        );
+        return !fuzzyMatch;
+      });
+      if (user?.onboardingCompleted && definitelyNewPeople.length > 0) {
         const hasSeenPopup = sessionStorage.getItem(`seen-people-popup-${activeSession.id}`);
         if (!hasSeenPopup) {
           setIsDiscoveryDialogOpen(true);
@@ -584,7 +613,7 @@ export default function ChatPageContent() {
         }
       }
     }
-  }, [activeSessionId, user?.onboardingCompleted, getActiveSession]);
+  }, [activeSessionId, getActiveSession, people, user?.onboardingCompleted]);
 
 
   useEffect(() => {
@@ -1399,9 +1428,42 @@ export default function ChatPageContent() {
                 if (result.people && result.people.length > 0) {
                     const filteredPeople = result.people.filter((person: { name: string; email?: string | null }) => !isPersonBlocked(person));
                     const existingPeopleNames = new Set((currentSession?.people || []).map((person: { name: string }) => person.name));
-                    const newPeopleDiscovered = filteredPeople.filter((person: { name: string }) => !existingPeopleNames.has(person.name));
-                    if (newPeopleDiscovered.length > 0) {
+                    const hasSessionPeopleChanges = filteredPeople.some(
+                      (person: { name: string }) => !existingPeopleNames.has(person.name)
+                    );
+                    if (hasSessionPeopleChanges) {
                         await updateSession(activeSessionId, { people: filteredPeople });
+                    }
+                    const definitelyNewPeople = filteredPeople.filter((person: { name: string; email?: string | null }) => {
+                        const email =
+                          typeof person.email === "string" ? person.email.trim().toLowerCase() : "";
+                        if (!email) return false;
+
+                        const exactEmailMatch = people.some(
+                          (existing: any) =>
+                            typeof existing.email === "string" &&
+                            existing.email.toLowerCase() === email
+                        );
+                        if (exactEmailMatch) return false;
+
+                        const normalizedName = (person.name || "").toLowerCase();
+                        const exactNameMatch = normalizedName
+                          ? people.some(
+                              (existing: any) =>
+                                typeof existing.name === "string" &&
+                                existing.name.toLowerCase() === normalizedName
+                            )
+                          : false;
+                        if (exactNameMatch) return false;
+
+                        const fuzzyMatch = getBestPersonMatch(
+                          { name: person.name, email: person.email },
+                          people,
+                          0.9
+                        );
+                        return !fuzzyMatch;
+                    });
+                    if (definitelyNewPeople.length > 0) {
                         const hasSeenPopup = sessionStorage.getItem(`seen-people-popup-${activeSessionId}`);
                         if (!hasSeenPopup) {
                             setIsDiscoveryDialogOpen(true);

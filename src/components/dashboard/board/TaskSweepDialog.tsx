@@ -1,10 +1,7 @@
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
-import { motion } from "framer-motion";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  ArrowDown,
-  ArrowLeft,
   ArrowUp,
   CalendarClock,
   CheckCircle2,
@@ -164,7 +161,7 @@ export default function TaskSweepDialog({
     [candidates]
   );
 
-  const resetWizard = () => {
+  const resetWizard = useCallback(() => {
     setPhase("setup");
     setSessionSizeInput(String(defaultSessionSize));
     setQueue([]);
@@ -173,14 +170,13 @@ export default function TaskSweepDialog({
     setPendingDiscardTask(null);
     setDiscardReason("low_intent");
     setIsSubmitting(false);
-  };
+  }, [defaultSessionSize]);
 
   useEffect(() => {
     if (open) {
       resetWizard();
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open]);
+  }, [open, resetWizard]);
 
   const beginSession = () => {
     const sessionSize = parsePositiveInt(sessionSizeInput, defaultSessionSize, maxSessionSize);
@@ -234,28 +230,6 @@ export default function TaskSweepDialog({
       return;
     }
     await advance(currentTask, action);
-  };
-
-  const handleSwipeEnd = async (
-    _event: MouseEvent | TouchEvent | PointerEvent,
-    info: { offset: { x: number; y: number } }
-  ) => {
-    if (!currentTask || phase !== "sweeping" || isSubmitting) return;
-    if (info.offset.y >= 100) {
-      await handleAction("complete");
-      return;
-    }
-    if (info.offset.x >= 120) {
-      await handleAction("keep");
-      return;
-    }
-    if (info.offset.x <= -120) {
-      await handleAction("discard");
-      return;
-    }
-    if (info.offset.y <= -100) {
-      await handleAction("snooze");
-    }
   };
 
   const progressLabel =
@@ -316,23 +290,23 @@ export default function TaskSweepDialog({
                 </div>
 
                 <div className="rounded-xl border bg-muted/30 p-4">
-                  <div className="text-sm font-medium">Gesture and action map</div>
+                  <div className="text-sm font-medium">Action map</div>
                   <div className="mt-3 grid gap-2 text-xs sm:grid-cols-2">
                     <div className="flex items-center gap-2 rounded-md border border-emerald-200 bg-emerald-50 p-2 text-emerald-700">
                       <CheckCircle2 className="h-4 w-4" />
-                      Swipe right / Keep
+                      Keep
                     </div>
                     <div className="flex items-center gap-2 rounded-md border border-rose-200 bg-rose-50 p-2 text-rose-700">
-                      <ArrowLeft className="h-4 w-4" />
-                      Swipe left / Discard
+                      <Trash2 className="h-4 w-4" />
+                      Discard
                     </div>
                     <div className="flex items-center gap-2 rounded-md border border-amber-200 bg-amber-50 p-2 text-amber-700">
                       <ArrowUp className="h-4 w-4" />
-                      Swipe up / Snooze
+                      Snooze
                     </div>
                     <div className="flex items-center gap-2 rounded-md border border-sky-200 bg-sky-50 p-2 text-sky-700">
-                      <ArrowDown className="h-4 w-4" />
-                      Swipe down / Complete
+                      <CheckCheck className="h-4 w-4" />
+                      Complete
                     </div>
                   </div>
                 </div>
@@ -370,7 +344,7 @@ export default function TaskSweepDialog({
                   <Badge variant="secondary">{progressLabel}</Badge>
                 </DialogTitle>
                 <DialogDescription>
-                  Use actions or gestures to process tasks quickly.
+                  Use action buttons to process tasks quickly.
                 </DialogDescription>
               </DialogHeader>
               <div className="mt-4 space-y-4">
@@ -381,12 +355,8 @@ export default function TaskSweepDialog({
                   />
                 </div>
 
-                <motion.div
+                <div
                   key={currentTask.id}
-                  drag
-                  dragElastic={0.2}
-                  dragMomentum={false}
-                  onDragEnd={handleSwipeEnd}
                   className="rounded-2xl border bg-card p-5 shadow-sm"
                 >
                   <div className="flex flex-wrap items-center gap-2">
@@ -519,7 +489,7 @@ export default function TaskSweepDialog({
                       </div>
                     </div>
                   </details>
-                </motion.div>
+                </div>
 
                 <div className="grid grid-cols-2 gap-2">
                   <Button

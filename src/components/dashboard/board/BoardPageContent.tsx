@@ -18,6 +18,7 @@ import {
   Plus,
   Search,
   Sparkles,
+  Trash2,
 } from "lucide-react";
 import {
   endOfWeek,
@@ -490,6 +491,7 @@ function AssigneeDropdown({
   const [stageToEdit, setStageToEdit] = useState<BoardStatus | null>(null);
   const [stageColorDraft, setStageColorDraft] = useState("#2563eb");
   const [stageToDelete, setStageToDelete] = useState<BoardStatus | null>(null);
+  const [boardToDelete, setBoardToDelete] = useState<Board | null>(null);
     const [isAssignDialogOpen, setIsAssignDialogOpen] = useState(false);
     const [isSetDueDateDialogOpen, setIsSetDueDateDialogOpen] = useState(false);
     const [isStatusDialogOpen, setIsStatusDialogOpen] = useState(false);
@@ -1450,6 +1452,56 @@ function AssigneeDropdown({
     [newBoardTemplateId]
   );
 
+  const handleDeleteBoard = useCallback(async () => {
+    if (!boardToDelete) {
+      setBoardToDelete(null);
+      return;
+    }
+
+    const deletingBoardId = boardToDelete.id;
+    const deletingBoardName = boardToDelete.name || "Board";
+
+    try {
+      await apiFetch(`/api/workspaces/${_workspaceId}/boards/${deletingBoardId}`, {
+        method: "DELETE",
+      });
+      const remainingBoards = boards.filter((board: any) => board.id !== deletingBoardId);
+      setBoards(remainingBoards);
+      setBoardToDelete(null);
+
+      if (activeBoardId === deletingBoardId) {
+        setBoardStatuses([]);
+        setTasks([]);
+        if (remainingBoards.length > 0) {
+          handleBoardChange(remainingBoards[0].id);
+        } else {
+          setActiveBoardId(null);
+          await loadBoards();
+        }
+      }
+
+      toast({
+        title: "Board deleted",
+        description: `"${deletingBoardName}" has been deleted.`,
+      });
+    } catch (error) {
+      console.error("Failed to delete board:", error);
+      toast({
+        title: "Could not delete board",
+        description: error instanceof Error ? error.message : "Try again in a moment.",
+        variant: "destructive",
+      });
+    }
+  }, [
+    _workspaceId,
+    activeBoardId,
+    boardToDelete,
+    boards,
+    handleBoardChange,
+    loadBoards,
+    toast,
+  ]);
+
   const openStageDialog = useCallback(() => {
     setNewStageLabel("");
     setNewStageCategory("todo");
@@ -2404,12 +2456,9 @@ function AssigneeDropdown({
       <DashboardHeader
         pageIcon={LayoutGrid}
         pageTitle={
-          <div className="flex flex-col">
-            <h1 className="text-2xl font-bold font-headline">Board</h1>
-            <p className="text-sm text-muted-foreground">
-              Manage tasks, track progress, and collaborate.
-            </p>
-          </div>
+          <h1 className="text-2xl font-bold font-headline">
+            {activeBoard?.name || "Board"}
+          </h1>
         }
       >
         <div className="flex flex-wrap items-center gap-3">
@@ -2439,6 +2488,16 @@ function AssigneeDropdown({
             <Button variant="outline" size="sm" onClick={openBoardDialog}>
               <Plus className="mr-2 h-4 w-4" />
               New board
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="text-destructive hover:text-destructive"
+              onClick={() => setBoardToDelete(activeBoard)}
+              disabled={!activeBoard}
+            >
+              <Trash2 className="mr-2 h-4 w-4" />
+              Delete board
             </Button>
             <div className="flex items-center gap-2">
               <Palette className="h-4 w-4 text-muted-foreground" />
@@ -2786,6 +2845,25 @@ function AssigneeDropdown({
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction onClick={handleDeleteStage}>Delete</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={Boolean(boardToDelete)} onOpenChange={() => setBoardToDelete(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete board?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This removes board columns and placements from{" "}
+              <span className="font-medium text-foreground">
+                {boardToDelete?.name || "this board"}
+              </span>
+              . Tasks stay in your workspace and can be re-added to another board.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleDeleteBoard}>Delete</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

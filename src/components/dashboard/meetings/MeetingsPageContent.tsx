@@ -1174,6 +1174,25 @@ export function MeetingDetailSheet({
     return meetingPeople.filter((person: any) => !isMeetingPersonBlocked(person));
   }, [meetingPeople, isMeetingPersonBlocked]);
 
+  const definitelyNewMeetingPeople = useMemo(() => {
+    return selectableMeetingPeople.filter((person: any) => {
+      const email =
+        typeof person.email === "string" ? person.email.trim().toLowerCase() : "";
+      if (!email) return false;
+      if (peopleByEmail.has(email)) return false;
+
+      const normalizedName = (person.name || "").toLowerCase();
+      if (normalizedName && peopleByName.has(normalizedName)) return false;
+
+      const fuzzyMatch = getBestPersonMatch(
+        { name: person.name, email: person.email },
+        people,
+        0.9
+      );
+      return !fuzzyMatch;
+    });
+  }, [people, peopleByEmail, peopleByName, selectableMeetingPeople]);
+
   const allMeetingPeopleKeys = useMemo(() => {
     return new Set(selectableMeetingPeople.map(getMeetingPersonKey));
   }, [selectableMeetingPeople]);
@@ -1203,11 +1222,11 @@ export function MeetingDetailSheet({
   useEffect(() => {
     if (!meeting) return;
     const hasSeenPopup = sessionStorage.getItem(`seen-people-popup-${meeting.id}`);
-    if (user?.onboardingCompleted && selectableMeetingPeople.length > 0 && !hasSeenPopup) {
+    if (user?.onboardingCompleted && definitelyNewMeetingPeople.length > 0 && !hasSeenPopup) {
       setIsDiscoveryDialogOpen(true);
       sessionStorage.setItem(`seen-people-popup-${meeting.id}`, 'true');
     }
-  }, [meeting?.id, user?.onboardingCompleted, selectableMeetingPeople]);
+  }, [definitelyNewMeetingPeople.length, meeting?.id, user?.onboardingCompleted]);
 
   useEffect(() => {
     if (!meeting) return;
