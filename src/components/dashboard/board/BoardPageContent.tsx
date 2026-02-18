@@ -878,7 +878,7 @@ function AssigneeDropdown({
   }, [activeBoardId, loadBoardData]);
 
   useEffect(() => {
-    if (!_workspaceId || !activeBoardId) return;
+    if (!_workspaceId || !activeBoardId || isTaskSweepOpen) return;
     let refreshTimer: ReturnType<typeof setTimeout> | null = null;
     const scheduleRefresh = () => {
       if (refreshTimer) return;
@@ -900,7 +900,7 @@ function AssigneeDropdown({
       if (refreshTimer) clearTimeout(refreshTimer);
       unsubscribe();
     };
-  }, [_workspaceId, activeBoardId, loadBoardData]);
+  }, [_workspaceId, activeBoardId, isTaskSweepOpen, loadBoardData]);
 
   const resolveBoardStatusId = useCallback(
     (statusId?: string | null) => {
@@ -934,9 +934,9 @@ function AssigneeDropdown({
       taskId: string,
       options: { statusId?: string; rank?: number; taskUpdates?: Record<string, any> }
     ) => {
-      if (!activeBoardId) return;
+      if (!activeBoardId) return false;
       const current = tasks.find((task: any) => task.id === taskId);
-      if (!current) return;
+      if (!current) return false;
 
       const previous = tasks;
       const nextTasks = tasks.map((task: any) =>
@@ -967,6 +967,7 @@ function AssigneeDropdown({
         setTasks((prev) =>
           prev.map((task: any) => (task.id === updated.id ? { ...task, ...updated } : task))
         );
+        return true;
       } catch (error) {
         console.error("Board update failed:", error);
         setTasks(previous);
@@ -976,6 +977,7 @@ function AssigneeDropdown({
             error instanceof Error ? error.message : "Try again in a moment.",
           variant: "destructive",
         });
+        return false;
       }
     },
     [activeBoardId, _workspaceId, tasks, toast]
@@ -1586,8 +1588,17 @@ function AssigneeDropdown({
     const taskSweepCandidates = useMemo<TaskSweepCandidate[]>(() => {
       const now = Date.now();
       const enriched = tasks
-        .filter((task: any) => (task.taskState || "active") !== "archived")
+        .filter((task: any) => {
+          if ((task.taskState || "active") === "archived") return false;
+          const lastSweptAt =
+            task.taskSweep?.lastActionAt ??
+            task.taskSweepLastActionAt ??
+            null;
+          return !lastSweptAt;
+        })
         .map((task: any) => {
+          const statusId = task.boardStatusId || resolveBoardStatusId(null);
+          const statusMeta = orderedStatuses.find((status: any) => status.id === statusId);
           const createdAtTs =
             toTimestamp(task.createdAt) ??
             toTimestamp(task.lastUpdated) ??
@@ -1602,9 +1613,15 @@ function AssigneeDropdown({
           const title = String(task.title || "").trim();
           const description = String(task.description || "").trim();
           const overdue = dueAtTs != null && dueAtTs < now;
+          const currentSweep = task.taskSweep || {};
+          const keepCount = Number(currentSweep.keepCount || 0);
+          const discardCount = Number(currentSweep.discardCount || 0);
+          const completeCount = Number(currentSweep.completeCount || 0);
           const snoozeCount = Number(
-            task.sweepSnoozeCount ?? task.taskSweep?.snoozeCount ?? 0
+            task.sweepSnoozeCount ?? currentSweep.snoozeCount ?? 0
           );
+          const interactionCount =
+            keepCount + discardCount + completeCount + snoozeCount;
           const oldTimer = ageDays >= 30 && inactiveDays >= 21;
           const vague = isVagueTaskTitle(title) && description.length === 0;
           const overdueLoop = overdue && snoozeCount >= 3;
@@ -1623,12 +1640,59 @@ function AssigneeDropdown({
             (overdue ? 1 : 0) +
             Math.min(2, ageDays / 45);
 
+          let removeSignal = 0;
+          let keepSignal = 0;
+
+          if (oldTimer) removeSignal += 1.1;
+          if (vague) removeSignal += 1.0;
+          if (overdueLoop) removeSignal += 1.2;
+          if (overdue) removeSignal += 0.6;
+          if (inactive) removeSignal += 0.8;
+
+          if (interactionCount > 0) {
+            const removeRate = discardCount / interactionCount;
+            const keepRate = (keepCount + completeCount) / interactionCount;
+            const snoozeRate = snoozeCount / interactionCount;
+            removeSignal += removeRate * 2.4;
+            keepSignal += keepRate * 2.1;
+            if (snoozeRate > 0.5) removeSignal += 0.5;
+          }
+
+          const removeDelta = removeSignal - keepSignal;
+          const aiShouldRemove = removeDelta >= 0.35;
+          const aiConfidence = Math.max(
+            0.55,
+            Math.min(
+              0.97,
+              0.55 +
+                Math.min(1, Math.abs(removeDelta) / 3) * 0.35 +
+                Math.min(0.07, interactionCount * 0.01)
+            )
+          );
+          const aiReason =
+            interactionCount > 0
+              ? `Based on prior sweeps: ${discardCount} discard, ${keepCount} keep, ${completeCount} complete, ${snoozeCount} snooze.`
+              : flags.length
+              ? `No history yet. Recommendation based on stale signals: ${flags
+                  .map((flag) => flag.replace("_", " "))
+                  .join(", ")}.`
+              : "No prior interactions yet; this is a neutral recommendation.";
+
           return {
             ...task,
+            statusLabel: statusMeta?.label || task.status || "Unknown",
+            assigneeName: getAssigneeName(task),
+            taskType: task.taskType || null,
+            createdAt: task.createdAt ?? null,
+            lastUpdated: task.lastUpdated ?? null,
             taskAgeDays: ageDays,
             inactiveDays,
             sweepFlags: flags,
             sweepScore: score,
+            aiShouldRemove,
+            aiConfidence,
+            aiReason,
+            aiInteractionCount: interactionCount,
           } as TaskSweepCandidate;
         });
 
@@ -1643,7 +1707,7 @@ function AssigneeDropdown({
         }
         return a.title.localeCompare(b.title);
       });
-    }, [tasks]);
+    }, [tasks, resolveBoardStatusId, orderedStatuses, getAssigneeName]);
 
     const handleTaskSweepAction = useCallback(
       async (
@@ -1665,6 +1729,8 @@ function AssigneeDropdown({
               Number(currentSweep.discardCount || 0) + (action === "discard" ? 1 : 0),
             snoozeCount:
               Number(currentSweep.snoozeCount || 0) + (action === "snooze" ? 1 : 0),
+            completeCount:
+              Number(currentSweep.completeCount || 0) + (action === "complete" ? 1 : 0),
           },
         };
 
@@ -1682,11 +1748,51 @@ function AssigneeDropdown({
           patch.sweepSnoozeCount = Number((task as any).sweepSnoozeCount || 0) + 1;
         }
 
+        if (action === "complete") {
+          patch.status = "done";
+        }
+
         try {
           await apiFetch(`/api/tasks/${task.id}`, {
             method: "PATCH",
             body: JSON.stringify(patch),
           });
+
+          if (action === "complete") {
+            const doneStatus = orderedStatuses.find(
+              (status: any) => status.category === "done"
+            );
+            if (doneStatus) {
+              const doneStatusId = doneStatus.id;
+              const maxDoneRank = tasks.reduce((maxRank, boardTask) => {
+                const boardStatusId =
+                  boardTask.boardStatusId || resolveBoardStatusId(null);
+                if (boardStatusId !== doneStatusId) return maxRank;
+                const rank =
+                  typeof boardTask.boardRank === "number" ? boardTask.boardRank : 0;
+                return rank > maxRank ? rank : maxRank;
+              }, 0);
+              const applied = await updateBoardItem(task.id, {
+                statusId: doneStatusId,
+                rank: maxDoneRank + 1000,
+                taskUpdates: patch,
+              });
+              if (!applied) {
+                setTasks((prev) =>
+                  prev.map((item: any) =>
+                    item.id === task.id
+                      ? {
+                          ...item,
+                          ...patch,
+                          lastUpdated: nowIso,
+                        }
+                      : item
+                  )
+                );
+              }
+              return;
+            }
+          }
 
           if (action === "discard") {
             setTasks((prev) => prev.filter((item: any) => item.id !== task.id));
@@ -1721,7 +1827,7 @@ function AssigneeDropdown({
           throw error;
         }
       },
-      [toast]
+      [toast, orderedStatuses, resolveBoardStatusId, tasks, updateBoardItem]
     );
 
   const toggleTaskSelection = useCallback((taskId: string, checked: boolean) => {
