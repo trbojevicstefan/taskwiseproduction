@@ -12,8 +12,12 @@ const ensureWorkspaceId = async (user: {
   _id: { toString: () => string };
   name?: string | null;
   workspace?: { id?: string; name?: string };
+  activeWorkspaceId?: string | null;
 }): Promise<WorkspaceInfo> => {
   if (user.workspace?.id) {
+    if (user.activeWorkspaceId !== user.workspace.id) {
+      await updateUserById(user._id.toString(), { activeWorkspaceId: user.workspace.id } as any);
+    }
     return {
       id: user.workspace.id,
       name: user.workspace.name || `${user.name || "Workspace"}'s Workspace`,
@@ -22,7 +26,10 @@ const ensureWorkspaceId = async (user: {
   const workspaceName =
     user.workspace?.name || `${user.name || "Workspace"}'s Workspace`;
   const workspace: WorkspaceInfo = { id: randomUUID(), name: workspaceName };
-  await updateUserById(user._id.toString(), { workspace });
+  await updateUserById(user._id.toString(), {
+    workspace,
+    activeWorkspaceId: workspace.id,
+  } as any);
   return workspace;
 };
 
@@ -69,6 +76,7 @@ const providers: any[] = [
         firefliesWebhookToken: user.firefliesWebhookToken,
         slackTeamId: user.slackTeamId || null,
         taskGranularityPreference: user.taskGranularityPreference,
+        activeWorkspaceId: user.activeWorkspaceId || workspace.id,
       };
     },
   }),
@@ -176,6 +184,7 @@ export const authOptions: NextAuthOptions = {
           token.firefliesWebhookToken = dbUser.firefliesWebhookToken;
           token.slackTeamId = dbUser.slackTeamId;
           token.taskGranularityPreference = dbUser.taskGranularityPreference;
+          token.activeWorkspaceId = dbUser.activeWorkspaceId || workspace.id;
         }
       }
 
@@ -207,6 +216,7 @@ export const authOptions: NextAuthOptions = {
           token.firefliesWebhookToken = dbUser.firefliesWebhookToken;
           token.slackTeamId = dbUser.slackTeamId;
           token.taskGranularityPreference = dbUser.taskGranularityPreference;
+          token.activeWorkspaceId = dbUser.activeWorkspaceId || workspace.id;
 
           const update: Record<string, unknown> = {
             googleConnected: true,
@@ -241,6 +251,8 @@ export const authOptions: NextAuthOptions = {
         token.firefliesWebhookToken = (user as any).firefliesWebhookToken;
         token.slackTeamId = (user as any).slackTeamId;
         token.taskGranularityPreference = (user as any).taskGranularityPreference;
+        token.activeWorkspaceId =
+          (user as any).activeWorkspaceId || (user as any).workspace?.id || null;
       }
       return token;
     },
@@ -258,6 +270,10 @@ export const authOptions: NextAuthOptions = {
         session.user.slackTeamId = (token.slackTeamId as string) || null;
         session.user.taskGranularityPreference =
           (token.taskGranularityPreference as "light" | "medium" | "detailed") || undefined;
+        session.user.activeWorkspaceId =
+          (token.activeWorkspaceId as string) ||
+          (session.user.workspace?.id as string | undefined) ||
+          null;
       }
       return session;
     },

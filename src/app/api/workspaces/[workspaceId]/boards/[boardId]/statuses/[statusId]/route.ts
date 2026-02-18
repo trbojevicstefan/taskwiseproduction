@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import { apiError } from "@/lib/api-route";
-import { getDb } from "@/lib/db";
-import { getSessionUserId } from "@/lib/server-auth";
+import { requireWorkspaceRouteAccess } from "@/lib/workspace-route-access";
 
 const serializeStatus = (status: any) => ({
   ...status,
@@ -22,14 +21,14 @@ export async function PATCH(
   }
 ) {
   const { workspaceId, boardId, statusId } = await Promise.resolve(params);
-  const userId = await getSessionUserId();
-  if (!userId) {
-    return apiError(401, "request_error", "Unauthorized");
+  if (!boardId || !statusId) {
+    return apiError(400, "request_error", "Board ID and status ID are required.");
   }
-
-  if (!workspaceId || !boardId || !statusId) {
-    return apiError(400, "request_error", "Workspace ID, board ID, and status ID are required.");
+  const access = await requireWorkspaceRouteAccess(workspaceId, "member");
+  if (!access.ok) {
+    return access.response;
   }
+  const { db, userId } = access;
 
   const body = await request.json().catch(() => ({}));
   const update: Record<string, any> = { updatedAt: new Date() };
@@ -67,7 +66,6 @@ export async function PATCH(
     return apiError(400, "request_error", "No updates provided.");
   }
 
-  const db = await getDb();
   const userIdQuery = userId;
   const statusIdQuery = statusId;
   const filter = {
@@ -99,16 +97,15 @@ export async function DELETE(
   }
 ) {
   const { workspaceId, boardId, statusId } = await Promise.resolve(params);
-  const userId = await getSessionUserId();
-  if (!userId) {
-    return apiError(401, "request_error", "Unauthorized");
+  if (!boardId || !statusId) {
+    return apiError(400, "request_error", "Board ID and status ID are required.");
   }
-
-  if (!workspaceId || !boardId || !statusId) {
-    return apiError(400, "request_error", "Workspace ID, board ID, and status ID are required.");
+  const access = await requireWorkspaceRouteAccess(workspaceId, "member");
+  if (!access.ok) {
+    return access.response;
   }
+  const { db, userId } = access;
 
-  const db = await getDb();
   const userIdQuery = userId;
   const statusIdQuery = statusId;
   const filter = {

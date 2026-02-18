@@ -19,7 +19,7 @@ type Outcome = "success" | "error";
 
 type MetricDocument = {
   _id: string;
-  kind: "route" | "job" | "external_api";
+  kind: "route" | "job" | "external_api" | "workspace_action";
   outcome: Outcome;
   recordedAt: Date;
   correlationId: string;
@@ -32,6 +32,8 @@ type MetricDocument = {
   jobStatus?: string;
   provider?: "slack" | "google" | "fathom" | "openai";
   operation?: string;
+  action?: string;
+  workspaceId?: string | null;
   durationMs?: number;
   error?: ReturnType<typeof serializeError>;
   metadata?: Record<string, unknown> | null;
@@ -64,6 +66,13 @@ export type ExternalApiFailureInput = MetricBase & {
   metadata?: Record<string, unknown>;
 };
 
+export type WorkspaceActionMetricInput = MetricBase & {
+  action: string;
+  workspaceId?: string | null;
+  outcome?: Outcome;
+  metadata?: Record<string, unknown>;
+};
+
 const metricsLogger = createLogger({ scope: "observability.metrics" });
 let indexesEnsured = false;
 let indexesEnsuring: Promise<void> | null = null;
@@ -84,6 +93,7 @@ const ensureIndexes = async () => {
       collection.createIndex({ route: 1, method: 1, recordedAt: -1 }),
       collection.createIndex({ jobType: 1, jobStatus: 1, recordedAt: -1 }),
       collection.createIndex({ provider: 1, operation: 1, outcome: 1, recordedAt: -1 }),
+      collection.createIndex({ kind: 1, action: 1, workspaceId: 1, recordedAt: -1 }),
       collection.createIndex({ recordedAt: 1 }, { expireAfterSeconds: TTL_SECONDS }),
     ]);
     indexesEnsured = true;
@@ -165,6 +175,23 @@ export const recordExternalApiFailure = async (
     statusCode: input.statusCode,
     durationMs: input.durationMs,
     error: serializeError(input.error),
+    metadata: input.metadata || null,
+  });
+};
+
+export const recordWorkspaceActionMetric = async (
+  input: WorkspaceActionMetricInput
+) => {
+  const correlationId = ensureCorrelationId(input.correlationId);
+  await persistMetric({
+    _id: randomUUID(),
+    kind: "workspace_action",
+    recordedAt: new Date(),
+    outcome: input.outcome || "success",
+    correlationId,
+    userId: input.userId || null,
+    action: input.action,
+    workspaceId: input.workspaceId || null,
     metadata: input.metadata || null,
   });
 };

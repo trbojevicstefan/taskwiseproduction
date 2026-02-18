@@ -11,6 +11,17 @@ export interface Workspace {
   name: string;
 }
 
+export interface WorkspaceMembershipSummary {
+  membershipId: string;
+  workspaceId: string;
+  workspaceName: string;
+  role: "owner" | "admin" | "member";
+  status: "active" | "invited" | "suspended" | "left";
+  isActive: boolean;
+  joinedAt?: string | null;
+  updatedAt?: string | null;
+}
+
 export interface AppUser extends Person {
   uid: string;
   plan?: string;
@@ -18,6 +29,8 @@ export interface AppUser extends Person {
   tz?: string;
   firefliesWebhookToken?: string | null;
   workspace?: Workspace;
+  activeWorkspaceId?: string | null;
+  workspaceMemberships?: WorkspaceMembershipSummary[];
   onboardingCompleted?: boolean;
   slackTeamId?: string | null;
   fathomWebhookToken?: string | null;
@@ -59,9 +72,11 @@ interface AuthContextType {
   updateUserProfile: (data: UserProfileUpdate, avoidGlobalLoading?: boolean) => Promise<void>;
   completeOnboarding: () => Promise<void>;
   refreshUserProfile: () => Promise<void>;
+  switchWorkspace: (workspaceId: string) => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
+const ACTIVE_WORKSPACE_STORAGE_KEY = "taskwise.activeWorkspaceId";
 
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [user, setUser] = useState<AppUser | null>(null);
@@ -88,6 +103,68 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const refreshUserProfile = async () => {
     if (status === "authenticated") {
       await fetchUserProfile();
+    }
+  };
+
+  const switchWorkspace = async (workspaceId: string) => {
+    const nextWorkspaceId = workspaceId.trim();
+    if (!nextWorkspaceId) {
+      throw new Error("Workspace ID is required.");
+    }
+    if (!user) {
+      throw new Error("Unauthorized");
+    }
+
+    const previousUser = user;
+    const membership = user.workspaceMemberships?.find(
+      (item) => item.workspaceId === nextWorkspaceId
+    );
+    if (membership) {
+      setUser((current) =>
+        current
+          ? {
+              ...current,
+              activeWorkspaceId: nextWorkspaceId,
+              workspace: {
+                id: membership.workspaceId,
+                name: membership.workspaceName,
+              },
+            }
+          : current
+      );
+    }
+
+    try {
+      const response = await fetch("/api/workspaces/switch", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ workspaceId: nextWorkspaceId }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(payload?.error || "Could not switch workspace.");
+      }
+
+      const activeWorkspaceId = payload?.activeWorkspaceId || nextWorkspaceId;
+      const workspace = payload?.workspace;
+      setUser((current) =>
+        current
+          ? {
+              ...current,
+              activeWorkspaceId,
+              workspace: workspace?.id
+                ? { id: workspace.id, name: workspace.name || current.workspace?.name || "Workspace" }
+                : current.workspace,
+            }
+          : current
+      );
+      if (typeof window !== "undefined") {
+        window.localStorage.setItem(ACTIVE_WORKSPACE_STORAGE_KEY, activeWorkspaceId);
+      }
+      await fetchUserProfile();
+    } catch (error) {
+      setUser(previousUser);
+      throw error;
     }
   };
 
@@ -123,6 +200,25 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       isActive = false;
     };
   }, [status]);
+
+  useEffect(() => {
+    if (status !== "authenticated") return;
+
+    const onStorage = (event: StorageEvent) => {
+      if (event.key !== ACTIVE_WORKSPACE_STORAGE_KEY) return;
+      const incomingWorkspaceId = typeof event.newValue === "string" ? event.newValue : null;
+      if (!incomingWorkspaceId) return;
+      if (incomingWorkspaceId === (user?.activeWorkspaceId || user?.workspace?.id || null)) {
+        return;
+      }
+      void fetchUserProfile();
+    };
+
+    window.addEventListener("storage", onStorage);
+    return () => {
+      window.removeEventListener("storage", onStorage);
+    };
+  }, [status, user?.activeWorkspaceId, user?.workspace?.id]);
 
   // This separate effect handles redirection based on the final, stable state of `user` and `loading`.
   useEffect(() => {
@@ -226,7 +322,19 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   };
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, signup, logout, updateUserProfile, completeOnboarding, refreshUserProfile }}>
+    <AuthContext.Provider
+      value={{
+        user,
+        loading,
+        login,
+        signup,
+        logout,
+        updateUserProfile,
+        completeOnboarding,
+        refreshUserProfile,
+        switchWorkspace,
+      }}
+    >
       {children}
     </AuthContext.Provider>
   );

@@ -14,6 +14,8 @@ import { getSessionUserId } from "@/lib/server-auth";
 import { normalizePersonNameKey } from "@/lib/transcript-utils";
 import { getWorkspaceIdForUser } from "@/lib/workspace";
 import { TASK_LIST_PROJECTION } from "@/lib/task-projections";
+import { assertWorkspaceAccess, ensureWorkspaceBootstrapForUser } from "@/lib/workspace-context";
+import { isWorkspaceMembershipGuardEnabled } from "@/lib/workspace-flags";
 
 const ROUTE = "/api/tasks";
 
@@ -128,6 +130,10 @@ export async function GET(request: Request) {
     const cursor = decodeTaskCursor(searchParams.get("cursor"));
     const filters: Record<string, any> = { userId };
     if (workspaceId) {
+      if (isWorkspaceMembershipGuardEnabled()) {
+        await ensureWorkspaceBootstrapForUser(db, userId);
+        await assertWorkspaceAccess(db, userId, workspaceId, "member");
+      }
       filters.workspaceId = workspaceId;
     }
     if (parentId) {
@@ -271,8 +277,19 @@ export async function POST(request: Request) {
     const db = await getDb();
     const workspaceId =
       typeof body.workspaceId === "string" && body.workspaceId
-        ? body.workspaceId
+        ? body.workspaceId.trim()
         : await getWorkspaceIdForUser(db, userId);
+
+    if (!workspaceId) {
+      emitMetric(400, "error", { reason: "workspace_missing" });
+      return apiError(400, "request_error", "Workspace is not configured.", undefined, {
+        correlationId,
+      });
+    }
+    if (isWorkspaceMembershipGuardEnabled()) {
+      await ensureWorkspaceBootstrapForUser(db, userId);
+      await assertWorkspaceAccess(db, userId, workspaceId, "member");
+    }
 
     const task = {
       _id: randomUUID(),

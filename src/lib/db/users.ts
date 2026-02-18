@@ -15,6 +15,7 @@ export interface DbUser {
   lastSeenAt: Date;
   onboardingCompleted: boolean;
   workspace: { id: string; name: string };
+  activeWorkspaceId: string | null;
   firefliesWebhookToken: string | null;
   slackTeamId?: string | null;
   fathomWebhookToken?: string | null;
@@ -76,6 +77,7 @@ export const createUser = async ({
     lastSeenAt: now,
     onboardingCompleted: false,
     workspace: { id: randomUUID(), name: `${safeName}'s Workspace` },
+    activeWorkspaceId: null,
     firefliesWebhookToken: null,
     slackTeamId: null,
     fathomWebhookToken: null,
@@ -95,6 +97,8 @@ export const createUser = async ({
     briefGenerationMonth: null,
     briefGenerationCount: 0,
   };
+
+  doc.activeWorkspaceId = doc.workspace.id;
 
   const result = await db.collection(USERS_COLLECTION).insertOne(doc as DbUser);
   return { ...doc, _id: result.insertedId };

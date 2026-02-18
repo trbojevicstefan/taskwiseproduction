@@ -1,22 +1,19 @@
 import type { Db } from "mongodb";
-import { ObjectId } from "mongodb";
-
-const buildUserLookupFilter = (userId: string) => {
-  if (ObjectId.isValid(userId)) {
-    return { $or: [{ _id: new ObjectId(userId) }, { id: userId }] };
-  }
-  return { id: userId };
-};
+import {
+  ensureWorkspaceBootstrapForUser,
+  getActiveWorkspaceForUser,
+  getActiveWorkspaceIdForUser,
+} from "@/lib/workspace-context";
 
 export const getWorkspaceForUser = async (db: Db, userId: string) => {
-  const user = await (db.collection("users") as any).findOne(
-    buildUserLookupFilter(userId)
-  );
-  return user?.workspace || null;
+  await ensureWorkspaceBootstrapForUser(db, userId);
+  return getActiveWorkspaceForUser(db, userId);
 };
 
 export const getWorkspaceIdForUser = async (db: Db, userId: string) => {
-  const workspace = await getWorkspaceForUser(db, userId);
-  return workspace?.id || null;
+  const bootstrapWorkspace = await ensureWorkspaceBootstrapForUser(db, userId);
+  if (bootstrapWorkspace?.id) {
+    return bootstrapWorkspace.id;
+  }
+  return getActiveWorkspaceIdForUser(db, userId);
 };
-

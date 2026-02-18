@@ -1,9 +1,8 @@
 import { NextResponse } from "next/server";
 import { apiError } from "@/lib/api-route";
-import { getDb } from "@/lib/db";
-import { getSessionUserId } from "@/lib/server-auth";
 import { createBoardWithTemplate, ensureDefaultBoard } from "@/lib/boards";
 import { getBoardTemplate } from "@/lib/board-templates";
+import { requireWorkspaceRouteAccess } from "@/lib/workspace-route-access";
 
 const serializeBoard = (board: any) => ({
   ...board,
@@ -20,16 +19,12 @@ export async function GET(
   }: { params: { workspaceId: string } | Promise<{ workspaceId: string }> }
 ) {
   const { workspaceId } = await Promise.resolve(params);
-  const userId = await getSessionUserId();
-  if (!userId) {
-    return apiError(401, "request_error", "Unauthorized");
+  const access = await requireWorkspaceRouteAccess(workspaceId, "member");
+  if (!access.ok) {
+    return access.response;
   }
+  const { db, userId } = access;
 
-  if (!workspaceId) {
-    return apiError(400, "request_error", "Workspace ID is required.");
-  }
-
-  const db = await getDb();
   const userIdQuery = userId;
   let boards = await db
     .collection("boards")
@@ -52,14 +47,11 @@ export async function POST(
   }: { params: { workspaceId: string } | Promise<{ workspaceId: string }> }
 ) {
   const { workspaceId } = await Promise.resolve(params);
-  const userId = await getSessionUserId();
-  if (!userId) {
-    return apiError(401, "request_error", "Unauthorized");
+  const access = await requireWorkspaceRouteAccess(workspaceId, "member");
+  if (!access.ok) {
+    return access.response;
   }
-
-  if (!workspaceId) {
-    return apiError(400, "request_error", "Workspace ID is required.");
-  }
+  const { db, userId } = access;
 
   const body = await request.json().catch(() => ({}));
   const name = typeof body.name === "string" ? body.name.trim() : "";
@@ -77,7 +69,6 @@ export async function POST(
     return apiError(404, "request_error", "Template not found.");
   }
 
-  const db = await getDb();
   const { board } = await createBoardWithTemplate(
     db,
     userId,

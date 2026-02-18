@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
-import { getDb } from "@/lib/db";
-import { getSessionUserId } from "@/lib/server-auth";
+import { apiError } from "@/lib/api-route";
+import { requireWorkspaceRouteAccess } from "@/lib/workspace-route-access";
 
 export async function GET(
   _request: Request,
@@ -13,19 +13,16 @@ export async function GET(
   }
 ) {
   const { workspaceId, taskId } = await Promise.resolve(params);
-  const userId = await getSessionUserId();
-  if (!userId) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const access = await requireWorkspaceRouteAccess(workspaceId, "member");
+  if (!access.ok) {
+    return access.response;
   }
+  const { db, userId } = access;
 
   if (!workspaceId || !taskId) {
-    return NextResponse.json(
-      { error: "Workspace ID and task ID are required." },
-      { status: 400 }
-    );
+    return apiError(400, "request_error", "Workspace ID and task ID are required.");
   }
 
-  const db = await getDb();
   const userIdQuery = userId;
   const taskIdQuery = taskId;
   const normalizedTaskId = taskId && taskId.includes(":") ? taskId.split(":").slice(1).join(":") : null;
@@ -47,10 +44,7 @@ export async function GET(
     new Set(items.map((item: any) => String(item.boardId)).filter(Boolean))
   );
 
-  return NextResponse.json({
-    boardId: boardIds[0] || null,
-    boardIds,
-  });
+  return NextResponse.json({ boardId: boardIds[0] || null, boardIds });
 }
 
 

@@ -11,6 +11,7 @@ declare module "next-auth" {
       avatarUrl?: string | null;
       onboardingCompleted?: boolean;
       workspace?: { id: string; name: string };
+      activeWorkspaceId?: string | null;
       firefliesWebhookToken?: string | null;
       slackTeamId?: string | null;
       taskGranularityPreference?: "light" | "medium" | "detailed";
@@ -25,6 +26,7 @@ declare module "next-auth" {
     avatarUrl?: string | null;
     onboardingCompleted?: boolean;
     workspace?: { id: string; name: string };
+    activeWorkspaceId?: string | null;
     firefliesWebhookToken?: string | null;
     slackTeamId?: string | null;
     taskGranularityPreference?: "light" | "medium" | "detailed";
@@ -41,6 +43,7 @@ declare module "next-auth/jwt" {
     avatarUrl?: string | null;
     onboardingCompleted?: boolean;
     workspace?: { id: string; name: string };
+    activeWorkspaceId?: string | null;
     firefliesWebhookToken?: string | null;
     slackTeamId?: string | null;
     taskGranularityPreference?: "light" | "medium" | "detailed";

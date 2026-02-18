@@ -1,9 +1,8 @@
 import { NextResponse } from "next/server";
 import { apiError } from "@/lib/api-route";
 import { randomUUID } from "crypto";
-import { getDb } from "@/lib/db";
-import { getSessionUserId } from "@/lib/server-auth";
 import { TASK_LIST_PROJECTION } from "@/lib/task-projections";
+import { requireWorkspaceRouteAccess } from "@/lib/workspace-route-access";
 
 const serializeTask = (task: any) => ({
   ...task,
@@ -45,16 +44,15 @@ export async function GET(
   }
 ) {
   const { workspaceId, boardId } = await Promise.resolve(params);
-  const userId = await getSessionUserId();
-  if (!userId) {
-    return apiError(401, "request_error", "Unauthorized");
+  if (!boardId) {
+    return apiError(400, "request_error", "Board ID is required.");
   }
-
-  if (!workspaceId || !boardId) {
-    return apiError(400, "request_error", "Workspace ID and board ID are required.");
+  const access = await requireWorkspaceRouteAccess(workspaceId, "member");
+  if (!access.ok) {
+    return access.response;
   }
+  const { db, userId } = access;
 
-  const db = await getDb();
   const userIdQuery = userId;
   const pipeline = [
     { $match: { userId: userIdQuery, workspaceId, boardId } },
@@ -103,17 +101,16 @@ export async function POST(
   }
 ) {
   const { workspaceId, boardId } = await Promise.resolve(params);
-  const userId = await getSessionUserId();
-  if (!userId) {
-    return apiError(401, "request_error", "Unauthorized");
+  if (!boardId) {
+    return apiError(400, "request_error", "Board ID is required.");
   }
-
-  if (!workspaceId || !boardId) {
-    return apiError(400, "request_error", "Workspace ID and board ID are required.");
+  const access = await requireWorkspaceRouteAccess(workspaceId, "member");
+  if (!access.ok) {
+    return access.response;
   }
+  const { db, userId } = access;
 
   const body = await request.json().catch(() => ({}));
-  const db = await getDb();
   const userIdQuery = userId;
 
   const statusIdQuery = body.statusId || "";

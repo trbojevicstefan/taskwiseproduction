@@ -54,9 +54,14 @@ export default function WorkspaceInvitePage({
         }
 
         const workspace = payload?.workspace || {};
+        const switchedActiveWorkspace = Boolean(payload?.switchedActiveWorkspace);
         setWorkspaceName(workspace.name || "Workspace");
         setState("success");
-        setMessage("Invitation accepted. You are now in the invited workspace.");
+        setMessage(
+          switchedActiveWorkspace
+            ? "Invitation accepted. You are now in the invited workspace."
+            : "Invitation accepted. You joined the workspace."
+        );
         await refreshUserProfile();
       } catch (error) {
         const nextMessage =
@@ -171,4 +176,3 @@ export default function WorkspaceInvitePage({
     </div>
   );
 }
-

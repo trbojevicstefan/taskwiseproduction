@@ -1,8 +1,7 @@
 import { NextResponse } from "next/server";
 import { apiError } from "@/lib/api-route";
 import { randomUUID } from "crypto";
-import { getDb } from "@/lib/db";
-import { getSessionUserId } from "@/lib/server-auth";
+import { requireWorkspaceRouteAccess } from "@/lib/workspace-route-access";
 
 const serializeTask = (task: any) => ({
   ...task,
@@ -41,10 +40,11 @@ export async function POST(
   }
 ) {
   const { workspaceId } = await Promise.resolve(params);
-  const userId = await getSessionUserId();
-  if (!userId) {
-    return apiError(401, "request_error", "Unauthorized");
+  const access = await requireWorkspaceRouteAccess(workspaceId, "member");
+  if (!access.ok) {
+    return access.response;
   }
+  const { db, userId } = access;
 
   const body = await request.json().catch(() => ({}));
   const boardId = typeof body.boardId === "string" ? body.boardId : "";
@@ -55,7 +55,6 @@ export async function POST(
     return apiError(400, "request_error", "Workspace ID, board ID, and task ID are required.");
   }
 
-  const db = await getDb();
   const userIdQuery = userId;
   const taskIdQuery = taskId;
 

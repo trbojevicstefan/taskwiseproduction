@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import { apiError } from "@/lib/api-route";
-import { getDb } from "@/lib/db";
-import { getSessionUserId } from "@/lib/server-auth";
+import { requireWorkspaceRouteAccess } from "@/lib/workspace-route-access";
 
 const serializeBoard = (board: any) => ({
   ...board,
@@ -22,14 +21,14 @@ export async function PATCH(
   }
 ) {
   const { workspaceId, boardId } = await Promise.resolve(params);
-  const userId = await getSessionUserId();
-  if (!userId) {
-    return apiError(401, "request_error", "Unauthorized");
+  if (!boardId) {
+    return apiError(400, "request_error", "Board ID is required.");
   }
-
-  if (!workspaceId || !boardId) {
-    return apiError(400, "request_error", "Workspace ID and board ID are required.");
+  const access = await requireWorkspaceRouteAccess(workspaceId, "member");
+  if (!access.ok) {
+    return access.response;
   }
+  const { db, userId } = access;
 
   const body = await request.json().catch(() => ({}));
   const update: Record<string, any> = { updatedAt: new Date() };
@@ -54,7 +53,6 @@ export async function PATCH(
     update.isDefault = body.isDefault;
   }
 
-  const db = await getDb();
   const userIdQuery = userId;
   const boardIdQuery = boardId;
   const filter = {
@@ -83,16 +81,15 @@ export async function DELETE(
   }
 ) {
   const { workspaceId, boardId } = await Promise.resolve(params);
-  const userId = await getSessionUserId();
-  if (!userId) {
-    return apiError(401, "request_error", "Unauthorized");
+  if (!boardId) {
+    return apiError(400, "request_error", "Board ID is required.");
   }
-
-  if (!workspaceId || !boardId) {
-    return apiError(400, "request_error", "Workspace ID and board ID are required.");
+  const access = await requireWorkspaceRouteAccess(workspaceId, "member");
+  if (!access.ok) {
+    return access.response;
   }
+  const { db, userId } = access;
 
-  const db = await getDb();
   const userIdQuery = userId;
   const boardIdQuery = boardId;
   const filter = {

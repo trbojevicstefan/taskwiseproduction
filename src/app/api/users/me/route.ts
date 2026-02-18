@@ -2,8 +2,12 @@ import { getServerSession } from "next-auth";
 import { randomUUID } from "crypto";
 import { z } from "zod";
 import { authOptions } from "@/lib/auth";
+import { getDb } from "@/lib/db";
 import { findUserById, updateUserById } from "@/lib/db/users";
 import { apiError, apiSuccess, mapApiError, parseJsonBody } from "@/lib/api-route";
+import { assertWorkspaceAccess, ensureWorkspaceBootstrapForUser } from "@/lib/workspace-context";
+import { listWorkspaceMembershipsForUser } from "@/lib/workspace-memberships";
+import { listWorkspacesByIds, updateWorkspaceById } from "@/lib/workspaces";
 
 const updateSchema = z.object({
   name: z.string().min(1).optional(),
@@ -26,7 +30,21 @@ const updateSchema = z.object({
   slackAutoShareChannelId: z.string().optional().nullable(),
 });
 
-const toAppUser = (user: Awaited<ReturnType<typeof findUserById>>) => {
+type WorkspaceMembershipSummary = {
+  membershipId: string;
+  workspaceId: string;
+  workspaceName: string;
+  role: string;
+  status: string;
+  isActive: boolean;
+  joinedAt: string | null;
+  updatedAt: string | null;
+};
+
+const toAppUser = (
+  user: Awaited<ReturnType<typeof findUserById>>,
+  workspaceMemberships: WorkspaceMembershipSummary[] = []
+) => {
   if (!user) return null;
   const id = user._id.toString();
   return {
@@ -43,6 +61,8 @@ const toAppUser = (user: Awaited<ReturnType<typeof findUserById>>) => {
     lastSeenAt: user.lastSeenAt.toISOString(),
     onboardingCompleted: user.onboardingCompleted,
     workspace: user.workspace,
+    activeWorkspaceId: user.activeWorkspaceId || user.workspace?.id || null,
+    workspaceMemberships,
     firefliesWebhookToken: user.firefliesWebhookToken,
     slackTeamId: user.slackTeamId || null,
     fathomWebhookToken: user.fathomWebhookToken || null,
@@ -62,6 +82,33 @@ const toAppUser = (user: Awaited<ReturnType<typeof findUserById>>) => {
   };
 };
 
+const buildWorkspaceMembershipSummary = async (
+  db: Awaited<ReturnType<typeof getDb>>,
+  userId: string,
+  activeWorkspaceId: string | null
+) => {
+  const memberships = await listWorkspaceMembershipsForUser(db as any, userId);
+  const workspaceIds = Array.from(
+    new Set(memberships.map((membership: any) => membership.workspaceId).filter(Boolean))
+  );
+  const workspaces = await listWorkspacesByIds(db as any, workspaceIds);
+  const workspaceById = new Map(workspaces.map((workspace: any) => [workspace._id, workspace]));
+
+  return memberships.map((membership: any) => {
+    const workspace = workspaceById.get(membership.workspaceId);
+    return {
+      membershipId: String(membership._id),
+      workspaceId: membership.workspaceId,
+      workspaceName: workspace?.name || membership.workspaceId,
+      role: membership.role,
+      status: membership.status,
+      isActive: membership.workspaceId === activeWorkspaceId,
+      joinedAt: membership.joinedAt?.toISOString?.() || null,
+      updatedAt: membership.updatedAt?.toISOString?.() || null,
+    };
+  });
+};
+
 export async function GET() {
   try {
     const session = await getServerSession(authOptions);
@@ -71,20 +118,37 @@ export async function GET() {
       return apiError(401, "unauthorized", "Unauthorized");
     }
 
+    const db = await getDb();
+    await ensureWorkspaceBootstrapForUser(db as any, userId);
+
     let user = await findUserById(userId);
     if (!user) {
       return apiError(404, "not_found", "User not found");
     }
 
-    if (!user.workspace?.id) {
+    const shouldInitializeWorkspace = !user.workspace?.id;
+    const shouldInitializeActiveWorkspace =
+      !user.activeWorkspaceId && Boolean(user.workspace?.id);
+
+    if (shouldInitializeWorkspace || shouldInitializeActiveWorkspace) {
       const workspaceName =
         user.workspace?.name || `${user.name || "Workspace"}'s Workspace`;
-      const workspace = { id: randomUUID(), name: workspaceName };
-      await updateUserById(userId, { workspace });
-      user = { ...user, workspace };
+      const workspace = user.workspace?.id
+        ? { id: user.workspace.id, name: workspaceName }
+        : { id: randomUUID(), name: workspaceName };
+      const activeWorkspaceId = user.activeWorkspaceId || workspace.id;
+      await updateUserById(userId, { workspace, activeWorkspaceId } as any);
+      user = { ...user, workspace, activeWorkspaceId };
     }
 
-    const appUser = toAppUser(user);
+    const activeWorkspaceId = user.activeWorkspaceId || user.workspace?.id || null;
+    const workspaceMemberships = await buildWorkspaceMembershipSummary(
+      db,
+      userId,
+      activeWorkspaceId
+    );
+
+    const appUser = toAppUser(user, workspaceMemberships);
     if (!appUser) {
       return apiError(404, "not_found", "User not found");
     }
@@ -104,6 +168,9 @@ export async function PATCH(request: Request) {
       return apiError(401, "unauthorized", "Unauthorized");
     }
 
+    const db = await getDb();
+    await ensureWorkspaceBootstrapForUser(db as any, userId);
+
     const update = await parseJsonBody(request, updateSchema, "Invalid update payload.");
     const name = update.displayName || update.name;
     const avatarUrl = update.photoURL || update.avatarUrl;
@@ -113,18 +180,37 @@ export async function PATCH(request: Request) {
       return apiError(404, "not_found", "User not found");
     }
 
-    const workspace =
-      update.workspace
-        ? {
-            id: update.workspace.id || existingUser.workspace?.id || randomUUID(),
-            name: update.workspace.name,
-          }
-        : undefined;
+    let workspace:
+      | {
+          id: string;
+          name: string;
+        }
+      | undefined;
+    if (update.workspace) {
+      const targetWorkspaceId =
+        update.workspace.id || existingUser.activeWorkspaceId || existingUser.workspace?.id;
+      if (!targetWorkspaceId) {
+        return apiError(400, "request_error", "Workspace ID is required.");
+      }
+
+      await assertWorkspaceAccess(db as any, userId, targetWorkspaceId, "admin");
+      await updateWorkspaceById(db as any, targetWorkspaceId, {
+        name: update.workspace.name,
+      });
+      workspace = {
+        id: targetWorkspaceId,
+        name: update.workspace.name,
+      };
+    }
+    const activeWorkspaceId = workspace
+      ? workspace.id
+      : existingUser.activeWorkspaceId || existingUser.workspace?.id || null;
 
     await updateUserById(userId, {
       ...(name ? { name } : {}),
       ...(avatarUrl !== undefined ? { avatarUrl } : {}),
       ...(workspace ? { workspace } : {}),
+      ...(activeWorkspaceId ? { activeWorkspaceId } : {}),
       ...(update.onboardingCompleted !== undefined
         ? { onboardingCompleted: update.onboardingCompleted }
         : {}),
@@ -157,7 +243,14 @@ export async function PATCH(request: Request) {
     });
 
     const user = await findUserById(userId);
-    const appUser = toAppUser(user);
+    const resolvedActiveWorkspaceId =
+      user?.activeWorkspaceId || user?.workspace?.id || null;
+    const workspaceMemberships = await buildWorkspaceMembershipSummary(
+      db,
+      userId,
+      resolvedActiveWorkspaceId
+    );
+    const appUser = toAppUser(user, workspaceMemberships);
     if (!appUser) {
       return apiError(404, "not_found", "User not found");
     }

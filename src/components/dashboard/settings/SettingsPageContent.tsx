@@ -43,6 +43,29 @@ type SlackChannel = {
   name: string;
 };
 
+type WorkspaceMember = {
+  membershipId: string;
+  userId: string;
+  name: string;
+  email: string | null;
+  avatarUrl: string | null;
+  role: "owner" | "admin" | "member";
+  status: "active" | "invited" | "suspended" | "left";
+  joinedAt: string | null;
+  updatedAt: string | null;
+  isCurrentUser: boolean;
+  isLastOwner: boolean;
+  canEditRole: boolean;
+  canRemove: boolean;
+};
+
+type WorkspaceMemberPermissions = {
+  canInvite: boolean;
+  canReadMembers: boolean;
+  canUpdateMembers: boolean;
+  canRemoveMembers: boolean;
+};
+
 const IntegrationCard: React.FC<{
   icon: React.ElementType;
   title: string;
@@ -159,9 +182,20 @@ export default function SettingsPageContent() {
   const [workspaceName, setWorkspaceName] = useState('');
   const [isSavingWorkspace, setIsSavingWorkspace] = useState(false);
   const [inviteEmail, setInviteEmail] = useState("");
+  const [inviteRole, setInviteRole] = useState<"member" | "admin">("member");
   const [workspaceInviteLink, setWorkspaceInviteLink] = useState("");
   const [isCreatingWorkspaceInvite, setIsCreatingWorkspaceInvite] = useState(false);
   const [hasCopiedWorkspaceInvite, setHasCopiedWorkspaceInvite] = useState(false);
+  const [workspaceMembers, setWorkspaceMembers] = useState<WorkspaceMember[]>([]);
+  const [workspaceMemberPermissions, setWorkspaceMemberPermissions] =
+    useState<WorkspaceMemberPermissions>({
+      canInvite: false,
+      canReadMembers: false,
+      canUpdateMembers: false,
+      canRemoveMembers: false,
+    });
+  const [isLoadingWorkspaceMembers, setIsLoadingWorkspaceMembers] = useState(false);
+  const [pendingWorkspaceMemberId, setPendingWorkspaceMemberId] = useState<string | null>(null);
   const [hasCopied, setHasCopied] = useState(false);
   const [autoApproveCompleted, setAutoApproveCompleted] = useState(false);
   const [completionMatchThreshold, setCompletionMatchThreshold] = useState(60);
@@ -174,6 +208,16 @@ export default function SettingsPageContent() {
   const [selectedAvatarUrl, setSelectedAvatarUrl] = useState('');
   const [customAvatarUrl, setCustomAvatarUrl] = useState('');
   const randomSeed = useMemo(() => user?.uid || Math.random().toString(36).substring(7), [user]);
+  const activeWorkspaceId = user?.activeWorkspaceId || user?.workspace?.id || "";
+  const activeWorkspaceMembership = useMemo(
+    () =>
+      (user?.workspaceMemberships || []).find(
+        (membership) => membership.workspaceId === activeWorkspaceId && membership.status === "active"
+      ) || null,
+    [user?.workspaceMemberships, activeWorkspaceId]
+  );
+  const canManageWorkspaceMembers =
+    activeWorkspaceMembership?.role === "owner" || activeWorkspaceMembership?.role === "admin";
   const workspaceInviteInputRef = useRef<HTMLInputElement>(null);
   const webhookUrlInputRef = useRef<HTMLInputElement>(null);
   const [isCreatingFathomWebhook, setIsCreatingFathomWebhook] = useState(false);
@@ -371,14 +415,93 @@ export default function SettingsPageContent() {
     }
   };
 
+  const loadWorkspaceMembers = useCallback(
+    async (showErrorToast = true) => {
+      if (!activeWorkspaceId) {
+        setWorkspaceMembers([]);
+        setWorkspaceMemberPermissions({
+          canInvite: false,
+          canReadMembers: false,
+          canUpdateMembers: false,
+          canRemoveMembers: false,
+        });
+        return;
+      }
+
+      setIsLoadingWorkspaceMembers(true);
+      try {
+        const response = await fetch(`/api/workspaces/${activeWorkspaceId}/members`, {
+          cache: "no-store",
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          throw new Error(payload?.error || "Could not load workspace members.");
+        }
+
+        setWorkspaceMembers(Array.isArray(payload?.members) ? payload.members : []);
+        setWorkspaceMemberPermissions({
+          canInvite: Boolean(payload?.permissions?.canInvite),
+          canReadMembers: Boolean(payload?.permissions?.canReadMembers),
+          canUpdateMembers: Boolean(payload?.permissions?.canUpdateMembers),
+          canRemoveMembers: Boolean(payload?.permissions?.canRemoveMembers),
+        });
+      } catch (error) {
+        setWorkspaceMembers([]);
+        setWorkspaceMemberPermissions({
+          canInvite: false,
+          canReadMembers: false,
+          canUpdateMembers: false,
+          canRemoveMembers: false,
+        });
+        if (showErrorToast) {
+          toast({
+            title: "Member Load Failed",
+            description:
+              error instanceof Error
+                ? error.message
+                : "Could not load workspace members.",
+            variant: "destructive",
+          });
+        }
+      } finally {
+        setIsLoadingWorkspaceMembers(false);
+      }
+    },
+    [activeWorkspaceId, toast]
+  );
+
+  useEffect(() => {
+    if (!activeWorkspaceMembership) {
+      setWorkspaceMembers([]);
+      setWorkspaceMemberPermissions({
+        canInvite: false,
+        canReadMembers: false,
+        canUpdateMembers: false,
+        canRemoveMembers: false,
+      });
+      return;
+    }
+    void loadWorkspaceMembers(false);
+  }, [activeWorkspaceMembership, loadWorkspaceMembers]);
+
   const handleCreateWorkspaceInvite = async () => {
+    if (!activeWorkspaceId) {
+      toast({
+        title: "No Active Workspace",
+        description: "Select an active workspace before inviting members.",
+        variant: "destructive",
+      });
+      return;
+    }
+
     setIsCreatingWorkspaceInvite(true);
     try {
-      const response = await fetch("/api/workspace-invitations", {
+      const response = await fetch(`/api/workspaces/${activeWorkspaceId}/members/invite`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           invitedEmail: inviteEmail.trim() || null,
+          role: inviteRole,
         }),
       });
       const payload = await response.json().catch(() => ({}));
@@ -396,6 +519,7 @@ export default function SettingsPageContent() {
         title: "Invitation Created",
         description: "Share this link to let someone join your workspace.",
       });
+      setInviteEmail("");
     } catch (error) {
       console.error("Failed to create workspace invitation:", error);
       toast({
@@ -406,6 +530,75 @@ export default function SettingsPageContent() {
       });
     } finally {
       setIsCreatingWorkspaceInvite(false);
+    }
+  };
+
+  const handleWorkspaceMemberRoleChange = async (
+    membershipId: string,
+    nextRole: "owner" | "admin" | "member"
+  ) => {
+    if (!activeWorkspaceId) return;
+    setPendingWorkspaceMemberId(membershipId);
+    try {
+      const response = await fetch(
+        `/api/workspaces/${activeWorkspaceId}/members/${membershipId}`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ role: nextRole }),
+        }
+      );
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(payload?.error || "Could not update member role.");
+      }
+      await Promise.all([loadWorkspaceMembers(false), refreshUserProfile()]);
+      toast({
+        title: "Member Updated",
+        description: "Workspace member role has been updated.",
+      });
+    } catch (error) {
+      toast({
+        title: "Update Failed",
+        description:
+          error instanceof Error ? error.message : "Could not update member role.",
+        variant: "destructive",
+      });
+    } finally {
+      setPendingWorkspaceMemberId(null);
+    }
+  };
+
+  const handleRemoveWorkspaceMember = async (membershipId: string) => {
+    if (!activeWorkspaceId) return;
+    setPendingWorkspaceMemberId(membershipId);
+    try {
+      const response = await fetch(
+        `/api/workspaces/${activeWorkspaceId}/members/${membershipId}`,
+        {
+          method: "DELETE",
+        }
+      );
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(payload?.error || "Could not remove workspace member.");
+      }
+      await Promise.all([loadWorkspaceMembers(false), refreshUserProfile()]);
+      toast({
+        title: "Member Removed",
+        description: "The member has been removed from this workspace.",
+      });
+    } catch (error) {
+      toast({
+        title: "Removal Failed",
+        description:
+          error instanceof Error
+            ? error.message
+            : "Could not remove workspace member.",
+        variant: "destructive",
+      });
+    } finally {
+      setPendingWorkspaceMemberId(null);
     }
   };
 
@@ -831,9 +1024,9 @@ export default function SettingsPageContent() {
                         Workspace Invitations
                       </div>
                       <p className="text-xs text-muted-foreground">
-                        Create an invite link so another account can join this workspace.
+                        Create an invite link and assign a default role.
                       </p>
-                      <div className="grid grid-cols-1 md:grid-cols-[1fr_auto] gap-2 items-end">
+                      <div className="grid grid-cols-1 md:grid-cols-[1fr_180px_auto] gap-2 items-end">
                         <div>
                           <Label htmlFor="workspaceInviteEmail">
                             Invite Email (optional)
@@ -848,11 +1041,31 @@ export default function SettingsPageContent() {
                             className="mt-1"
                           />
                         </div>
+                        <div>
+                          <Label htmlFor="workspaceInviteRole">Role</Label>
+                          <Select
+                            value={inviteRole}
+                            onValueChange={(value) =>
+                              setInviteRole(value as "member" | "admin")
+                            }
+                            disabled={isCreatingWorkspaceInvite || authLoading}
+                          >
+                            <SelectTrigger id="workspaceInviteRole" className="mt-1">
+                              <SelectValue placeholder="Select role" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="member">Member</SelectItem>
+                              <SelectItem value="admin">Admin</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
                         <Button
                           type="button"
                           variant="outline"
                           onClick={handleCreateWorkspaceInvite}
-                          disabled={isCreatingWorkspaceInvite || authLoading}
+                          disabled={
+                            isCreatingWorkspaceInvite || authLoading || !canManageWorkspaceMembers
+                          }
                         >
                           {isCreatingWorkspaceInvite ? (
                             <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -862,6 +1075,11 @@ export default function SettingsPageContent() {
                           Create Invite Link
                         </Button>
                       </div>
+                      {!canManageWorkspaceMembers && (
+                        <p className="text-xs text-muted-foreground">
+                          Admin or owner access is required to invite members.
+                        </p>
+                      )}
                       {workspaceInviteLink ? (
                         <div className="grid grid-cols-1 md:grid-cols-[1fr_auto] gap-2 items-end">
                           <div>
@@ -888,6 +1106,114 @@ export default function SettingsPageContent() {
                           </Button>
                         </div>
                       ) : null}
+                    </div>
+
+                    <div className="rounded-lg border border-border/60 bg-muted/20 p-4 space-y-3">
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="flex items-center gap-2 text-sm font-medium">
+                          <Users className="h-4 w-4 text-primary" />
+                          Workspace Members
+                        </div>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => void loadWorkspaceMembers()}
+                          disabled={!canManageWorkspaceMembers || isLoadingWorkspaceMembers}
+                        >
+                          {isLoadingWorkspaceMembers ? (
+                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          ) : (
+                            <RefreshCw className="mr-2 h-4 w-4" />
+                          )}
+                          Refresh
+                        </Button>
+                      </div>
+
+                      {!canManageWorkspaceMembers ? (
+                        <p className="text-xs text-muted-foreground">
+                          Admin or owner access is required to view and manage members.
+                        </p>
+                      ) : workspaceMembers.length === 0 ? (
+                        <p className="text-xs text-muted-foreground">
+                          No members found in this workspace.
+                        </p>
+                      ) : (
+                        <div className="space-y-2">
+                          {workspaceMembers.map((member) => {
+                            const disableActions =
+                              pendingWorkspaceMemberId === member.membershipId ||
+                              (member.role === "owner" && member.isLastOwner);
+                            const roleOptions =
+                              activeWorkspaceMembership?.role === "owner"
+                                ? (["member", "admin", "owner"] as const)
+                                : (["member", "admin"] as const);
+
+                            return (
+                              <div
+                                key={member.membershipId}
+                                className="rounded-md border bg-background/60 p-3"
+                              >
+                                <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                                  <div className="min-w-0">
+                                    <p className="text-sm font-medium truncate">
+                                      {member.name}
+                                      {member.isCurrentUser ? " (You)" : ""}
+                                    </p>
+                                    <p className="text-xs text-muted-foreground truncate">
+                                      {member.email || member.userId}
+                                    </p>
+                                  </div>
+                                  <div className="flex items-center gap-2">
+                                    <Badge variant="outline" className="capitalize">
+                                      {member.status}
+                                    </Badge>
+                                    {member.canEditRole &&
+                                    workspaceMemberPermissions.canUpdateMembers ? (
+                                      <Select
+                                        value={member.role}
+                                        onValueChange={(value) =>
+                                          void handleWorkspaceMemberRoleChange(
+                                            member.membershipId,
+                                            value as "owner" | "admin" | "member"
+                                          )
+                                        }
+                                        disabled={disableActions}
+                                      >
+                                        <SelectTrigger className="w-[120px]">
+                                          <SelectValue />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                          {roleOptions.map((roleOption) => (
+                                            <SelectItem key={roleOption} value={roleOption}>
+                                              <span className="capitalize">{roleOption}</span>
+                                            </SelectItem>
+                                          ))}
+                                        </SelectContent>
+                                      </Select>
+                                    ) : (
+                                      <Badge className="capitalize">{member.role}</Badge>
+                                    )}
+                                    {member.canRemove && workspaceMemberPermissions.canRemoveMembers && (
+                                      <Button
+                                        type="button"
+                                        variant="ghost"
+                                        size="sm"
+                                        onClick={() =>
+                                          void handleRemoveWorkspaceMember(member.membershipId)
+                                        }
+                                        disabled={disableActions}
+                                      >
+                                        Remove
+                                      </Button>
+                                    )}
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
                     </div>
                   </CardContent>
                   <CardFooter>

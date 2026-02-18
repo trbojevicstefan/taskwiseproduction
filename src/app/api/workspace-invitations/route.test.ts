@@ -2,6 +2,7 @@ import { POST } from "@/app/api/workspace-invitations/route";
 import { getSessionUserId } from "@/lib/server-auth";
 import { findUserById } from "@/lib/db/users";
 import { getDb } from "@/lib/db";
+import { assertWorkspaceAccess, ensureWorkspaceBootstrapForUser, getActiveWorkspaceForUser } from "@/lib/workspace-context";
 import {
   createWorkspaceInvitation,
   ensureWorkspaceInvitationIndexes,
@@ -24,6 +25,12 @@ jest.mock("@/lib/workspace-invitations", () => ({
   ensureWorkspaceInvitationIndexes: jest.fn(),
 }));
 
+jest.mock("@/lib/workspace-context", () => ({
+  assertWorkspaceAccess: jest.fn(),
+  ensureWorkspaceBootstrapForUser: jest.fn(),
+  getActiveWorkspaceForUser: jest.fn(),
+}));
+
 const mockedGetSessionUserId = getSessionUserId as jest.MockedFunction<
   typeof getSessionUserId
 >;
@@ -37,6 +44,15 @@ const mockedCreateWorkspaceInvitation =
   createWorkspaceInvitation as jest.MockedFunction<
     typeof createWorkspaceInvitation
   >;
+const mockedAssertWorkspaceAccess = assertWorkspaceAccess as jest.MockedFunction<
+  typeof assertWorkspaceAccess
+>;
+const mockedEnsureWorkspaceBootstrapForUser =
+  ensureWorkspaceBootstrapForUser as jest.MockedFunction<
+    typeof ensureWorkspaceBootstrapForUser
+  >;
+const mockedGetActiveWorkspaceForUser =
+  getActiveWorkspaceForUser as jest.MockedFunction<typeof getActiveWorkspaceForUser>;
 
 describe("POST /api/workspace-invitations", () => {
   beforeEach(() => {
@@ -44,6 +60,18 @@ describe("POST /api/workspace-invitations", () => {
     mockedGetSessionUserId.mockResolvedValue("user-1");
     mockedGetDb.mockResolvedValue({} as any);
     mockedEnsureWorkspaceInvitationIndexes.mockResolvedValue(undefined as never);
+    mockedEnsureWorkspaceBootstrapForUser.mockResolvedValue({
+      id: "workspace-1",
+      name: "Main Workspace",
+    } as never);
+    mockedGetActiveWorkspaceForUser.mockResolvedValue({
+      id: "workspace-1",
+      name: "Main Workspace",
+    });
+    mockedAssertWorkspaceAccess.mockResolvedValue({
+      workspace: { _id: "workspace-1" },
+      membership: { role: "owner" },
+    } as any);
     mockedFindUserById.mockResolvedValue({
       _id: { toString: () => "user-1" },
       email: "owner@example.com",
@@ -108,9 +136,15 @@ describe("POST /api/workspace-invitations", () => {
         workspaceId: "workspace-1",
         workspaceName: "Main Workspace",
         inviterUserId: "user-1",
+        role: "member",
         invitedEmail: "member@example.com",
       })
     );
+    expect(mockedAssertWorkspaceAccess).toHaveBeenCalledWith(
+      expect.anything(),
+      "user-1",
+      "workspace-1",
+      "admin"
+    );
   });
 });
-

@@ -1,8 +1,7 @@
 import { NextResponse } from "next/server";
 import { apiError } from "@/lib/api-route";
 import { randomUUID } from "crypto";
-import { getDb } from "@/lib/db";
-import { getSessionUserId } from "@/lib/server-auth";
+import { requireWorkspaceRouteAccess } from "@/lib/workspace-route-access";
 
 const serializeStatus = (status: any) => ({
   ...status,
@@ -19,16 +18,15 @@ export async function GET(
   }: { params: { workspaceId: string; boardId: string } | Promise<{ workspaceId: string; boardId: string }> }
 ) {
   const { workspaceId, boardId } = await Promise.resolve(params);
-  const userId = await getSessionUserId();
-  if (!userId) {
-    return apiError(401, "request_error", "Unauthorized");
+  if (!boardId) {
+    return apiError(400, "request_error", "Board ID is required.");
   }
-
-  if (!workspaceId || !boardId) {
-    return apiError(400, "request_error", "Workspace ID and board ID are required.");
+  const access = await requireWorkspaceRouteAccess(workspaceId, "member");
+  if (!access.ok) {
+    return access.response;
   }
+  const { db, userId } = access;
 
-  const db = await getDb();
   const userIdQuery = userId;
   const statuses = await db
     .collection("boardStatuses")
@@ -46,14 +44,14 @@ export async function POST(
   }: { params: { workspaceId: string; boardId: string } | Promise<{ workspaceId: string; boardId: string }> }
 ) {
   const { workspaceId, boardId } = await Promise.resolve(params);
-  const userId = await getSessionUserId();
-  if (!userId) {
-    return apiError(401, "request_error", "Unauthorized");
+  if (!boardId) {
+    return apiError(400, "request_error", "Board ID is required.");
   }
-
-  if (!workspaceId || !boardId) {
-    return apiError(400, "request_error", "Workspace ID and board ID are required.");
+  const access = await requireWorkspaceRouteAccess(workspaceId, "member");
+  if (!access.ok) {
+    return access.response;
   }
+  const { db, userId } = access;
 
   const body = await request.json().catch(() => ({}));
   const label = typeof body.label === "string" ? body.label.trim() : "";
@@ -69,7 +67,6 @@ export async function POST(
       ? body.category
       : "todo";
 
-  const db = await getDb();
   const userIdQuery = userId;
   const lastStatus = await db
     .collection("boardStatuses")
