@@ -3,7 +3,6 @@ import { apiError } from "@/lib/api-route";
 import { getDb } from "@/lib/db";
 import { getSessionUserId } from "@/lib/server-auth";
 import { normalizeTask } from "@/lib/data";
-import { upsertPeopleFromAttendees } from "@/lib/people-sync";
 import { syncTasksForSource } from "@/lib/task-sync";
 import { ensureBoardItemsForTasks } from "@/lib/board-items";
 import { ensureDefaultBoard } from "@/lib/boards";
@@ -19,7 +18,9 @@ import {
 import type { ExtractedTaskSchema } from "@/types/chat";
 
 const serializeMeeting = (meeting: any) => {
-  const { recordingId, recordingIdHash, ...rest } = meeting;
+  const rest = { ...meeting };
+  delete rest.recordingId;
+  delete rest.recordingIdHash;
   return {
     ...rest,
     id: meeting._id,
@@ -82,6 +83,42 @@ const collectDescendantTaskIds = async (
   return Array.from(allIds);
 };
 
+const resolveMeetingAccess = async (db: any, userId: string, id: string) => {
+  const lookupFilter = {
+    $or: [{ _id: id }, { id }],
+  };
+
+  const meeting = await db.collection("meetings").findOne(lookupFilter);
+  if (!meeting) {
+    return null;
+  }
+
+  const workspaceId =
+    typeof meeting.workspaceId === "string" ? meeting.workspaceId.trim() : "";
+  if (workspaceId) {
+    await ensureWorkspaceBootstrapForUser(db as any, userId);
+    try {
+      await assertWorkspaceAccess(db as any, userId, workspaceId, "member");
+    } catch {
+      return null;
+    }
+  } else if (meeting.userId !== userId) {
+    return null;
+  }
+
+  const ownerUserId =
+    typeof meeting.userId === "string" && meeting.userId.trim()
+      ? meeting.userId.trim()
+      : userId;
+
+  return {
+    meeting,
+    workspaceId,
+    ownerUserId,
+    filter: meeting?._id ? { _id: meeting._id } : lookupFilter,
+  };
+};
+
 export async function PATCH(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
@@ -93,7 +130,14 @@ export async function PATCH(
   }
 
   const body = await request.json().catch(() => ({}));
-  const { recordingId, recordingIdHash, ...safeBody } = body || {};
+  const safeBody: Record<string, any> =
+    body && typeof body === "object"
+      ? Object.fromEntries(
+          Object.entries(body).filter(
+            ([key]) => key !== "recordingId" && key !== "recordingIdHash"
+          )
+        )
+      : {};
   const update: Record<string, any> = { ...safeBody };
   let extractedTasks: ExtractedTaskSchema[] | null = null;
   if (Array.isArray(safeBody.extractedTasks)) {
@@ -107,22 +151,18 @@ export async function PATCH(
   }
 
   const db = await getDb();
-  const filter = {
-    userId,
-    $or: [{ _id: id }, { id }],
-  };
-
-  const meeting = await db.collection("meetings").findOne(filter);
-  if (!meeting) {
+  const access = await resolveMeetingAccess(db, userId, id);
+  if (!access || access.meeting.isHidden) {
     return apiError(404, "request_error", "Meeting not found");
   }
+  const { meeting, filter, workspaceId: scopedWorkspaceId, ownerUserId } = access;
 
   if (extractedTasks) {
     try {
       const workspaceId =
-        meeting.workspaceId || (await getWorkspaceIdForUser(db, userId));
+        scopedWorkspaceId || (await getWorkspaceIdForUser(db, ownerUserId));
       const syncResult = await syncTasksForSource(db, extractedTasks, {
-        userId,
+        userId: ownerUserId,
         workspaceId,
         sourceSessionId: String(meeting._id ?? id),
         sourceSessionType: "meeting",
@@ -155,16 +195,16 @@ export async function PATCH(
         // If we want chat to have references, we should pass referencedTasks.
         const linkedSessions = await updateLinkedChatSessions(
           db,
-          userId,
+          ownerUserId,
           meeting,
           referencedTasks as any // Ensure compatibility
         );
-        await cleanupChatTasksForSessions(db, userId, linkedSessions);
+        await cleanupChatTasksForSessions(db, ownerUserId, linkedSessions);
       }
       if (workspaceId) {
-        const defaultBoard = await ensureDefaultBoard(db, userId, workspaceId);
+        const defaultBoard = await ensureDefaultBoard(db, ownerUserId, workspaceId);
         await ensureBoardItemsForTasks(db, {
-          userId,
+          userId: ownerUserId,
           workspaceId,
           boardId: String(defaultBoard._id),
           tasks: extractedTasks, // Board likely needs full info? Or syncTasksForSource handled it?
@@ -198,27 +238,11 @@ export async function GET(
   }
 
   const db = await getDb();
-  const meetingFilter = {
-    $or: [{ _id: id }, { id }],
-  };
-
-  const meeting = await db.collection("meetings").findOne(meetingFilter);
-  if (!meeting || meeting.isHidden) {
+  const access = await resolveMeetingAccess(db, userId, id);
+  if (!access || access.meeting.isHidden) {
     return apiError(404, "request_error", "Meeting not found.");
   }
-
-  const workspaceId =
-    typeof meeting.workspaceId === "string" ? meeting.workspaceId.trim() : "";
-  if (workspaceId) {
-    await ensureWorkspaceBootstrapForUser(db as any, userId);
-    try {
-      await assertWorkspaceAccess(db as any, userId, workspaceId, "member");
-    } catch {
-      return apiError(404, "request_error", "Meeting not found.");
-    }
-  } else if (meeting.userId !== userId) {
-    return apiError(404, "request_error", "Meeting not found.");
-  }
+  const { meeting, workspaceId } = access;
 
   // Hydrate tasks from canonical collection
   if (meeting.extractedTasks && Array.isArray(meeting.extractedTasks)) {
@@ -273,14 +297,11 @@ export async function DELETE(
   }
 
   const db = await getDb();
-  const filter = {
-    userId,
-    $or: [{ _id: id }, { id }],
-  };
-  const meeting = await db.collection("meetings").findOne(filter);
-  if (!meeting) {
+  const access = await resolveMeetingAccess(db, userId, id);
+  if (!access || access.meeting.isHidden) {
     return apiError(404, "request_error", "Meeting not found.");
   }
+  const { meeting, filter, ownerUserId } = access;
   const now = new Date();
   const sessionIds = new Set<string>();
   if (meeting?._id) sessionIds.add(String(meeting._id));
@@ -305,23 +326,23 @@ export async function DELETE(
     const tasksToRemove = await db
       .collection("tasks")
       .find({
-        userId,
+        userId: ownerUserId,
         sourceSessionType: "meeting",
         sourceSessionId: { $in: sessionIdList },
       })
       .project({ _id: 1 })
       .toArray();
     const rootTaskIds = tasksToRemove.map((task: any) => String(task._id));
-    const taskIds = await collectDescendantTaskIds(db, userId, rootTaskIds);
+    const taskIds = await collectDescendantTaskIds(db, ownerUserId, rootTaskIds);
 
     await db.collection("tasks").deleteMany({
-      userId,
+      userId: ownerUserId,
       _id: { $in: taskIds },
     });
 
     if (taskIds.length) {
       await db.collection("boardItems").deleteMany({
-        userId,
+        userId: ownerUserId,
         taskId: { $in: taskIds },
       });
     }
@@ -331,7 +352,7 @@ export async function DELETE(
   const chatIds = Array.from(chatSessionIds);
   if (chatMeetingIds.length || chatIds.length) {
     await db.collection("chatSessions").deleteMany({
-      userId,
+      userId: ownerUserId,
       $or: [
         chatMeetingIds.length
           ? { sourceMeetingId: { $in: chatMeetingIds } }
