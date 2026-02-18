@@ -3,6 +3,7 @@ import { getDb } from "@/lib/db";
 import { getSessionUserId } from "@/lib/server-auth";
 import { runMeetingIngestionCommand } from "@/lib/services/meeting-ingestion-command";
 import { getWorkspaceIdForUser } from "@/lib/workspace";
+import { assertWorkspaceAccess, ensureWorkspaceBootstrapForUser } from "@/lib/workspace-context";
 
 jest.mock("@/lib/db", () => ({
   getDb: jest.fn(),
@@ -18,6 +19,11 @@ jest.mock("@/lib/services/meeting-ingestion-command", () => ({
 
 jest.mock("@/lib/workspace", () => ({
   getWorkspaceIdForUser: jest.fn(),
+}));
+
+jest.mock("@/lib/workspace-context", () => ({
+  assertWorkspaceAccess: jest.fn(),
+  ensureWorkspaceBootstrapForUser: jest.fn(),
 }));
 
 jest.mock("@/lib/observability-metrics", () => ({
@@ -50,12 +56,23 @@ const mockedRunMeetingIngestionCommand =
   >;
 const mockedGetWorkspaceIdForUser =
   getWorkspaceIdForUser as jest.MockedFunction<typeof getWorkspaceIdForUser>;
+const mockedEnsureWorkspaceBootstrapForUser =
+  ensureWorkspaceBootstrapForUser as jest.MockedFunction<
+    typeof ensureWorkspaceBootstrapForUser
+  >;
+const mockedAssertWorkspaceAccess =
+  assertWorkspaceAccess as jest.MockedFunction<typeof assertWorkspaceAccess>;
 
 describe("POST /api/meetings ingestion parity", () => {
   beforeEach(() => {
     jest.clearAllMocks();
     mockedGetSessionUserId.mockResolvedValue("user-1");
     mockedGetWorkspaceIdForUser.mockResolvedValue("workspace-1");
+    mockedEnsureWorkspaceBootstrapForUser.mockResolvedValue(null as any);
+    mockedAssertWorkspaceAccess.mockResolvedValue({
+      workspace: { _id: "workspace-1", name: "Workspace 1" },
+      membership: { role: "member", status: "active" },
+    } as any);
     mockedRunMeetingIngestionCommand.mockResolvedValue({
       people: { created: 0, updated: 0 },
       tasks: { upserted: 0, deleted: 0 },
@@ -197,5 +214,36 @@ describe("POST /api/meetings ingestion parity", () => {
     const payload = await response.json();
     expect(Array.isArray(payload)).toBe(true);
     expect(meetingsLimit).toHaveBeenCalledWith(500);
+  });
+
+  it("filters meeting list by active workspace so invited members can see shared records", async () => {
+    const meetingsToArray = jest.fn().mockResolvedValue([]);
+    const meetingsLimit = jest.fn().mockReturnValue({ toArray: meetingsToArray });
+    const meetingsSort = jest.fn().mockReturnValue({ limit: meetingsLimit });
+    const meetingsFind = jest.fn().mockReturnValue({ sort: meetingsSort });
+
+    const db = {
+      collection: jest.fn((name: string) => {
+        if (name === "meetings") {
+          return { find: meetingsFind };
+        }
+        throw new Error(`Unexpected collection in test: ${name}`);
+      }),
+    } as any;
+    mockedGetDb.mockResolvedValue(db);
+
+    const response = await GET(new Request("http://localhost/api/meetings"));
+    expect(response.status).toBe(200);
+    expect(mockedGetWorkspaceIdForUser).toHaveBeenCalledWith(db, "user-1");
+    expect(meetingsFind).toHaveBeenCalledWith(
+      expect.objectContaining({
+        workspaceId: "workspace-1",
+      }),
+      expect.anything()
+    );
+    expect(meetingsFind).not.toHaveBeenCalledWith(
+      expect.objectContaining({ userId: "user-1" }),
+      expect.anything()
+    );
   });
 });

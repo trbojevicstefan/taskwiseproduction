@@ -84,15 +84,17 @@ const toHydratedTask = (
 
 export const hydrateTaskReferences = async (
   userId: string,
-  items: TaskLike[]
+  items: TaskLike[],
+  options?: { workspaceId?: string | null }
 ): Promise<ExtractedTaskSchema[]> => {
-  const [hydrated] = await hydrateTaskReferenceLists(userId, [items]);
+  const [hydrated] = await hydrateTaskReferenceLists(userId, [items], options);
   return hydrated || [];
 };
 
 export const hydrateTaskReferenceLists = async (
   userId: string,
-  lists: TaskLike[][]
+  lists: TaskLike[][],
+  options?: { workspaceId?: string | null }
 ): Promise<ExtractedTaskSchema[][]> => {
   if (!lists.length) return [];
   if (lists.every((items) => !items || items.length === 0)) {
@@ -120,11 +122,15 @@ export const hydrateTaskReferenceLists = async (
     return lists.map((items: any) => items.map((item: any) => normalizeTask(item)));
   }
 
+  const workspaceId =
+    typeof options?.workspaceId === "string" ? options.workspaceId.trim() : "";
+  const scopeFilter = workspaceId ? { workspaceId } : { userId };
+
   const canonicalTasks = await db
     .collection("tasks")
     .find(
       {
-        userId,
+        ...scopeFilter,
         $or: orClauses,
       },
       { projection: TASK_LIST_PROJECTION }

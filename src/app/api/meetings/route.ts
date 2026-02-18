@@ -13,6 +13,10 @@ import { attachCorrelationIdHeader, serializeError } from "@/lib/observability";
 import { getSessionUserId } from "@/lib/server-auth";
 import { runMeetingIngestionCommand } from "@/lib/services/meeting-ingestion-command";
 import { getWorkspaceIdForUser } from "@/lib/workspace";
+import {
+  assertWorkspaceAccess,
+  ensureWorkspaceBootstrapForUser,
+} from "@/lib/workspace-context";
 import { postMeetingAutomationToSlack } from "@/lib/slack-automation";
 import type { ExtractedTaskSchema } from "@/types/chat";
 import {
@@ -193,8 +197,20 @@ export async function GET(request?: Request) {
     const cursor = decodeMeetingCursor(searchParams?.get("cursor") || null);
 
     const db = await getDb();
+    await ensureWorkspaceBootstrapForUser(db as any, userId);
+    const workspaceId =
+      searchParams?.get("workspaceId")?.trim() ||
+      (await getWorkspaceIdForUser(db, userId));
+    if (!workspaceId) {
+      emitMetric(400, "error", { reason: "workspace_missing" });
+      return apiError(400, "request_error", "Workspace is not configured.", undefined, {
+        correlationId,
+      });
+    }
+    await assertWorkspaceAccess(db as any, userId, workspaceId, "member");
+
     const baseFilter: Record<string, any> = {
-      userId,
+      workspaceId,
       isHidden: { $ne: true },
     };
     if (paginateRequested && cursor) {
@@ -221,7 +237,8 @@ export async function GET(request?: Request) {
           userId,
           pageMeetings.map((meeting: any) =>
             Array.isArray(meeting.extractedTasks) ? meeting.extractedTasks : []
-          )
+          ),
+          { workspaceId }
         );
         pageMeetings.forEach((meeting: any, index: number) => {
           meeting.extractedTasks = hydratedTaskLists[index] || [];
@@ -243,11 +260,13 @@ export async function GET(request?: Request) {
         paginateRequested: false,
         limit,
         resultCount: serialized.length,
+        workspaceId,
       });
       emitMetric(200, "success", {
         paginateRequested: false,
         limit,
         resultCount: serialized.length,
+        workspaceId,
       });
       return attachCorrelationIdHeader(NextResponse.json(serialized), correlationId);
     }
@@ -264,12 +283,14 @@ export async function GET(request?: Request) {
       limit,
       resultCount: serialized.length,
       hasMore,
+      workspaceId,
     });
     emitMetric(200, "success", {
       paginateRequested: true,
       limit,
       resultCount: serialized.length,
       hasMore,
+      workspaceId,
     });
     return attachCorrelationIdHeader(
       NextResponse.json({

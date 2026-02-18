@@ -12,6 +12,10 @@ import {
   updateLinkedChatSessions,
 } from "@/lib/services/session-task-sync";
 import { getWorkspaceIdForUser } from "@/lib/workspace";
+import {
+  assertWorkspaceAccess,
+  ensureWorkspaceBootstrapForUser,
+} from "@/lib/workspace-context";
 import type { ExtractedTaskSchema } from "@/types/chat";
 
 const serializeMeeting = (meeting: any) => {
@@ -194,13 +198,25 @@ export async function GET(
   }
 
   const db = await getDb();
-  const filter = {
-    userId,
+  const meetingFilter = {
     $or: [{ _id: id }, { id }],
   };
 
-  const meeting = await db.collection("meetings").findOne(filter);
+  const meeting = await db.collection("meetings").findOne(meetingFilter);
   if (!meeting || meeting.isHidden) {
+    return apiError(404, "request_error", "Meeting not found.");
+  }
+
+  const workspaceId =
+    typeof meeting.workspaceId === "string" ? meeting.workspaceId.trim() : "";
+  if (workspaceId) {
+    await ensureWorkspaceBootstrapForUser(db as any, userId);
+    try {
+      await assertWorkspaceAccess(db as any, userId, workspaceId, "member");
+    } catch {
+      return apiError(404, "request_error", "Meeting not found.");
+    }
+  } else if (meeting.userId !== userId) {
     return apiError(404, "request_error", "Meeting not found.");
   }
 
@@ -225,7 +241,11 @@ export async function GET(
         hydratedLight,
         hydratedMedium,
         hydratedDetailed,
-      ] = await hydrateTaskReferenceLists(userId, taskLists);
+      ] = await hydrateTaskReferenceLists(
+        userId,
+        taskLists,
+        workspaceId ? { workspaceId } : undefined
+      );
 
       meeting.extractedTasks = hydratedExtracted || [];
       if (meeting.allTaskLevels) {
