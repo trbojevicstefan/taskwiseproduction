@@ -76,6 +76,10 @@ export const IntegrationsProvider = ({ children }: { children: ReactNode }) => {
     Boolean(workspaceGoogle?.connected) && !workspaceGoogle?.connectedByCurrentUser;
   const fathomManagedByWorkspace =
     Boolean(workspaceFathom?.connected) && !workspaceFathom?.connectedByCurrentUser;
+  const canManageWorkspaceIntegrations =
+    user?.activeWorkspaceRole === "owner" ||
+    (user?.activeWorkspaceRole === "admin" &&
+      Boolean(user?.activeWorkspaceAdminAccess?.integrations));
 
   const warnDisabled = useCallback(() => {
     toast({
@@ -108,7 +112,7 @@ export const IntegrationsProvider = ({ children }: { children: ReactNode }) => {
   };
 
   const disconnectGoogleTasks = async () => {
-    if (googleManagedByWorkspace && !user?.googleConnected) {
+    if (googleManagedByWorkspace && !user?.googleConnected && !canManageWorkspaceIntegrations) {
       toast({
         title: "Managed by Workspace",
         description: "Google integration is connected by another workspace admin.",
@@ -159,7 +163,7 @@ export const IntegrationsProvider = ({ children }: { children: ReactNode }) => {
     window.location.href = "/api/slack/oauth/start";
   };
   const disconnectSlack = async () => {
-    if (slackManagedByWorkspace && !user?.slackTeamId) {
+    if (slackManagedByWorkspace && !user?.slackTeamId && !canManageWorkspaceIntegrations) {
       toast({
         title: "Managed by Workspace",
         description: "Slack integration is connected by another workspace admin.",
@@ -185,7 +189,7 @@ export const IntegrationsProvider = ({ children }: { children: ReactNode }) => {
   };
 
   const disconnectFathom = async () => {
-    if (fathomManagedByWorkspace && !user?.fathomConnected) {
+    if (fathomManagedByWorkspace && !user?.fathomConnected && !canManageWorkspaceIntegrations) {
       toast({
         title: "Managed by Workspace",
         description: "Fathom integration is connected by another workspace admin.",
