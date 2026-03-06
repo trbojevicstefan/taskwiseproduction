@@ -10,7 +10,7 @@ import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { useAuth } from '@/contexts/AuthContext';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import { Loader2, Power, PowerOff, RefreshCw, Copy, Check, Save, Video, Users, Building, Send, Image as ImageIcon, Link as LinkIcon, Settings as SettingsIcon, Settings2, ZoomIn, Bot, Slack, FileText, MessageSquare, User, Info as InfoIcon, ToyBrick, Webhook, ClipboardCheck, Trash2 } from 'lucide-react';
+import { Loader2, Power, PowerOff, RefreshCw, Copy, Check, Save, Video, Users, Building, Send, Image as ImageIcon, Link as LinkIcon, Settings as SettingsIcon, Settings2, ZoomIn, Bot, Slack, FileText, MessageSquare, User, Info as InfoIcon, ToyBrick, Webhook, ClipboardCheck, Trash2, Download } from 'lucide-react';
 import { useIntegrations } from '@/contexts/IntegrationsContext';
 import { useToast } from '@/hooks/use-toast';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogClose } from '@/components/ui/dialog';
@@ -229,6 +229,7 @@ export default function SettingsPageContent() {
   const [slackAutomationChannelId, setSlackAutomationChannelId] = useState("");
   const [slackChannels, setSlackChannels] = useState<SlackChannel[]>([]);
   const [isLoadingSlackChannels, setIsLoadingSlackChannels] = useState(false);
+  const [isExportingTranscripts, setIsExportingTranscripts] = useState(false);
   
   const [isAvatarDialogOpen, setIsAvatarDialogOpen] = useState(false);
   const [selectedAvatarUrl, setSelectedAvatarUrl] = useState('');
@@ -1002,6 +1003,50 @@ export default function SettingsPageContent() {
       description: "Settings will be available soon.",
     });
   };
+
+
+  const handleExportAllTranscripts = async () => {
+    if (isExportingTranscripts) return;
+
+    setIsExportingTranscripts(true);
+    try {
+      const response = await fetch('/api/meetings/export-transcripts', {
+        method: 'GET',
+      });
+
+      if (!response.ok) {
+        throw new Error(`Failed to export transcripts (${response.status})`);
+      }
+
+      const blob = await response.blob();
+      const contentDisposition = response.headers.get('Content-Disposition') || '';
+      const filenameMatch = contentDisposition.match(/filename="([^"]+)"/i);
+      const filename = filenameMatch?.[1] || `taskwise-transcripts-${new Date().toISOString().slice(0, 10)}.md`;
+
+      const downloadUrl = URL.createObjectURL(blob);
+      const anchor = document.createElement('a');
+      anchor.href = downloadUrl;
+      anchor.download = filename;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(downloadUrl);
+
+      toast({
+        title: 'Transcripts exported',
+        description: 'Downloaded transcripts for all stored meetings in this workspace.',
+      });
+    } catch (error) {
+      console.error('Failed to export transcripts:', error);
+      toast({
+        title: 'Export failed',
+        description: 'Could not export meeting transcripts right now. Please try again.',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsExportingTranscripts(false);
+    }
+  };
   
   const appBaseUrl =
     typeof window !== "undefined" ? window.location.origin : "";
@@ -1508,6 +1553,27 @@ export default function SettingsPageContent() {
                           )}
                       </div>
                     </div>
+
+                    <div className="mt-8 border-t border-border/60 pt-6 space-y-3">
+                      <div className="space-y-1">
+                        <Label className="text-sm font-medium">Export all meeting transcripts</Label>
+                        <p className="text-xs text-muted-foreground">
+                          Download every stored meeting transcript in this workspace as a single Markdown file.
+                        </p>
+                      </div>
+                      <Button
+                        variant="outline"
+                        onClick={() => void handleExportAllTranscripts()}
+                        disabled={isExportingTranscripts}
+                      >
+                        {isExportingTranscripts ? (
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        ) : (
+                          <Download className="mr-2 h-4 w-4" />
+                        )}
+                        Export All Transcripts
+                      </Button>
+                    </div>
                   </CardContent>
                 </Card>
 
@@ -1971,4 +2037,3 @@ export default function SettingsPageContent() {
     </>
   );
 }
-
