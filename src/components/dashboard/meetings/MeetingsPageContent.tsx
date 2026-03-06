@@ -2688,7 +2688,12 @@ export default function MeetingsPageContent() {
   } = useMeetingHistory();
   const { sessions, createNewSession, setActiveSessionId } = useChatHistory();
   const { openPasteDialog } = usePasteAction();
-  const { isFathomConnected } = useIntegrations();
+  const {
+    isFathomConnected,
+    isSlackConnected,
+    isGoogleTasksConnected,
+    isTrelloConnected,
+  } = useIntegrations();
   const [openId, setOpenId] = useState<string | null>(null);
   const { toast } = useToast();
   const router = useRouter();
@@ -2700,6 +2705,12 @@ export default function MeetingsPageContent() {
   const [fathomSyncRange, setFathomSyncRange] = useState<FathomSyncRange>("this_week");
   const [selectedMeetingIds, setSelectedMeetingIds] = useState<Set<string>>(new Set());
   const [isBulkDeleteMeetingsOpen, setIsBulkDeleteMeetingsOpen] = useState(false);
+  const [isShareSelectedMeetingsToSlackOpen, setIsShareSelectedMeetingsToSlackOpen] =
+    useState(false);
+  const [isPushSelectedMeetingsToGoogleOpen, setIsPushSelectedMeetingsToGoogleOpen] =
+    useState(false);
+  const [isPushSelectedMeetingsToTrelloOpen, setIsPushSelectedMeetingsToTrelloOpen] =
+    useState(false);
 
   const clearDuplicateChatLinks = useCallback(
     async (chatSessionId: string, meetingId: string) => {
@@ -2894,6 +2905,21 @@ export default function MeetingsPageContent() {
 
   }, [meetings, searchQuery, filter]);
 
+  const selectedMeetings = useMemo(
+    () => meetings.filter((meeting: any) => selectedMeetingIds.has(meeting.id)),
+    [meetings, selectedMeetingIds]
+  );
+
+  const selectedMeetingTasks = useMemo(
+    () => selectedMeetings.flatMap((meeting: any) => getExtractedTasks(meeting.extractedTasks)),
+    [selectedMeetings]
+  );
+
+  const selectedMeetingsLabel =
+    selectedMeetings.length === 1
+      ? selectedMeetings[0]?.title || "Meeting"
+      : `${selectedMeetings.length} meetings`;
+
   const selectedVisibleCount = useMemo(
     () => filteredMeetings.filter((meeting: any) => selectedMeetingIds.has(meeting.id)).length,
     [filteredMeetings, selectedMeetingIds]
@@ -2943,6 +2969,94 @@ export default function MeetingsPageContent() {
     setSelectedMeetingIds(new Set());
     setIsBulkDeleteMeetingsOpen(false);
   }, [deleteMeetings, openId, selectedMeetingIds]);
+
+  const handleExportSelectedMeetings = useCallback(
+    (format: 'csv' | 'md' | 'pdf') => {
+      if (selectedMeetingTasks.length === 0) {
+        toast({
+          title: "No tasks selected",
+          description: "Selected meetings do not contain any extracted tasks to export.",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      const filenameBase =
+        selectedMeetings.length === 1
+          ? (selectedMeetings[0]?.title || "meeting").replace(/\s+/g, '_')
+          : `${selectedMeetings.length}_meetings_export`;
+
+      if (format === 'csv') exportTasksToCSV(selectedMeetingTasks, `${filenameBase}.csv`);
+      if (format === 'md') exportTasksToMarkdown(selectedMeetingTasks, `${filenameBase}.md`);
+      if (format === 'pdf') exportTasksToPDF(selectedMeetingTasks, selectedMeetingsLabel);
+
+      toast({ title: `Exported to ${format.toUpperCase()}` });
+    },
+    [selectedMeetingTasks, selectedMeetings, selectedMeetingsLabel, toast]
+  );
+
+  const handleCopySelectedMeetings = useCallback(async () => {
+    if (selectedMeetingTasks.length === 0) {
+      toast({
+        title: "No tasks selected",
+        description: "Selected meetings do not contain any extracted tasks to copy.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const textToCopy = formatTasksToText(selectedMeetingTasks);
+    const { success } = await copyTextToClipboard(textToCopy);
+    if (success) {
+      toast({
+        title: "Copied!",
+        description: `Copied ${selectedMeetingTasks.length} task branch${selectedMeetingTasks.length === 1 ? "" : "es"} to clipboard.`,
+      });
+      return;
+    }
+
+    toast({
+      title: "Copy Failed",
+      description: "Could not copy the selected meeting tasks to clipboard.",
+      variant: "destructive",
+    });
+  }, [selectedMeetingTasks, toast]);
+
+  const handleShareSelectedMeetingsToSlack = useCallback(() => {
+    if (selectedMeetingTasks.length === 0) {
+      toast({
+        title: "No tasks selected",
+        description: "Selected meetings do not contain any extracted tasks to share.",
+        variant: "destructive",
+      });
+      return;
+    }
+    setIsShareSelectedMeetingsToSlackOpen(true);
+  }, [selectedMeetingTasks, toast]);
+
+  const handlePushSelectedMeetingsToGoogleTasks = useCallback(() => {
+    if (selectedMeetingTasks.length === 0) {
+      toast({
+        title: "No tasks selected",
+        description: "Selected meetings do not contain any extracted tasks to push.",
+        variant: "destructive",
+      });
+      return;
+    }
+    setIsPushSelectedMeetingsToGoogleOpen(true);
+  }, [selectedMeetingTasks, toast]);
+
+  const handlePushSelectedMeetingsToTrello = useCallback(() => {
+    if (selectedMeetingTasks.length === 0) {
+      toast({
+        title: "No tasks selected",
+        description: "Selected meetings do not contain any extracted tasks to push.",
+        variant: "destructive",
+      });
+      return;
+    }
+    setIsPushSelectedMeetingsToTrelloOpen(true);
+  }, [selectedMeetingTasks, toast]);
 
 
   const groupedMeetings = useMemo(() => {
@@ -3173,8 +3287,32 @@ export default function MeetingsPageContent() {
       </ScrollArea>
 
       <MeetingDetailSheet id={openId} onClose={() => setOpenId(null)} onNavigateToChat={handleChatNavigation} />
+      <ShareToSlackDialog
+        isOpen={isShareSelectedMeetingsToSlackOpen}
+        onClose={() => setIsShareSelectedMeetingsToSlackOpen(false)}
+        tasks={selectedMeetingTasks}
+        sessionTitle={selectedMeetingsLabel}
+      />
+      <PushToGoogleTasksDialog
+        isOpen={isPushSelectedMeetingsToGoogleOpen}
+        onClose={() => setIsPushSelectedMeetingsToGoogleOpen(false)}
+        tasks={selectedMeetingTasks}
+      />
+      <PushToTrelloDialog
+        isOpen={isPushSelectedMeetingsToTrelloOpen}
+        onClose={() => setIsPushSelectedMeetingsToTrelloOpen(false)}
+        tasks={selectedMeetingTasks}
+      />
       <SelectionToolbar
         selectedCount={selectedMeetingIds.size}
+        onSend={handleExportSelectedMeetings}
+        onCopy={handleCopySelectedMeetings}
+        onShareToSlack={handleShareSelectedMeetingsToSlack}
+        isSlackConnected={isSlackConnected}
+        onPushToGoogleTasks={handlePushSelectedMeetingsToGoogleTasks}
+        isGoogleTasksConnected={isGoogleTasksConnected}
+        onPushToTrello={handlePushSelectedMeetingsToTrello}
+        isTrelloConnected={isTrelloConnected}
         onDelete={() => setIsBulkDeleteMeetingsOpen(true)}
         onClear={handleClearMeetingSelection}
       />
@@ -3203,5 +3341,4 @@ export default function MeetingsPageContent() {
     </div>
   );
 }
-
 
