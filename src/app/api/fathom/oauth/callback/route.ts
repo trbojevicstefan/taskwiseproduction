@@ -22,8 +22,8 @@ export async function GET(request: Request) {
   const error = url.searchParams.get("error");
   const errorDescription = url.searchParams.get("error_description");
   const state = url.searchParams.get("state");
-  const configuredRedirectUri = process.env.FATHOM_OAUTH_REDIRECT_URI
-    ? process.env.FATHOM_OAUTH_REDIRECT_URI.replace(/\/$/, "")
+  const configuredRedirectUri = process.env.FATHOM_OAUTH_REDIRECT_URI?.trim()
+    ? process.env.FATHOM_OAUTH_REDIRECT_URI.trim().replace(/\/$/, "")
     : null;
   const redirectUri =
     configuredRedirectUri || `${url.origin}/api/fathom/oauth/callback`;

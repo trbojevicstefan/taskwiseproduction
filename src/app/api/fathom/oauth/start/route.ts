@@ -20,8 +20,8 @@ export async function GET(request: Request) {
 
   const state = await createFathomOAuthState(userId);
   const requestUrl = new URL(request.url);
-  const configuredRedirectUri = process.env.FATHOM_OAUTH_REDIRECT_URI
-    ? process.env.FATHOM_OAUTH_REDIRECT_URI.replace(/\/$/, "")
+  const configuredRedirectUri = process.env.FATHOM_OAUTH_REDIRECT_URI?.trim()
+    ? process.env.FATHOM_OAUTH_REDIRECT_URI.trim().replace(/\/$/, "")
     : null;
   const redirectUri =
     configuredRedirectUri ||
