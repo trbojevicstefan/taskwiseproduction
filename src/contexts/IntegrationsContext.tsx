@@ -197,13 +197,33 @@ export const IntegrationsProvider = ({ children }: { children: ReactNode }) => {
       return;
     }
     try {
-      await fetch("/api/fathom/revoke", { method: "POST" });
+      const response = await fetch("/api/fathom/revoke", { method: "POST" });
+      if (!response.ok) {
+        let message = "Could not disconnect Fathom. Please try again.";
+        try {
+          const payload = await response.json();
+          if (payload && typeof payload === "object" && "error" in payload) {
+            message = String(payload.error);
+          } else if (typeof payload === "string" && payload.trim()) {
+            message = payload.trim();
+          }
+        } catch (error) {
+          if (error instanceof Error) {
+            message = error.message;
+          }
+        }
+        throw new Error(message);
+      }
       await refreshUserProfile();
     } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Could not disconnect Fathom. Please try again.";
       console.error("Failed to disconnect Fathom:", error);
       toast({
         title: "Fathom Disconnect Failed",
-        description: "Could not disconnect Fathom. Please try again.",
+        description: message,
         variant: "destructive",
       });
     }

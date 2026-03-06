@@ -4,7 +4,6 @@ import { updateUserById } from "@/lib/db/users";
 import {
   consumeFathomOAuthState,
   deleteManagedFathomWebhooks,
-  getFathomRedirectUri,
   ensureFathomWebhook,
   saveFathomInstallation,
 } from "@/lib/fathom";
@@ -21,7 +20,9 @@ export async function GET(request: Request) {
 
   const code = url.searchParams.get("code");
   const error = url.searchParams.get("error");
+  const errorDescription = url.searchParams.get("error_description");
   const state = url.searchParams.get("state");
+  const redirectUri = `${url.origin}/api/fathom/oauth/callback`;
 
   if (error) {
     if (state) {
@@ -32,13 +33,13 @@ export async function GET(request: Request) {
           "error",
           "oauth.callback",
           "Fathom OAuth error from provider.",
-          { error }
+          { error, errorDescription }
         );
       }
     }
     return redirectToSettings({
       error: "fathom_oauth_failed",
-      message: error,
+      message: errorDescription || error || "OAuth provider returned an error.",
     });
   }
 
@@ -69,7 +70,7 @@ export async function GET(request: Request) {
     code,
     client_id: process.env.FATHOM_CLIENT_ID,
     client_secret: process.env.FATHOM_CLIENT_SECRET,
-    redirect_uri: getFathomRedirectUri(),
+    redirect_uri: redirectUri,
   });
 
   try {
@@ -89,12 +90,14 @@ export async function GET(request: Request) {
       scope?: string;
       user_id?: string;
       error?: string;
+      error_description?: string;
     };
 
     if (!payload.access_token) {
       return redirectToSettings({
         error: "fathom_oauth_failed",
-        message: payload.error || "Fathom OAuth exchange failed.",
+        message:
+          payload.error_description || payload.error || "Fathom OAuth exchange failed.",
       });
     }
 

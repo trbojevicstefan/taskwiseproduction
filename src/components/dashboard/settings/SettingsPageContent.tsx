@@ -92,6 +92,7 @@ const IntegrationCard: React.FC<{
   isLoading: boolean;
   onConnect: () => void;
   onDisconnect: () => void;
+  onDisconnectDisabled?: boolean;
   extraActions?: React.ReactNode;
   settingsAction?: {
     onClick: () => void;
@@ -107,6 +108,7 @@ const IntegrationCard: React.FC<{
   isLoading,
   onConnect,
   onDisconnect,
+  onDisconnectDisabled = false,
   extraActions,
   settingsAction,
   statusNote,
@@ -144,7 +146,12 @@ const IntegrationCard: React.FC<{
               <Settings2 className="h-4 w-4" />
             </Button>
           )}
-          <Button variant="secondary" size="sm" onClick={onDisconnect}>
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={onDisconnect}
+            disabled={onDisconnectDisabled}
+          >
             <PowerOff className="mr-2 h-4 w-4 text-red-500" />
             Disconnect
           </Button>
@@ -277,6 +284,15 @@ export default function SettingsPageContent() {
           workspaceFathom.connectedByEmail
         )}.`
       : null;
+  const canManageWorkspaceIntegrations =
+    user?.activeWorkspaceRole === "owner" ||
+    (user?.activeWorkspaceRole === "admin" &&
+      Boolean(user?.activeWorkspaceAdminAccess?.integrations));
+  const fathomDisconnectDisabled =
+    Boolean(workspaceFathom?.connected) &&
+    !workspaceFathom?.connectedByCurrentUser &&
+    !user?.fathomConnected &&
+    !canManageWorkspaceIntegrations;
   const workspaceInviteInputRef = useRef<HTMLInputElement>(null);
   const webhookUrlInputRef = useRef<HTMLInputElement>(null);
   const [isCreatingFathomWebhook, setIsCreatingFathomWebhook] = useState(false);
@@ -1647,6 +1663,7 @@ export default function SettingsPageContent() {
                               onClick: handleOpenFathomSettings,
                               disabled: !isFathomConnected,
                             }}
+                            onDisconnectDisabled={fathomDisconnectDisabled}
                             extraActions={isFathomConnected ? (
                               <Button variant="outline" size="sm" onClick={handleOpenFathomLogs}>
                                 <FileText className="mr-2 h-4 w-4" />

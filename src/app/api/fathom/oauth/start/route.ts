@@ -2,11 +2,10 @@ import { NextResponse } from "next/server";
 import { getSessionUserId } from "@/lib/server-auth";
 import {
   createFathomOAuthState,
-  getFathomRedirectUri,
   FATHOM_SCOPES,
 } from "@/lib/fathom";
 
-export async function GET() {
+export async function GET(request: Request) {
   const userId = await getSessionUserId();
   if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -20,7 +19,8 @@ export async function GET() {
   }
 
   const state = await createFathomOAuthState(userId);
-  const redirectUri = getFathomRedirectUri();
+  const requestUrl = new URL(request.url);
+  const redirectUri = `${requestUrl.origin}/api/fathom/oauth/callback`;
 
   const params = new URLSearchParams({
     client_id: process.env.FATHOM_CLIENT_ID,
