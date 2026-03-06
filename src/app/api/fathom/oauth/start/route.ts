@@ -20,7 +20,12 @@ export async function GET(request: Request) {
 
   const state = await createFathomOAuthState(userId);
   const requestUrl = new URL(request.url);
-  const redirectUri = `${requestUrl.origin}/api/fathom/oauth/callback`;
+  const configuredRedirectUri = process.env.FATHOM_OAUTH_REDIRECT_URI
+    ? process.env.FATHOM_OAUTH_REDIRECT_URI.replace(/\/$/, "")
+    : null;
+  const redirectUri =
+    configuredRedirectUri ||
+    `${requestUrl.origin}/api/fathom/oauth/callback`;
 
   const params = new URLSearchParams({
     client_id: process.env.FATHOM_CLIENT_ID,
