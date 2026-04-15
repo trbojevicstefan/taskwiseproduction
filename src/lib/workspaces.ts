@@ -22,6 +22,9 @@ export interface WorkspaceDoc {
       boards?: boolean;
       integrations?: boolean;
     } | null;
+    integrations?: {
+      preferredFathomConnectionId?: string | null;
+    } | null;
   } | null;
 }
 

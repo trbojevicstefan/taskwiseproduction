@@ -36,6 +36,9 @@ export interface WorkspaceIntegrationProviderSummary {
   connectedByUserId: string | null;
   connectedByEmail: string | null;
   connectedByCurrentUser: boolean;
+  connectionCount?: number;
+  activeConnectionId?: string | null;
+  activeConnectionLabel?: string | null;
 }
 
 export interface WorkspaceIntegrationsSummary {
@@ -55,9 +58,6 @@ export interface AppUser extends Person {
   workspaceMemberships?: WorkspaceMembershipSummary[];
   onboardingCompleted?: boolean;
   slackTeamId?: string | null;
-  fathomWebhookToken?: string | null;
-  fathomConnected?: boolean;
-  fathomUserId?: string | null;
   displayName?: string | null;
   photoURL?: string | null;
   taskGranularityPreference?: 'light' | 'medium' | 'detailed';

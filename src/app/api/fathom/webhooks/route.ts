@@ -3,70 +3,63 @@ import { apiError } from "@/lib/api-route";
 import { getDb } from "@/lib/db";
 import {
   deleteFathomWebhook,
-  getFathomInstallation,
-  getValidFathomAccessToken,
-  saveFathomInstallation,
+  getValidFathomAccessTokenForConnection,
 } from "@/lib/fathom";
-import { getFathomIntegrationLogs } from "@/lib/fathom-logs";
+import {
+  findPreferredFathomConnectionForWorkspace,
+  updateFathomConnectionById,
+} from "@/lib/fathom-connections";
 import { getSessionUserId } from "@/lib/server-auth";
 import { resolveWorkspaceScopeForUser } from "@/lib/workspace-scope";
+
+const serializeManagedWebhook = (entry: any) => ({
+  id: entry?.id || null,
+  url: entry?.url || null,
+  created_at: entry?.createdAt || null,
+  include_transcript: entry?.includeTranscript ?? null,
+  include_summary: entry?.includeSummary ?? null,
+  include_action_items: entry?.includeActionItems ?? null,
+  include_crm_matches: entry?.includeCrmMatches ?? null,
+  triggered_for: entry?.triggeredFor ?? null,
+});
 
 export async function GET() {
   const userId = await getSessionUserId();
   if (!userId) {
     return apiError(401, "request_error", "Unauthorized");
   }
+
+  const db = await getDb();
   try {
-    const db = await getDb();
-    await resolveWorkspaceScopeForUser(db, userId, {
+    const workspaceScope = await resolveWorkspaceScopeForUser(db, userId, {
       minimumRole: "member",
       adminVisibilityKey: "integrations",
     });
+    const connection = await findPreferredFathomConnectionForWorkspace(
+      db as any,
+      workspaceScope.workspaceId,
+      userId
+    );
+    if (!connection) {
+      return apiError(400, "request_error", "Fathom integration not connected.");
+    }
+
+    const fallback = connection.webhook.managedWebhooks?.length
+      ? connection.webhook.managedWebhooks
+      : connection.webhook.webhookId || connection.webhook.webhookUrl
+        ? [
+            {
+              id: connection.webhook.webhookId || null,
+              url: connection.webhook.webhookUrl || null,
+              createdAt: connection.updatedAt,
+            },
+          ]
+        : [];
+
+    return NextResponse.json(fallback.map(serializeManagedWebhook));
   } catch (error: any) {
     return apiError(error?.status || 403, "request_error", error?.message || "Forbidden");
   }
-
-  const installation = await getFathomInstallation(userId);
-  if (!installation) {
-    return apiError(400, "request_error", "Fathom integration not connected.");
-  }
-
-  const fallback = installation.webhooks?.length
-    ? installation.webhooks
-    : installation.webhookId || installation.webhookUrl
-    ? [
-        {
-          id: installation.webhookId,
-          url: installation.webhookUrl,
-          created_at: installation.updatedAt || installation.createdAt || null,
-        },
-      ]
-    : [];
-
-  if (fallback.length > 0) {
-    return NextResponse.json(fallback);
-  }
-
-  const logs = await getFathomIntegrationLogs(userId, 200);
-  const fromLogs = logs
-    .filter((entry: any) => entry.event === "webhook.create")
-    .map((entry: any) => ({
-      id: entry.metadata?.webhookId ?? null,
-      url: entry.metadata?.destinationUrl ?? null,
-      created_at: entry.createdAt,
-    }))
-    .filter((entry: any) => entry.id || entry.url);
-
-  const unique = Array.from(
-    new Map(
-      fromLogs.map((entry: any) => [
-        entry.id || entry.url || JSON.stringify(entry),
-        entry,
-      ])
-    ).values()
-  );
-
-  return NextResponse.json(unique);
 }
 
 export async function DELETE(request: Request) {
@@ -74,57 +67,43 @@ export async function DELETE(request: Request) {
   if (!userId) {
     return apiError(401, "request_error", "Unauthorized");
   }
+
+  const db = await getDb();
   try {
-    const db = await getDb();
-    await resolveWorkspaceScopeForUser(db, userId, {
+    const workspaceScope = await resolveWorkspaceScopeForUser(db, userId, {
       minimumRole: "member",
       adminVisibilityKey: "integrations",
     });
-  } catch (error: any) {
-    return apiError(error?.status || 403, "request_error", error?.message || "Forbidden");
-  }
-
-  const body = await request.json().catch(() => ({}));
-  const { ids, deleteAll } = body || {};
-
-  const installation = await getFathomInstallation(userId);
-  if (!installation) {
-    return apiError(400, "request_error", "Fathom integration not connected.");
-  }
-
-  try {
-    const accessToken = await getValidFathomAccessToken(userId);
-    const targets = Array.isArray(ids) ? ids : [];
-    const shouldDeleteAll = Boolean(deleteAll);
-
-    let webhookIds: any[] = shouldDeleteAll
-      ? installation.webhooks?.length
-        ? installation.webhooks
-        : installation.webhookId || installation.webhookUrl
-        ? [
-            {
-              id: installation.webhookId,
-              url: installation.webhookUrl,
-            },
-          ]
-        : []
-      : targets;
-
-    if (shouldDeleteAll && webhookIds.length === 0) {
-      const logs = await getFathomIntegrationLogs(userId, 200);
-      webhookIds = logs
-        .filter((entry: any) => entry.event === "webhook.create")
-        .map((entry: any) => ({
-          id: entry.metadata?.webhookId ?? null,
-          url: entry.metadata?.destinationUrl ?? null,
-        }))
-        .filter((entry: any) => entry.id || entry.url);
+    const connection = await findPreferredFathomConnectionForWorkspace(
+      db as any,
+      workspaceScope.workspaceId,
+      userId
+    );
+    if (!connection) {
+      return apiError(400, "request_error", "Fathom integration not connected.");
     }
+
+    const body = await request.json().catch(() => ({}));
+    const { ids, deleteAll } = body || {};
+    const configuredWebhooks =
+      connection.webhook.managedWebhooks?.length
+        ? connection.webhook.managedWebhooks
+        : connection.webhook.webhookId || connection.webhook.webhookUrl
+          ? [
+              {
+                id: connection.webhook.webhookId || null,
+                url: connection.webhook.webhookUrl || null,
+              },
+            ]
+          : [];
+    const targets = Array.isArray(ids) ? ids : [];
+    const webhookIds: any[] = Boolean(deleteAll) ? configuredWebhooks : targets;
 
     if (!webhookIds.length) {
       return apiError(400, "request_error", "No webhook IDs provided.");
     }
 
+    const accessToken = await getValidFathomAccessTokenForConnection(connection._id);
     for (const webhook of webhookIds) {
       await deleteFathomWebhook(accessToken, webhook);
     }
@@ -132,23 +111,25 @@ export async function DELETE(request: Request) {
     const deletedIds = webhookIds
       .map((item: any) => (typeof item === "string" ? item : item?.id))
       .filter(Boolean);
-    const nextWebhooks =
-      installation.webhooks?.filter(
+    const remainingWebhooks =
+      connection.webhook.managedWebhooks?.filter(
         (entry: any) => !deletedIds.includes(entry.id || "")
       ) || [];
+    const removedPrimary = connection.webhook.webhookId
+      ? deletedIds.includes(connection.webhook.webhookId)
+      : false;
 
-    await saveFathomInstallation({
-      ...installation,
-      webhooks: nextWebhooks,
-      webhookId:
-        installation.webhookId && deletedIds.includes(installation.webhookId)
-          ? null
-          : installation.webhookId,
-      webhookUrl:
-        installation.webhookId && deletedIds.includes(installation.webhookId)
-          ? null
-          : installation.webhookUrl,
-      updatedAt: new Date(),
+    await updateFathomConnectionById(db as any, connection._id, {
+      updatedByUserId: userId,
+      webhook: {
+        ...connection.webhook,
+        status: remainingWebhooks.length || !removedPrimary ? connection.webhook.status : "not_configured",
+        webhookId: removedPrimary ? null : connection.webhook.webhookId || null,
+        webhookUrl: removedPrimary ? null : connection.webhook.webhookUrl || null,
+        managedWebhooks: remainingWebhooks,
+        lastSyncedAt: new Date(),
+        lastError: null,
+      },
     });
 
     return NextResponse.json({ ok: true, deleted: webhookIds.length });
@@ -159,5 +140,3 @@ export async function DELETE(request: Request) {
     );
   }
 }
-
-

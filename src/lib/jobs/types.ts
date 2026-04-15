@@ -27,6 +27,7 @@ export type MeetingRescanJobPayload = {
 
 export type FathomSyncJobPayload = {
   range: FathomSyncRange;
+  connectionId?: string | null;
 };
 
 export type SlackUsersSyncJobPayload = {
@@ -35,6 +36,8 @@ export type SlackUsersSyncJobPayload = {
 
 export type FathomWebhookIngestJobPayload = {
   recordingId: string;
+  connectionId?: string | null;
+  providerSourceId?: string | null;
   data?: Record<string, unknown>;
 };
 

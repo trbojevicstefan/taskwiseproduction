@@ -5,6 +5,10 @@ import { z } from "zod";
 import { authOptions } from "@/lib/auth";
 import { getDb } from "@/lib/db";
 import { findUserById, updateUserById } from "@/lib/db/users";
+import {
+  findPreferredFathomConnectionForWorkspace,
+  listFathomConnectionsForWorkspace,
+} from "@/lib/fathom-connections";
 import { apiError, apiSuccess, mapApiError, parseJsonBody } from "@/lib/api-route";
 import { assertWorkspaceAccess, ensureWorkspaceBootstrapForUser } from "@/lib/workspace-context";
 import {
@@ -46,9 +50,6 @@ const updateSchema = z.object({
   onboardingCompleted: z.boolean().optional(),
   firefliesWebhookToken: z.string().optional().nullable(),
   slackTeamId: z.string().optional().nullable(),
-  fathomWebhookToken: z.string().optional().nullable(),
-  fathomConnected: z.boolean().optional(),
-  fathomUserId: z.string().optional().nullable(),
   taskGranularityPreference: z.enum(["light", "medium", "detailed"]).optional(),
   autoApproveCompletedTasks: z.boolean().optional(),
   completionMatchThreshold: z.number().min(0.4).max(0.95).optional(),
@@ -72,6 +73,9 @@ type WorkspaceIntegrationProviderSummary = {
   connectedByUserId: string | null;
   connectedByEmail: string | null;
   connectedByCurrentUser: boolean;
+  connectionCount?: number;
+  activeConnectionId?: string | null;
+  activeConnectionLabel?: string | null;
 };
 
 type WorkspaceIntegrationSummary = {
@@ -125,9 +129,6 @@ const toAppUser = (
     workspaceIntegrations: options.workspaceIntegrations || emptyWorkspaceIntegrationSummary(),
     firefliesWebhookToken: user.firefliesWebhookToken,
     slackTeamId: user.slackTeamId || null,
-    fathomWebhookToken: user.fathomWebhookToken || null,
-    fathomConnected: Boolean(user.fathomConnected),
-    fathomUserId: user.fathomUserId || null,
     sourceSessionIds: user.sourceSessionIds || [],
     taskGranularityPreference: user.taskGranularityPreference,
     autoApproveCompletedTasks: Boolean(user.autoApproveCompletedTasks),
@@ -204,14 +205,24 @@ const buildWorkspaceIntegrationSummary = async (
     db as any,
     workspaceId
   );
+  const fathomConnections = await listFathomConnectionsForWorkspace(db as any, workspaceId);
+  const preferredFathomConnection = await findPreferredFathomConnectionForWorkspace(
+    db as any,
+    workspaceId,
+    currentUserId
+  );
   const memberUserIds = Array.from(
     new Set(memberships.map((membership: any) => String(membership.userId)).filter(Boolean))
   );
-  if (!memberUserIds.length) {
+  const fathomCreatorIds = Array.from(
+    new Set(fathomConnections.map((connection) => connection.createdByUserId).filter(Boolean))
+  );
+  const lookupUserIds = Array.from(new Set([...memberUserIds, ...fathomCreatorIds]));
+  if (!lookupUserIds.length) {
     return emptyWorkspaceIntegrationSummary();
   }
 
-  const validObjectIds = memberUserIds.filter((memberId) => ObjectId.isValid(memberId));
+  const validObjectIds = lookupUserIds.filter((memberId) => ObjectId.isValid(memberId));
   if (!validObjectIds.length) {
     return emptyWorkspaceIntegrationSummary();
   }
@@ -230,7 +241,6 @@ const buildWorkspaceIntegrationSummary = async (
           email: 1,
           slackTeamId: 1,
           googleConnected: 1,
-          fathomConnected: 1,
         },
       }
     )
@@ -261,10 +271,27 @@ const buildWorkspaceIntegrationSummary = async (
     };
   };
 
+  const userById = new Map<string, any>(
+    users.map((candidate: any) => [String(candidate._id), candidate] as const)
+  );
+  const fathomOwnerId = preferredFathomConnection?.createdByUserId || null;
+  const fathomOwner = fathomOwnerId ? userById.get(fathomOwnerId) : null;
+  const activeFathomConnections = fathomConnections.filter(
+    (connection) => connection.status === "active"
+  );
+
   return {
     slack: resolveProvider((candidate: any) => Boolean(candidate.slackTeamId)),
     google: resolveProvider((candidate: any) => Boolean(candidate.googleConnected)),
-    fathom: resolveProvider((candidate: any) => Boolean(candidate.fathomConnected)),
+    fathom: {
+      connected: activeFathomConnections.length > 0,
+      connectedByUserId: fathomOwnerId,
+      connectedByEmail: fathomOwner?.email || null,
+      connectedByCurrentUser: fathomOwnerId === currentUserId,
+      connectionCount: activeFathomConnections.length,
+      activeConnectionId: preferredFathomConnection?._id || null,
+      activeConnectionLabel: preferredFathomConnection?.label || null,
+    },
   };
 };
 
@@ -397,13 +424,6 @@ export async function PATCH(request: Request) {
         ? { firefliesWebhookToken: update.firefliesWebhookToken }
         : {}),
       ...(update.slackTeamId !== undefined ? { slackTeamId: update.slackTeamId } : {}),
-      ...(update.fathomWebhookToken !== undefined
-        ? { fathomWebhookToken: update.fathomWebhookToken }
-        : {}),
-      ...(update.fathomConnected !== undefined
-        ? { fathomConnected: update.fathomConnected }
-        : {}),
-      ...(update.fathomUserId !== undefined ? { fathomUserId: update.fathomUserId } : {}),
       ...(update.taskGranularityPreference !== undefined
         ? { taskGranularityPreference: update.taskGranularityPreference }
         : {}),

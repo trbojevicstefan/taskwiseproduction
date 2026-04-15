@@ -2,8 +2,11 @@ import { ApiRouteError } from "@/lib/api-route";
 import { getDb } from "@/lib/db";
 import { findUserById } from "@/lib/db/users";
 import {
+  extractFathomProviderSourceId,
   fetchFathomMeetings,
+  getFathomRecordingHashScope,
   getValidFathomAccessToken,
+  getValidFathomAccessTokenForConnection,
   hashFathomRecordingId,
 } from "@/lib/fathom";
 import { ingestFathomMeeting } from "@/lib/fathom-ingest";
@@ -82,11 +85,13 @@ const resolveRangeBounds = (range: FathomSyncRange) => {
 export const runFathomSyncJob = async ({
   userId,
   range,
+  connectionId,
   correlationId,
   logger: baseLogger,
 }: {
   userId: string;
   range: FathomSyncRange;
+  connectionId?: string | null;
   correlationId?: string;
   logger?: StructuredLogger;
 }) => {
@@ -95,6 +100,7 @@ export const runFathomSyncJob = async ({
     correlationId: resolvedCorrelationId,
     userId,
     range,
+    connectionId: connectionId || null,
   });
   const startedAtMs = Date.now();
   logger.info("jobs.fathom-sync.started");
@@ -111,7 +117,9 @@ export const runFathomSyncJob = async ({
 
   let accessToken: string;
   try {
-    accessToken = await getValidFathomAccessToken(userId);
+    accessToken = connectionId
+      ? await getValidFathomAccessTokenForConnection(connectionId)
+      : await getValidFathomAccessToken(userId);
   } catch (error) {
     void recordExternalApiFailure({
       provider: "fathom",
@@ -178,22 +186,45 @@ export const runFathomSyncJob = async ({
   });
 
   const db = await getDb();
+  const recordingHashScope = getFathomRecordingHashScope({ userId, connectionId });
   const recordingIds = filteredMeetings
     .map((meeting: any) => extractRecordingId(meeting))
     .filter((id: any): id is string | number => Boolean(id))
     .map((id: any) => String(id));
-  const recordingIdHashes = recordingIds.map((id: any) => hashFathomRecordingId(userId, id));
+  const legacyRecordingHashScope = getFathomRecordingHashScope({ userId });
+  const recordingIdHashes = recordingIds.flatMap((id: any) => {
+    const scopedHashes = [hashFathomRecordingId(recordingHashScope, id)];
+    if (connectionId) {
+      scopedHashes.push(hashFathomRecordingId(legacyRecordingHashScope, id));
+    }
+    return scopedHashes;
+  });
   const existing = recordingIds.length
     ? await db
         .collection("meetings")
         .find({
-          userId,
-          $or: [
-            { recordingIdHash: { $in: recordingIdHashes } },
-            { recordingId: { $in: recordingIds } },
+          $and: [
+            { userId },
+            connectionId
+              ? {
+                  $or: [
+                    { connectionId },
+                    { connectionId: null },
+                    { connectionId: { $exists: false } },
+                  ],
+                }
+              : {
+                  $or: [{ connectionId: null }, { connectionId: { $exists: false } }],
+                },
+            {
+              $or: [
+                { recordingIdHash: { $in: recordingIdHashes } },
+                { recordingId: { $in: recordingIds } },
+              ],
+            },
           ],
         })
-        .project({ recordingId: 1, recordingIdHash: 1 })
+        .project({ recordingId: 1, recordingIdHash: 1, connectionId: 1 })
         .toArray()
     : [];
 
@@ -219,17 +250,28 @@ export const runFathomSyncJob = async ({
       skipped += 1;
       continue;
     }
-    const recordingIdHash = hashFathomRecordingId(userId, String(recordingId));
+    const recordingIdHash = hashFathomRecordingId(recordingHashScope, String(recordingId));
+    const legacyRecordingIdHash = connectionId
+      ? hashFathomRecordingId(legacyRecordingHashScope, String(recordingId))
+      : null;
     if (existingHashes.has(recordingIdHash) || existingIds.has(String(recordingId))) {
       duplicate += 1;
       continue;
     }
+    if (legacyRecordingIdHash && existingHashes.has(legacyRecordingIdHash)) {
+      duplicate += 1;
+      continue;
+    }
+
+    const providerSourceId = extractFathomProviderSourceId(meeting);
 
     let result: Awaited<ReturnType<typeof ingestFathomMeeting>> | null = null;
     try {
       result = await ingestFathomMeeting({
         user,
         recordingId: String(recordingId),
+        connectionId: connectionId || null,
+        providerSourceId,
         data: meeting,
         accessToken,
       });

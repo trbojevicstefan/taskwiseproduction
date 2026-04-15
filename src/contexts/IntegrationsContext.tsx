@@ -52,7 +52,7 @@ interface IntegrationsContextType {
   disconnectSlack: () => Promise<void>;
   isFathomConnected: boolean;
   isLoadingFathomConnection: boolean;
-  connectFathom: () => void;
+  connectFathom: (options?: { connectionId?: string | null; label?: string | null }) => void;
   disconnectFathom: () => Promise<void>;
 }
 
@@ -70,6 +70,8 @@ export const IntegrationsProvider = ({ children }: { children: ReactNode }) => {
   const workspaceSlack = user?.workspaceIntegrations?.slack;
   const workspaceGoogle = user?.workspaceIntegrations?.google;
   const workspaceFathom = user?.workspaceIntegrations?.fathom;
+  const activeWorkspaceId = user?.activeWorkspaceId || user?.workspace?.id || null;
+  const activeFathomConnectionId = workspaceFathom?.activeConnectionId || null;
   const slackManagedByWorkspace =
     Boolean(workspaceSlack?.connected) && !workspaceSlack?.connectedByCurrentUser;
   const googleManagedByWorkspace =
@@ -184,12 +186,60 @@ export const IntegrationsProvider = ({ children }: { children: ReactNode }) => {
     }
   };
 
-  const connectFathom = () => {
-    window.location.href = "/api/fathom/oauth/start";
+  const connectFathom = (options?: { connectionId?: string | null; label?: string | null }) => {
+    const query = new URLSearchParams();
+    if (activeWorkspaceId) {
+      query.set("workspaceId", activeWorkspaceId);
+    }
+    if (options?.connectionId) {
+      query.set("connectionId", options.connectionId);
+    }
+    if (options?.label) {
+      query.set("label", options.label);
+    }
+    const suffix = query.toString();
+    window.location.href = suffix
+      ? `/api/fathom/oauth/start?${suffix}`
+      : "/api/fathom/oauth/start";
   };
 
+  const resolveWorkspaceFathomConnectionId = useCallback(async () => {
+    if (!activeWorkspaceId) {
+      return null;
+    }
+    if (activeFathomConnectionId) {
+      return activeFathomConnectionId;
+    }
+
+    const response = await fetch(
+      `/api/workspaces/${encodeURIComponent(activeWorkspaceId)}/fathom/connections`
+    );
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(payload?.error || "Could not load Fathom connections.");
+    }
+
+    const connections = Array.isArray(payload?.connections) ? payload.connections : [];
+    const preferredConnectionId =
+      typeof payload?.preferredConnectionId === "string" ? payload.preferredConnectionId : null;
+    const selectedConnection =
+      (preferredConnectionId
+        ? connections.find((connection: any) => connection?.id === preferredConnectionId)
+        : null) ||
+      connections.find((connection: any) => connection?.isPreferred) ||
+      connections.find((connection: any) => connection?.status === "active") ||
+      connections[0] ||
+      null;
+
+    return typeof selectedConnection?.id === "string" ? selectedConnection.id : null;
+  }, [activeFathomConnectionId, activeWorkspaceId]);
+
   const disconnectFathom = async () => {
-    if (fathomManagedByWorkspace && !user?.fathomConnected && !canManageWorkspaceIntegrations) {
+    if (
+      fathomManagedByWorkspace &&
+      !workspaceFathom?.connectedByCurrentUser &&
+      !canManageWorkspaceIntegrations
+    ) {
       toast({
         title: "Managed by Workspace",
         description: "Fathom integration is connected by another workspace admin.",
@@ -197,7 +247,16 @@ export const IntegrationsProvider = ({ children }: { children: ReactNode }) => {
       return;
     }
     try {
-      const response = await fetch("/api/fathom/revoke", { method: "POST" });
+      const connectionId = await resolveWorkspaceFathomConnectionId();
+      if (!activeWorkspaceId || !connectionId) {
+        throw new Error("No workspace Fathom connection is available to disconnect.");
+      }
+      const response = await fetch(
+        `/api/workspaces/${encodeURIComponent(
+          activeWorkspaceId
+        )}/fathom/connections/${encodeURIComponent(connectionId)}`,
+        { method: "DELETE" }
+      );
       if (!response.ok) {
         let message = "Could not disconnect Fathom. Please try again.";
         try {
@@ -272,7 +331,7 @@ export const IntegrationsProvider = ({ children }: { children: ReactNode }) => {
       slackInstallation,
       connectSlack,
       disconnectSlack,
-      isFathomConnected: Boolean(user?.fathomConnected || workspaceFathom?.connected),
+      isFathomConnected: Boolean(workspaceFathom?.connected),
       isLoadingFathomConnection,
       connectFathom,
       disconnectFathom,

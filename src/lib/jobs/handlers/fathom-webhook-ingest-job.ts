@@ -1,6 +1,11 @@
 import { ApiRouteError } from "@/lib/api-route";
 import { findUserById } from "@/lib/db/users";
-import { getValidFathomAccessToken, hashFathomRecordingId } from "@/lib/fathom";
+import {
+  getFathomRecordingHashScope,
+  getValidFathomAccessToken,
+  getValidFathomAccessTokenForConnection,
+  hashFathomRecordingId,
+} from "@/lib/fathom";
 import { ingestFathomMeeting } from "@/lib/fathom-ingest";
 import { logFathomIntegration } from "@/lib/fathom-logs";
 import {
@@ -13,12 +18,16 @@ import { recordExternalApiFailure } from "@/lib/observability-metrics";
 export const runFathomWebhookIngestJob = async ({
   userId,
   recordingId,
+  connectionId,
+  providerSourceId,
   data,
   correlationId,
   logger: baseLogger,
 }: {
   userId: string;
   recordingId: string;
+  connectionId?: string | null;
+  providerSourceId?: string | null;
   data?: Record<string, unknown>;
   correlationId?: string;
   logger?: StructuredLogger;
@@ -27,6 +36,7 @@ export const runFathomWebhookIngestJob = async ({
   const logger = (baseLogger || createLogger({ scope: "jobs.fathom-webhook-ingest" })).child({
     correlationId: resolvedCorrelationId,
     userId,
+    connectionId: connectionId || null,
   });
   const startedAtMs = Date.now();
   logger.info("jobs.fathom-webhook-ingest.started");
@@ -38,7 +48,9 @@ export const runFathomWebhookIngestJob = async ({
 
   let accessToken = "";
   try {
-    accessToken = await getValidFathomAccessToken(userId);
+    accessToken = connectionId
+      ? await getValidFathomAccessTokenForConnection(connectionId)
+      : await getValidFathomAccessToken(userId);
   } catch (error) {
     void recordExternalApiFailure({
       provider: "fathom",
@@ -52,10 +64,15 @@ export const runFathomWebhookIngestJob = async ({
     throw error;
   }
 
-  const recordingIdHash = hashFathomRecordingId(userId, recordingId);
+  const recordingIdHash = hashFathomRecordingId(
+    getFathomRecordingHashScope({ userId, connectionId }),
+    recordingId
+  );
   const result = await ingestFathomMeeting({
     user,
     recordingId,
+    connectionId: connectionId || null,
+    providerSourceId: providerSourceId || null,
     data: data || {},
     accessToken,
   });

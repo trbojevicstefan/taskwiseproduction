@@ -31,6 +31,62 @@ describe("GET /api/chat-sessions pagination", () => {
     mockedGetSessionUserId.mockResolvedValue("user-1");
   });
 
+  const createDbMock = (sessionsFind: jest.Mock) =>
+    ({
+      collection: jest.fn((name: string) => {
+        if (name === "chatSessions") {
+          return { find: sessionsFind };
+        }
+        if (name === "users") {
+          return {
+            findOne: jest.fn().mockResolvedValue({
+              id: "user-1",
+              name: "User One",
+              email: "user-1@example.com",
+              activeWorkspaceId: "workspace-1",
+              workspace: { id: "workspace-1", name: "Workspace One" },
+            }),
+            updateOne: jest.fn().mockResolvedValue({ matchedCount: 1, modifiedCount: 0 }),
+          };
+        }
+        if (name === "workspaces") {
+          return {
+            findOne: jest.fn().mockResolvedValue({
+              _id: "workspace-1",
+              name: "Workspace One",
+              status: "active",
+              settings: null,
+            }),
+          };
+        }
+        if (name === "workspaceMemberships") {
+          return {
+            findOne: jest.fn().mockResolvedValue({
+              _id: "membership-1",
+              workspaceId: "workspace-1",
+              userId: "user-1",
+              role: "owner",
+              status: "active",
+            }),
+            find: jest.fn().mockReturnValue({
+              sort: jest.fn().mockReturnValue({
+                toArray: jest.fn().mockResolvedValue([
+                  {
+                    _id: "membership-1",
+                    workspaceId: "workspace-1",
+                    userId: "user-1",
+                    role: "owner",
+                    status: "active",
+                  },
+                ]),
+              }),
+            }),
+          };
+        }
+        throw new Error(`Unexpected collection in test: ${name}`);
+      }),
+    }) as any;
+
   it("returns cursor-paginated chat sessions when paginate=1 is provided", async () => {
     const sessionsToArray = jest.fn().mockResolvedValue([
       {
@@ -62,14 +118,7 @@ describe("GET /api/chat-sessions pagination", () => {
     const sessionsSort = jest.fn().mockReturnValue({ limit: sessionsLimit });
     const sessionsFind = jest.fn().mockReturnValue({ sort: sessionsSort });
 
-    const db = {
-      collection: jest.fn((name: string) => {
-        if (name === "chatSessions") {
-          return { find: sessionsFind };
-        }
-        throw new Error(`Unexpected collection in test: ${name}`);
-      }),
-    } as any;
+    const db = createDbMock(sessionsFind);
     mockedGetDb.mockResolvedValue(db);
 
     const response = await GET(
@@ -101,14 +150,7 @@ describe("GET /api/chat-sessions pagination", () => {
     const sessionsSort = jest.fn().mockReturnValue({ limit: sessionsLimit });
     const sessionsFind = jest.fn().mockReturnValue({ sort: sessionsSort });
 
-    const db = {
-      collection: jest.fn((name: string) => {
-        if (name === "chatSessions") {
-          return { find: sessionsFind };
-        }
-        throw new Error(`Unexpected collection in test: ${name}`);
-      }),
-    } as any;
+    const db = createDbMock(sessionsFind);
     mockedGetDb.mockResolvedValue(db);
 
     const response = await GET(new Request("http://localhost/api/chat-sessions"));

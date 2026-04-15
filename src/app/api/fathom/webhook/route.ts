@@ -3,13 +3,17 @@ import { NextResponse } from "next/server";
 import { apiError } from "@/lib/api-route";
 import { isQueueFirstWebhookIngestionEnabled } from "@/lib/core-first-flags";
 import { getDb } from "@/lib/db";
+import { findUserById, findUserByFathomWebhookToken } from "@/lib/db/users";
+import { findFathomConnectionByWebhookToken } from "@/lib/fathom-connections";
 import {
+  extractFathomProviderSourceId,
+  getFathomRecordingHashScope,
   getFathomInstallation,
   getValidFathomAccessToken,
+  getValidFathomAccessTokenForConnection,
   hashFathomRecordingId,
 } from "@/lib/fathom";
 import { ingestFathomMeeting } from "@/lib/fathom-ingest";
-import { findUserByFathomWebhookToken } from "@/lib/db/users";
 import { logFathomIntegration } from "@/lib/fathom-logs";
 import { enqueueJob } from "@/lib/jobs/store";
 import { kickJobWorker } from "@/lib/jobs/worker";
@@ -98,8 +102,13 @@ export async function POST(request: Request) {
   }
 
   const rawBody = await request.text();
+  const db = await getDb();
+  const connection = await findFathomConnectionByWebhookToken(db as any, token);
+  const connectionUserId = connection?.legacyUserId || connection?.createdByUserId || null;
+  const user = connectionUserId
+    ? await findUserById(connectionUserId)
+    : await findUserByFathomWebhookToken(token);
 
-  const user = await findUserByFathomWebhookToken(token);
   if (!user) {
     return apiError(404, "request_error", "Unknown webhook token.");
   }
@@ -109,7 +118,10 @@ export async function POST(request: Request) {
   const webhookTimestamp = request.headers.get("webhook-timestamp");
   const installation = await getFathomInstallation(user._id.toString());
   const secret =
-    installation?.webhookSecret || process.env.FATHOM_WEBHOOK_SECRET || null;
+    connection?.webhook.secret ||
+    installation?.webhookSecret ||
+    process.env.FATHOM_WEBHOOK_SECRET ||
+    null;
   if (
     !verifyWebhookSignature(
       rawBody,
@@ -165,18 +177,23 @@ export async function POST(request: Request) {
     return apiError(400, "request_error", "Missing recording ID.");
   }
 
+  const providerSourceId = extractFathomProviderSourceId(data);
   const recordingIdHash = hashFathomRecordingId(
-    user._id.toString(),
+    getFathomRecordingHashScope({
+      userId: user._id.toString(),
+      connectionId: connection?._id || null,
+    }),
     String(recordingId)
   );
 
   if (isQueueFirstWebhookIngestionEnabled()) {
-    const db = await getDb();
     const job = await enqueueJob(db, {
       type: "fathom-webhook-ingest",
       userId: user._id.toString(),
       payload: {
         recordingId: String(recordingId),
+        connectionId: connection?._id || null,
+        providerSourceId,
         data:
           data && typeof data === "object"
             ? (data as Record<string, unknown>)
@@ -202,10 +219,14 @@ export async function POST(request: Request) {
     );
   }
 
-  const accessToken = await getValidFathomAccessToken(user._id.toString());
+  const accessToken = connection?._id
+    ? await getValidFathomAccessTokenForConnection(connection._id)
+    : await getValidFathomAccessToken(user._id.toString());
   const result = await ingestFathomMeeting({
     user,
     recordingId: String(recordingId),
+    connectionId: connection?._id || null,
+    providerSourceId,
     data,
     accessToken,
   });

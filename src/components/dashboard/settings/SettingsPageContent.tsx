@@ -43,6 +43,33 @@ type SlackChannel = {
   name: string;
 };
 
+type FathomConnectionSummary = {
+  id: string;
+  label: string;
+  status: string;
+  createdByUserId: string;
+  updatedAt: string;
+  isPreferred?: boolean;
+  connectedByCurrentUser?: boolean;
+  canManage?: boolean;
+  webhook?: {
+    webhookId?: string | null;
+    webhookUrl?: string | null;
+    managedWebhooks?: Array<Record<string, any>> | null;
+  };
+};
+
+const resolveWorkspaceFathomConnection = (
+  connections: FathomConnectionSummary[],
+  preferredConnectionId: string | null
+) =>
+  (preferredConnectionId
+    ? connections.find((connection) => connection.id === preferredConnectionId)
+    : null) ||
+  connections.find((connection) => connection.isPreferred) ||
+  connections.find((connection) => connection.status === "active") ||
+  null;
+
 type WorkspaceMember = {
   membershipId: string;
   userId: string;
@@ -255,8 +282,8 @@ export default function SettingsPageContent() {
   const canManageWorkspaceSettings = canManageWorkspaceMembers;
   const integrationsBlockedForAdmin =
     activeWorkspaceMembership?.role === "admin" &&
-    Boolean(user?.activeWorkspaceAdminAccess) &&
-    !Boolean(user?.activeWorkspaceAdminAccess?.integrations);
+    !!user?.activeWorkspaceAdminAccess &&
+    !user.activeWorkspaceAdminAccess.integrations;
   const workspaceSlack = user?.workspaceIntegrations?.slack;
   const workspaceGoogle = user?.workspaceIntegrations?.google;
   const workspaceFathom = user?.workspaceIntegrations?.fathom;
@@ -269,9 +296,9 @@ export default function SettingsPageContent() {
         )}.`
       : null;
   const slackConnectedViaWorkspaceOnly =
-    Boolean(workspaceSlack?.connected) &&
+    !!workspaceSlack?.connected &&
     !workspaceSlack?.connectedByCurrentUser &&
-    !Boolean(user?.slackTeamId);
+    !user?.slackTeamId;
   const googleStatusNote =
     workspaceGoogle?.connected && !workspaceGoogle.connectedByCurrentUser
       ? `Connected in this workspace by ${formatIntegrationOwner(
@@ -288,10 +315,12 @@ export default function SettingsPageContent() {
     user?.activeWorkspaceRole === "owner" ||
     (user?.activeWorkspaceRole === "admin" &&
       Boolean(user?.activeWorkspaceAdminAccess?.integrations));
+  const canManageFathomConnection = (connection: FathomConnectionSummary) =>
+    connection.canManage ?? canManageWorkspaceIntegrations;
+  const isWorkspaceFathomConnected = Boolean(workspaceFathom?.connected);
   const fathomDisconnectDisabled =
     Boolean(workspaceFathom?.connected) &&
     !workspaceFathom?.connectedByCurrentUser &&
-    !user?.fathomConnected &&
     !canManageWorkspaceIntegrations;
   const workspaceInviteInputRef = useRef<HTMLInputElement>(null);
   const webhookUrlInputRef = useRef<HTMLInputElement>(null);
@@ -307,10 +336,20 @@ export default function SettingsPageContent() {
   }>>([]);
   const [isLoadingFathomLogs, setIsLoadingFathomLogs] = useState(false);
   const [isFathomSettingsOpen, setIsFathomSettingsOpen] = useState(false);
+  const [fathomConnections, setFathomConnections] = useState<FathomConnectionSummary[]>([]);
+  const [isLoadingFathomConnections, setIsLoadingFathomConnections] = useState(false);
   const [fathomWebhooks, setFathomWebhooks] = useState<any[]>([]);
+  const [fathomWebhookUrl, setFathomWebhookUrl] = useState("");
   const [isLoadingFathomWebhooks, setIsLoadingFathomWebhooks] = useState(false);
   const [isDeletingFathomWebhooks, setIsDeletingFathomWebhooks] = useState(false);
+  const [pendingFathomConnectionId, setPendingFathomConnectionId] = useState<string | null>(null);
   const hasHandledOauthRedirect = useRef(false);
+  const activeFathomConnection = useMemo(() => {
+    return resolveWorkspaceFathomConnection(
+      fathomConnections,
+      workspaceFathom?.activeConnectionId || null
+    );
+  }, [fathomConnections, workspaceFathom?.activeConnectionId]);
 
   useEffect(() => {
     // This function will run when the component mounts and when searchParams change.
@@ -890,15 +929,81 @@ export default function SettingsPageContent() {
     await loadFathomLogs();
   };
 
-  const loadFathomWebhooks = async () => {
+  const loadFathomConnections = useCallback(
+    async (showErrorToast = true): Promise<FathomConnectionSummary[]> => {
+      if (!activeWorkspaceId) {
+        setFathomConnections([]);
+        return [];
+      }
+
+      setIsLoadingFathomConnections(true);
+      try {
+        const response = await fetch(
+          `/api/workspaces/${encodeURIComponent(activeWorkspaceId)}/fathom/connections`,
+          { cache: "no-store" }
+        );
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          throw new Error(payload?.error || "Failed to load Fathom connections.");
+        }
+        const connections = Array.isArray(payload?.connections)
+          ? (payload.connections as FathomConnectionSummary[])
+          : [];
+        setFathomConnections(connections);
+        return connections;
+      } catch (error) {
+        console.error("Failed to load Fathom connections:", error);
+        if (showErrorToast) {
+          toast({
+            title: "Could not load Fathom connections",
+            description: error instanceof Error ? error.message : "Please try again.",
+            variant: "destructive",
+          });
+        }
+        return [];
+      } finally {
+        setIsLoadingFathomConnections(false);
+      }
+    },
+    [activeWorkspaceId, toast]
+  );
+
+  const loadFathomWebhooks = useCallback(async () => {
+    if (!activeWorkspaceId) {
+      setFathomWebhooks([]);
+      setFathomWebhookUrl("");
+      return;
+    }
     setIsLoadingFathomWebhooks(true);
     try {
-      const response = await fetch("/api/fathom/webhooks");
-      const payload = await response.json().catch(() => []);
+      const connections = await loadFathomConnections(false);
+      const selectedConnection = resolveWorkspaceFathomConnection(
+        connections,
+        workspaceFathom?.activeConnectionId || null
+      );
+
+      if (!selectedConnection) {
+        setFathomWebhooks([]);
+        setFathomWebhookUrl("");
+        return;
+      }
+
+      const response = await fetch(
+        `/api/workspaces/${encodeURIComponent(
+          activeWorkspaceId
+        )}/fathom/connections/${encodeURIComponent(selectedConnection.id)}/webhooks`
+      );
+      const payload = await response.json().catch(() => ({}));
       if (!response.ok) {
         throw new Error(payload?.error || "Failed to load webhooks.");
       }
-      setFathomWebhooks(Array.isArray(payload) ? payload : []);
+
+      setFathomWebhooks(Array.isArray(payload?.webhooks) ? payload.webhooks : []);
+      setFathomWebhookUrl(
+        typeof payload?.webhookUrl === "string"
+          ? payload.webhookUrl
+          : selectedConnection.webhook?.webhookUrl || ""
+      );
     } catch (error) {
       console.error("Failed to load Fathom webhooks:", error);
       toast({
@@ -906,25 +1011,215 @@ export default function SettingsPageContent() {
         description: error instanceof Error ? error.message : "Please try again.",
         variant: "destructive",
       });
+      setFathomWebhooks([]);
+      setFathomWebhookUrl("");
     } finally {
       setIsLoadingFathomWebhooks(false);
     }
-  };
+  }, [activeWorkspaceId, loadFathomConnections, toast, workspaceFathom?.activeConnectionId]);
+
+  useEffect(() => {
+    if (!isWorkspaceFathomConnected || !activeWorkspaceId) {
+      setFathomConnections([]);
+      setFathomWebhooks([]);
+      setFathomWebhookUrl("");
+      return;
+    }
+    void loadFathomConnections(false);
+  }, [activeWorkspaceId, isWorkspaceFathomConnected, loadFathomConnections]);
 
   const handleOpenFathomSettings = async () => {
     setIsFathomSettingsOpen(true);
     await loadFathomWebhooks();
   };
 
+  const handleSelectFathomConnection = async (connection: FathomConnectionSummary) => {
+    if (!activeWorkspaceId) {
+      return;
+    }
+    if (!canManageFathomConnection(connection)) {
+      toast({
+        title: "Permission required",
+        description: "Only workspace integration admins can switch the active connection.",
+        variant: "destructive",
+      });
+      return;
+    }
+    setPendingFathomConnectionId(connection.id);
+    try {
+      const response = await fetch(
+        `/api/workspaces/${encodeURIComponent(
+          activeWorkspaceId
+        )}/fathom/connections/${encodeURIComponent(connection.id)}`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ setPreferred: true }),
+        }
+      );
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(payload?.error || "Failed to set active connection.");
+      }
+      toast({
+        title: "Active Connection Updated",
+        description: `${connection.label} is now the workspace connection used for Fathom actions.`,
+      });
+      await refreshUserProfile();
+      await triggerTokenFetch();
+      await loadFathomConnections(false);
+      await loadFathomWebhooks();
+    } catch (error) {
+      console.error("Failed to set preferred Fathom connection:", error);
+      toast({
+        title: "Update Failed",
+        description: error instanceof Error ? error.message : "Could not set active connection.",
+        variant: "destructive",
+      });
+    } finally {
+      setPendingFathomConnectionId(null);
+    }
+  };
+
+  const handleRenameFathomConnection = async (connection: FathomConnectionSummary) => {
+    if (!activeWorkspaceId) {
+      return;
+    }
+    if (!canManageFathomConnection(connection)) {
+      toast({
+        title: "Permission required",
+        description: "Only workspace integration admins can rename this connection.",
+        variant: "destructive",
+      });
+      return;
+    }
+    const nextLabel = window.prompt("Rename Fathom connection", connection.label)?.trim();
+    if (!nextLabel || nextLabel === connection.label) {
+      return;
+    }
+
+    setPendingFathomConnectionId(connection.id);
+    try {
+      const response = await fetch(
+        `/api/workspaces/${encodeURIComponent(
+          activeWorkspaceId
+        )}/fathom/connections/${encodeURIComponent(connection.id)}`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ label: nextLabel }),
+        }
+      );
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(payload?.error || "Failed to rename connection.");
+      }
+      toast({
+        title: "Connection Renamed",
+        description: `Updated to "${nextLabel}".`,
+      });
+      await refreshUserProfile();
+      await loadFathomConnections(false);
+      await loadFathomWebhooks();
+    } catch (error) {
+      console.error("Failed to rename Fathom connection:", error);
+      toast({
+        title: "Rename Failed",
+        description: error instanceof Error ? error.message : "Could not rename connection.",
+        variant: "destructive",
+      });
+    } finally {
+      setPendingFathomConnectionId(null);
+    }
+  };
+
+  const handleReconnectFathomConnection = (connection: FathomConnectionSummary) => {
+    if (!canManageFathomConnection(connection)) {
+      toast({
+        title: "Permission required",
+        description: "Only workspace integration admins can reconnect this connection.",
+        variant: "destructive",
+      });
+      return;
+    }
+    connectFathom({ connectionId: connection.id, label: connection.label });
+  };
+
+  const handleDisconnectFathomConnection = async (connection: FathomConnectionSummary) => {
+    if (!activeWorkspaceId) {
+      return;
+    }
+    if (!canManageFathomConnection(connection)) {
+      toast({
+        title: "Permission required",
+        description: "Only workspace integration admins can disconnect this connection.",
+        variant: "destructive",
+      });
+      return;
+    }
+    const confirmed = window.confirm(
+      `Disconnect "${connection.label}" from this workspace? This revokes its Fathom webhooks.`
+    );
+    if (!confirmed) {
+      return;
+    }
+
+    setPendingFathomConnectionId(connection.id);
+    try {
+      const response = await fetch(
+        `/api/workspaces/${encodeURIComponent(
+          activeWorkspaceId
+        )}/fathom/connections/${encodeURIComponent(connection.id)}`,
+        {
+          method: "DELETE",
+        }
+      );
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(payload?.error || "Failed to disconnect connection.");
+      }
+      toast({
+        title: "Connection Disconnected",
+        description: `${connection.label} was disconnected.`,
+      });
+      await refreshUserProfile();
+      await triggerTokenFetch();
+      await loadFathomConnections(false);
+      await loadFathomWebhooks();
+    } catch (error) {
+      console.error("Failed to disconnect Fathom connection:", error);
+      toast({
+        title: "Disconnect Failed",
+        description: error instanceof Error ? error.message : "Could not disconnect connection.",
+        variant: "destructive",
+      });
+    } finally {
+      setPendingFathomConnectionId(null);
+    }
+  };
+
   const handleDeleteFathomWebhook = async (webhookId: string) => {
     if (!webhookId) return;
+    if (!activeWorkspaceId || !activeFathomConnection) {
+      toast({
+        title: "No Active Connection",
+        description: "Select an active Fathom connection before deleting webhooks.",
+        variant: "destructive",
+      });
+      return;
+    }
     setIsDeletingFathomWebhooks(true);
     try {
-      const response = await fetch("/api/fathom/webhooks", {
+      const response = await fetch(
+        `/api/workspaces/${encodeURIComponent(
+          activeWorkspaceId
+        )}/fathom/connections/${encodeURIComponent(activeFathomConnection.id)}/webhooks`,
+        {
         method: "DELETE",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ids: [webhookId] }),
-      });
+        }
+      );
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) {
         throw new Error(payload?.error || "Failed to delete webhook.");
@@ -945,13 +1240,26 @@ export default function SettingsPageContent() {
 
   const handleDeleteAllFathomWebhooks = async () => {
     if (!fathomWebhooks.length) return;
+    if (!activeWorkspaceId || !activeFathomConnection) {
+      toast({
+        title: "No Active Connection",
+        description: "Select an active Fathom connection before deleting webhooks.",
+        variant: "destructive",
+      });
+      return;
+    }
     setIsDeletingFathomWebhooks(true);
     try {
-      const response = await fetch("/api/fathom/webhooks", {
+      const response = await fetch(
+        `/api/workspaces/${encodeURIComponent(
+          activeWorkspaceId
+        )}/fathom/connections/${encodeURIComponent(activeFathomConnection.id)}/webhooks`,
+        {
         method: "DELETE",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ deleteAll: true }),
-      });
+        }
+      );
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) {
         throw new Error(payload?.error || "Failed to delete webhooks.");
@@ -974,7 +1282,7 @@ export default function SettingsPageContent() {
   };
 
   const handleRecreateFathomWebhook = async () => {
-    if (!user?.fathomConnected) {
+    if (!isWorkspaceFathomConnected) {
       toast({
         title: "Fathom Not Connected",
         description: "Connect Fathom before creating a webhook.",
@@ -982,9 +1290,22 @@ export default function SettingsPageContent() {
       });
       return;
     }
+    if (!activeWorkspaceId || !activeFathomConnection) {
+      toast({
+        title: "No Active Connection",
+        description: "Select an active Fathom connection before creating a webhook.",
+        variant: "destructive",
+      });
+      return;
+    }
     setIsCreatingFathomWebhook(true);
     try {
-      const response = await fetch("/api/fathom/webhook/setup", { method: "POST" });
+      const response = await fetch(
+        `/api/workspaces/${encodeURIComponent(
+          activeWorkspaceId
+        )}/fathom/connections/${encodeURIComponent(activeFathomConnection.id)}/webhooks`,
+        { method: "POST" }
+      );
       if (!response.ok) {
         const payload = await response.json().catch(() => ({}));
         throw new Error(payload.error || "Failed to create webhook.");
@@ -994,6 +1315,8 @@ export default function SettingsPageContent() {
         title: "Webhook Ready",
         description: `Status: ${payload.status || "created"}`,
       });
+      await loadFathomConnections(false);
+      await loadFathomWebhooks();
       await refreshUserProfile();
       await triggerTokenFetch();
     } catch (error) {
@@ -1064,11 +1387,7 @@ export default function SettingsPageContent() {
     }
   };
   
-  const appBaseUrl =
-    typeof window !== "undefined" ? window.location.origin : "";
-  const webhookUrl = user?.fathomWebhookToken
-    ? `${appBaseUrl}/api/fathom/webhook?token=${user.fathomWebhookToken}`
-    : "";
+  const webhookUrl = fathomWebhookUrl || activeFathomConnection?.webhook?.webhookUrl || "";
 
 
   const handleSaveAvatar = async () => {
@@ -1871,16 +2190,131 @@ export default function SettingsPageContent() {
           </DialogHeader>
           <div className="space-y-4">
             <div className="rounded-lg border bg-muted/20 p-4 space-y-3">
-              <div className="flex items-center justify-between">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <h4 className="text-sm font-semibold">Connections</h4>
+                  <p className="text-xs text-muted-foreground">
+                    Switch the active connection and manage each Fathom account.
+                  </p>
+                </div>
                 <div className="flex items-center gap-2">
-                  <Webhook className="h-5 w-5 text-green-400" />
-                  <span className="text-sm font-semibold">Webhook URL</span>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => void loadFathomConnections()}
+                    disabled={isLoadingFathomConnections}
+                  >
+                    {isLoadingFathomConnections ? (
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    ) : (
+                      <RefreshCw className="mr-2 h-4 w-4" />
+                    )}
+                    Refresh
+                  </Button>
+                  <Button
+                    size="sm"
+                    onClick={() => connectFathom()}
+                    disabled={!canManageWorkspaceIntegrations}
+                  >
+                    <Send className="mr-2 h-4 w-4" />
+                    Connect Another
+                  </Button>
+                </div>
+              </div>
+              <div className="max-h-[240px] space-y-2 overflow-y-auto">
+                {isLoadingFathomConnections && fathomConnections.length === 0 ? (
+                  <div className="text-sm text-muted-foreground">Loading connections...</div>
+                ) : fathomConnections.length === 0 ? (
+                  <div className="text-sm text-muted-foreground">
+                    No Fathom connections yet. Connect your first account.
+                  </div>
+                ) : (
+                  fathomConnections.map((connection) => {
+                    const isPending = pendingFathomConnectionId === connection.id;
+                    const isActive =
+                      connection.id === workspaceFathom?.activeConnectionId || connection.isPreferred;
+                    return (
+                      <div
+                        key={connection.id}
+                        className="rounded-md border bg-background/60 p-3 space-y-2"
+                      >
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <div className="min-w-0">
+                            <p className="text-sm font-semibold truncate">{connection.label}</p>
+                            <div className="flex flex-wrap items-center gap-2 mt-1">
+                              <Badge variant={isActive ? "secondary" : "outline"}>
+                                {isActive ? "Active" : "Inactive"}
+                              </Badge>
+                              <Badge variant="outline" className="capitalize">
+                                {connection.status}
+                              </Badge>
+                              {connection.connectedByCurrentUser ? (
+                                <Badge variant="outline">Connected by you</Badge>
+                              ) : null}
+                            </div>
+                          </div>
+                          {isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                        </div>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => void handleSelectFathomConnection(connection)}
+                            disabled={isActive || isPending || !canManageFathomConnection(connection)}
+                          >
+                            Use This
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => void handleRenameFathomConnection(connection)}
+                            disabled={isPending || !canManageFathomConnection(connection)}
+                          >
+                            Rename
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => handleReconnectFathomConnection(connection)}
+                            disabled={isPending || !canManageFathomConnection(connection)}
+                          >
+                            Reconnect
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => void handleDisconnectFathomConnection(connection)}
+                            disabled={isPending || !canManageFathomConnection(connection)}
+                          >
+                            <Trash2 className="mr-2 h-4 w-4 text-red-500" />
+                            Disconnect
+                          </Button>
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            </div>
+
+            <div className="rounded-lg border bg-muted/20 p-4 space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2">
+                    <Webhook className="h-5 w-5 text-green-400" />
+                    <span className="text-sm font-semibold">Webhook URL</span>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    {activeFathomConnection
+                      ? `Managing webhook delivery for ${activeFathomConnection.label}.`
+                      : "Choose an active connection to manage its webhook."}
+                  </p>
                 </div>
                 <Button
                   variant="outline"
                   size="sm"
                   onClick={loadFathomWebhooks}
-                  disabled={isLoadingFathomWebhooks}
+                  disabled={isLoadingFathomWebhooks || isLoadingFathomConnections}
                 >
                   {isLoadingFathomWebhooks ? (
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -1898,11 +2332,13 @@ export default function SettingsPageContent() {
                   readOnly
                   value={
                     webhookUrl ||
-                    "Connect Fathom to generate a webhook URL."
+                    (activeFathomConnection
+                      ? "Create a webhook to generate a workspace callback URL."
+                      : "Connect Fathom to generate a webhook URL.")
                   }
                   className="flex-1 bg-background/70"
                 />
-                {user?.fathomWebhookToken ? (
+                {webhookUrl ? (
                   <Button
                     variant="ghost"
                     size="sm"
@@ -1916,9 +2352,24 @@ export default function SettingsPageContent() {
                     )}
                     {hasCopied ? "Copied!" : "Copy URL"}
                   </Button>
+                ) : activeFathomConnection ? (
+                  <Button
+                    onClick={handleRecreateFathomWebhook}
+                    className="w-full sm:w-auto"
+                    disabled={
+                      isCreatingFathomWebhook || !canManageFathomConnection(activeFathomConnection)
+                    }
+                  >
+                    {isCreatingFathomWebhook ? (
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    ) : (
+                      <RefreshCw className="mr-2 h-4 w-4" />
+                    )}
+                    Create Webhook
+                  </Button>
                 ) : (
                   <Button
-                    onClick={connectFathom}
+                    onClick={() => connectFathom()}
                     className="w-full sm:w-auto"
                   >
                     <Send className="mr-2 h-4 w-4" />
@@ -1926,13 +2377,15 @@ export default function SettingsPageContent() {
                   </Button>
                 )}
               </div>
-              {user?.fathomConnected && user?.fathomWebhookToken && (
+              {isWorkspaceFathomConnected && activeFathomConnection && (
                 <div className="flex flex-wrap items-center gap-2">
                   <Button
                     variant="outline"
                     size="sm"
                     onClick={handleRecreateFathomWebhook}
-                    disabled={isCreatingFathomWebhook}
+                    disabled={
+                      isCreatingFathomWebhook || !canManageFathomConnection(activeFathomConnection)
+                    }
                   >
                     {isCreatingFathomWebhook ? (
                       <>
@@ -1950,7 +2403,11 @@ export default function SettingsPageContent() {
                     variant="outline"
                     size="sm"
                     onClick={handleDeleteAllFathomWebhooks}
-                    disabled={isDeletingFathomWebhooks || !fathomWebhooks.length}
+                    disabled={
+                      isDeletingFathomWebhooks ||
+                      !fathomWebhooks.length ||
+                      !canManageFathomConnection(activeFathomConnection)
+                    }
                   >
                     <Trash2 className="mr-2 h-4 w-4 text-red-500" />
                     Delete All
@@ -1966,7 +2423,11 @@ export default function SettingsPageContent() {
 
             <div className="space-y-2">
               <div className="flex items-center justify-between">
-                <h4 className="text-sm font-semibold">Active Webhooks</h4>
+                <h4 className="text-sm font-semibold">
+                  {activeFathomConnection
+                    ? `Webhooks for ${activeFathomConnection.label}`
+                    : "Active Webhooks"}
+                </h4>
                 <span className="text-xs text-muted-foreground">
                   {fathomWebhooks.length} webhook(s)
                 </span>
@@ -2033,7 +2494,12 @@ export default function SettingsPageContent() {
                           variant="ghost"
                           size="icon"
                           onClick={() => handleDeleteFathomWebhook(webhookId)}
-                          disabled={isDeletingFathomWebhooks || !webhookId}
+                          disabled={
+                            isDeletingFathomWebhooks ||
+                            !webhookId ||
+                            !activeFathomConnection ||
+                            !canManageFathomConnection(activeFathomConnection)
+                          }
                         >
                           <Trash2 className="h-4 w-4 text-red-500" />
                         </Button>

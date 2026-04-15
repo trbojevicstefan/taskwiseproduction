@@ -7,6 +7,10 @@ import {
   listActiveWorkspaceMembershipsForWorkspace,
   listWorkspaceMembershipsForUser,
 } from "@/lib/workspace-memberships";
+import {
+  findPreferredFathomConnectionForWorkspace,
+  listFathomConnectionsForWorkspace,
+} from "@/lib/fathom-connections";
 import { findWorkspaceById, listWorkspacesByIds } from "@/lib/workspaces";
 
 jest.mock("next-auth", () => ({
@@ -36,6 +40,11 @@ jest.mock("@/lib/workspaces", () => ({
   findWorkspaceById: jest.fn(),
 }));
 
+jest.mock("@/lib/fathom-connections", () => ({
+  listFathomConnectionsForWorkspace: jest.fn(),
+  findPreferredFathomConnectionForWorkspace: jest.fn(),
+}));
+
 const mockedGetServerSession = getServerSession as jest.MockedFunction<
   typeof getServerSession
 >;
@@ -60,6 +69,14 @@ const mockedListWorkspacesByIds = listWorkspacesByIds as jest.MockedFunction<
 const mockedFindWorkspaceById = findWorkspaceById as jest.MockedFunction<
   typeof findWorkspaceById
 >;
+const mockedListFathomConnectionsForWorkspace =
+  listFathomConnectionsForWorkspace as jest.MockedFunction<
+    typeof listFathomConnectionsForWorkspace
+  >;
+const mockedFindPreferredFathomConnectionForWorkspace =
+  findPreferredFathomConnectionForWorkspace as jest.MockedFunction<
+    typeof findPreferredFathomConnectionForWorkspace
+  >;
 
 describe("GET /api/users/me compatibility", () => {
   beforeEach(() => {
@@ -110,12 +127,15 @@ describe("GET /api/users/me compatibility", () => {
       name: "Main Workspace",
       settings: null,
     } as any);
+    mockedListFathomConnectionsForWorkspace.mockResolvedValue([] as any);
+    mockedFindPreferredFathomConnectionForWorkspace.mockResolvedValue(null);
   });
 
   it("hydrates activeWorkspaceId for legacy users and returns membership summary", async () => {
     const response = await GET();
     expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toMatchObject({
+    const payload = await response.json();
+    expect(payload).toMatchObject({
       ok: true,
       activeWorkspaceId: "workspace-1",
       workspaceMemberships: [
@@ -128,6 +148,9 @@ describe("GET /api/users/me compatibility", () => {
         }),
       ],
     });
+    expect(payload).not.toHaveProperty("fathomWebhookToken");
+    expect(payload).not.toHaveProperty("fathomConnected");
+    expect(payload).not.toHaveProperty("fathomUserId");
     expect(mockedUpdateUserById).toHaveBeenCalledWith(
       "user-1",
       expect.objectContaining({

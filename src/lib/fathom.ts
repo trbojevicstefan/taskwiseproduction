@@ -1,5 +1,10 @@
 import crypto from "crypto";
 import { getDb } from "@/lib/db";
+import {
+  findFathomConnectionById,
+  type FathomConnectionDoc,
+  updateFathomConnectionById,
+} from "@/lib/fathom-connections";
 import { logFathomIntegration } from "@/lib/fathom-logs";
 import { recordExternalApiFailure } from "@/lib/observability-metrics";
 
@@ -50,6 +55,21 @@ const FATHOM_WEBHOOK_TRIGGERED_FOR_FALLBACK = [
   "shared_team_recordings",
 ] as const;
 
+const normalizeConfiguredUrl = (value?: string | null) => {
+  const normalized = value?.trim();
+  return normalized ? normalized.replace(/\/$/, "") : null;
+};
+
+const isLoopbackUrl = (value?: string | null) => {
+  if (!value) return false;
+  try {
+    const hostname = new URL(value).hostname.toLowerCase();
+    return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1";
+  } catch {
+    return false;
+  }
+};
+
 const getBaseUrl = () => {
   const raw =
     process.env.NEXTAUTH_URL ||
@@ -60,23 +80,141 @@ const getBaseUrl = () => {
   return raw.replace(/\/$/, "");
 };
 
-export const getFathomRedirectUri = () =>
-  `${getBaseUrl()}/api/fathom/oauth/callback`;
+export const getFathomPublicBaseUrl = () =>
+  normalizeConfiguredUrl(process.env.FATHOM_PUBLIC_BASE_URL) || getBaseUrl();
+
+export const getFathomRedirectUri = () => {
+  const configuredRedirectUri = normalizeConfiguredUrl(
+    process.env.FATHOM_OAUTH_REDIRECT_URI
+  );
+  const publicBaseUrl = normalizeConfiguredUrl(process.env.FATHOM_PUBLIC_BASE_URL);
+
+  if (publicBaseUrl && (!configuredRedirectUri || isLoopbackUrl(configuredRedirectUri))) {
+    return `${publicBaseUrl}/api/fathom/oauth/callback`;
+  }
+
+  return configuredRedirectUri || `${getFathomPublicBaseUrl()}/api/fathom/oauth/callback`;
+};
 
 export const getFathomWebhookUrl = (token: string) =>
-  `${getBaseUrl()}/api/fathom/webhook?token=${token}`;
+  `${getFathomPublicBaseUrl()}/api/fathom/webhook?token=${token}`;
 export const getFathomWebhookUrlPrefix = () =>
-  `${getBaseUrl()}/api/fathom/webhook?token=`;
+  `${getFathomPublicBaseUrl()}/api/fathom/webhook?token=`;
 
 const getRecordingHashKey = () =>
   process.env.NEXTAUTH_SECRET || process.env.FATHOM_CLIENT_SECRET || "";
 
-export const hashFathomRecordingId = (userId: string, recordingId: string) => {
-  const key = getRecordingHashKey() || userId;
+export const getFathomRecordingHashScope = ({
+  userId,
+  connectionId,
+}: {
+  userId: string;
+  connectionId?: string | null;
+}) => (connectionId ? `connection:${connectionId}` : `user:${userId}`);
+
+export const hashFathomRecordingId = (scopeKey: string, recordingId: string) => {
+  const key = getRecordingHashKey() || scopeKey;
   return crypto
     .createHmac("sha256", key)
-    .update(`${userId}:${recordingId}`)
+    .update(`${scopeKey}:${recordingId}`)
     .digest("hex");
+};
+
+const mergeManagedWebhookEntries = (
+  nextEntry: Record<string, any>,
+  existingEntries: any[]
+) => [
+  nextEntry,
+  ...existingEntries.filter((entry: any) => {
+    if (!entry) return false;
+    if (nextEntry.id && entry.id === nextEntry.id) return false;
+    if (!nextEntry.id && nextEntry.url && entry.url === nextEntry.url) return false;
+    return true;
+  }),
+];
+
+const toLegacyWebhookEntry = (entry: any) => ({
+  id: entry?.id || null,
+  url: entry?.url || null,
+  createdAt: entry?.createdAt || null,
+  include_transcript: entry?.includeTranscript ?? null,
+  include_summary: entry?.includeSummary ?? null,
+  include_action_items: entry?.includeActionItems ?? null,
+  include_crm_matches: entry?.includeCrmMatches ?? null,
+  triggered_for: entry?.triggeredFor ?? null,
+});
+
+const toConnectionManagedWebhook = (entry: any, fallbackUrl: string) => ({
+  id: entry?.id || entry?.webhook_id || null,
+  url:
+    entry?.url ||
+    entry?.webhook_url ||
+    entry?.destination_url ||
+    entry?.destinationUrl ||
+    fallbackUrl,
+  createdAt: entry?.created_at || entry?.createdAt || null,
+  includeTranscript: entry?.include_transcript ?? null,
+  includeSummary: entry?.include_summary ?? null,
+  includeActionItems: entry?.include_action_items ?? null,
+  includeCrmMatches: entry?.include_crm_matches ?? null,
+  triggeredFor: entry?.triggered_for ?? null,
+});
+
+const syncLegacyInstallationFromConnection = async (
+  connection: FathomConnectionDoc,
+  overrides: Partial<FathomInstallationDoc> = {}
+) => {
+  if (!connection.legacyUserId) return null;
+
+  const userId = connection.legacyUserId;
+  const existing = await getFathomInstallation(userId);
+  const managedWebhooks = Array.isArray(connection.webhook.managedWebhooks)
+    ? connection.webhook.managedWebhooks.map(toLegacyWebhookEntry)
+    : [];
+  const accessToken =
+    overrides.accessToken ?? connection.oauth.accessToken ?? existing?.accessToken ?? null;
+
+  if (!accessToken) {
+    return existing;
+  }
+
+  const installation: FathomInstallationDoc = {
+    _id: userId,
+    userId,
+    accessToken,
+    refreshToken:
+      overrides.refreshToken ?? connection.oauth.refreshToken ?? existing?.refreshToken ?? null,
+    expiresAt:
+      overrides.expiresAt ?? connection.oauth.expiresAt ?? existing?.expiresAt ?? null,
+    scope: overrides.scope ?? connection.oauth.scope ?? existing?.scope ?? null,
+    fathomUserId:
+      overrides.fathomUserId ??
+      connection.source.providerUserId ??
+      existing?.fathomUserId ??
+      null,
+    webhookId:
+      overrides.webhookId ?? connection.webhook.webhookId ?? existing?.webhookId ?? null,
+    webhookUrl:
+      overrides.webhookUrl ?? connection.webhook.webhookUrl ?? existing?.webhookUrl ?? null,
+    webhookEvent:
+      overrides.webhookEvent ??
+      connection.webhook.webhookEvent ??
+      existing?.webhookEvent ??
+      null,
+    webhookSecret:
+      overrides.webhookSecret ??
+      connection.webhook.secret ??
+      existing?.webhookSecret ??
+      null,
+    webhooks:
+      overrides.webhooks ??
+      (managedWebhooks.length ? managedWebhooks : existing?.webhooks || []),
+    createdAt: existing?.createdAt,
+    updatedAt: new Date(),
+  };
+
+  await saveFathomInstallation(installation);
+  return installation;
 };
 
 export const createFathomOAuthState = async (userId: string): Promise<string> => {
@@ -201,6 +339,98 @@ const refreshFathomToken = async (installation: FathomInstallationDoc) => {
   return updated.accessToken;
 };
 
+const refreshFathomConnectionToken = async (connection: FathomConnectionDoc) => {
+  if (!FATHOM_CLIENT_ID || !FATHOM_CLIENT_SECRET) {
+    throw new Error("Fathom client credentials are not configured.");
+  }
+  if (!connection.oauth.refreshToken) {
+    throw new Error("Missing Fathom refresh token.");
+  }
+
+  const params = new URLSearchParams({
+    grant_type: "refresh_token",
+    refresh_token: connection.oauth.refreshToken,
+    client_id: FATHOM_CLIENT_ID,
+    client_secret: FATHOM_CLIENT_SECRET,
+  });
+
+  let response: Response;
+  try {
+    response = await fetch(
+      "https://fathom.video/external/v1/oauth2/token",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: params,
+      }
+    );
+  } catch (error) {
+    void recordExternalApiFailure({
+      provider: "fathom",
+      operation: "oauth.token.refresh",
+      userId: connection.legacyUserId || connection.createdByUserId,
+      error,
+      metadata: {
+        connectionId: connection._id,
+      },
+    });
+    throw error;
+  }
+
+  const payload = (await response.json()) as {
+    access_token?: string;
+    refresh_token?: string;
+    expires_in?: number;
+    scope?: string;
+    error?: string;
+  };
+
+  if (!payload.access_token) {
+    void recordExternalApiFailure({
+      provider: "fathom",
+      operation: "oauth.token.refresh",
+      userId: connection.legacyUserId || connection.createdByUserId,
+      statusCode: response.status,
+      error: payload.error || "Failed to refresh Fathom token.",
+      metadata: {
+        connectionId: connection._id,
+      },
+    });
+    throw new Error(payload.error || "Failed to refresh Fathom token.");
+  }
+
+  const db = await getDb();
+  const refreshed = await updateFathomConnectionById(db as any, connection._id, {
+    oauth: {
+      ...connection.oauth,
+      accessToken: payload.access_token,
+      refreshToken: payload.refresh_token || connection.oauth.refreshToken || null,
+      expiresAt: payload.expires_in
+        ? Date.now() + payload.expires_in * 1000
+        : connection.oauth.expiresAt || null,
+      scope: payload.scope || connection.oauth.scope || null,
+      lastRefreshedAt: new Date(),
+      lastError: null,
+    },
+    updatedByUserId: connection.updatedByUserId || connection.createdByUserId,
+  });
+
+  if (!refreshed) {
+    throw new Error("Fathom connection not found after refresh.");
+  }
+
+  await syncLegacyInstallationFromConnection(refreshed, {
+    accessToken: payload.access_token,
+    refreshToken: payload.refresh_token || connection.oauth.refreshToken || null,
+    expiresAt: payload.expires_in
+      ? Date.now() + payload.expires_in * 1000
+      : connection.oauth.expiresAt || null,
+    scope: payload.scope || connection.oauth.scope || null,
+  });
+
+  return payload.access_token;
+};
+
 export const getValidFathomAccessToken = async (
   userId: string
 ): Promise<string> => {
@@ -219,6 +449,68 @@ export const getValidFathomAccessToken = async (
   }
 
   return installation.accessToken;
+};
+
+export const getValidFathomAccessTokenForConnection = async (
+  connectionId: string
+): Promise<string> => {
+  const db = await getDb();
+  const connection = await findFathomConnectionById(db as any, connectionId);
+  if (!connection || !connection.oauth.accessToken) {
+    throw new Error("Fathom connection not found.");
+  }
+
+  const now = Date.now();
+  if (
+    connection.oauth.expiresAt &&
+    now >= connection.oauth.expiresAt - 60_000 &&
+    connection.oauth.refreshToken
+  ) {
+    return refreshFathomConnectionToken(connection);
+  }
+
+  return connection.oauth.accessToken;
+};
+
+const normalizeStringCandidate = (value: unknown) => {
+  if (typeof value === "string" && value.trim()) {
+    return value.trim();
+  }
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return String(value);
+  }
+  return null;
+};
+
+export const extractFathomProviderSourceId = (payload: any): string | null => {
+  const candidates = [
+    payload?.provider_source_id,
+    payload?.providerSourceId,
+    payload?.source_id,
+    payload?.sourceId,
+    payload?.source?.id,
+    payload?.source?.source_id,
+    payload?.recording?.provider_source_id,
+    payload?.recording?.providerSourceId,
+    payload?.recording?.source_id,
+    payload?.recording?.sourceId,
+    payload?.recording?.source?.id,
+    Array.isArray(payload?.source_ids) ? payload.source_ids[0] : null,
+    Array.isArray(payload?.provider_source_ids) ? payload.provider_source_ids[0] : null,
+    Array.isArray(payload?.recording?.source_ids) ? payload.recording.source_ids[0] : null,
+    Array.isArray(payload?.recording?.provider_source_ids)
+      ? payload.recording.provider_source_ids[0]
+      : null,
+  ];
+
+  for (const candidate of candidates) {
+    const normalized = normalizeStringCandidate(candidate);
+    if (normalized) {
+      return normalized;
+    }
+  }
+
+  return null;
 };
 
 const fathomApiFetch = async <T>(
@@ -714,6 +1006,445 @@ export const ensureFathomWebhook = async (
       }
     );
     return { status: "existing", webhookId, webhookUrl };
+  }
+};
+
+export const ensureFathomConnectionWebhook = async (
+  connectionId: string,
+  accessToken: string,
+  token: string,
+  options: { updatedByUserId?: string | null } = {}
+) => {
+  const db = await getDb();
+  const connection = await findFathomConnectionById(db as any, connectionId);
+  if (!connection) {
+    throw new Error("Fathom connection missing while creating webhook.");
+  }
+
+  const webhookUrl = getFathomWebhookUrl(token);
+  const updatedByUserId =
+    options.updatedByUserId || connection.updatedByUserId || connection.createdByUserId;
+
+  const upsertWebhook = (
+    created: any,
+    current: FathomConnectionDoc,
+    fallbackUrl: string
+  ) => {
+    const nextEntry = toConnectionManagedWebhook(created, fallbackUrl);
+    const merged = mergeManagedWebhookEntries(
+      nextEntry,
+      current.webhook.managedWebhooks || []
+    );
+    return {
+      webhookId: nextEntry.id || null,
+      createdUrl: nextEntry.url || fallbackUrl,
+      merged,
+      secret: created?.secret || created?.webhook_secret || current.webhook.secret || null,
+      event: current.webhook.webhookEvent || FATHOM_WEBHOOK_EVENT,
+    };
+  };
+
+  const mergeFallbackWebhook = (
+    current: FathomConnectionDoc,
+    webhookId: string | null,
+    currentWebhookUrl: string
+  ) =>
+    mergeManagedWebhookEntries(
+      {
+        id: webhookId,
+        url: currentWebhookUrl,
+        createdAt: current.updatedAt || current.createdAt || null,
+        includeTranscript: null,
+        includeSummary: null,
+        includeActionItems: null,
+        includeCrmMatches: null,
+        triggeredFor: null,
+      },
+      current.webhook.managedWebhooks || []
+    );
+
+  try {
+    const existingWebhooks = await listFathomWebhooks(accessToken);
+    const matches = existingWebhooks.filter(
+      (webhook: any) => getWebhookUrl(webhook) === webhookUrl
+    );
+    if (matches.length > 0) {
+      const sorted = [...matches].sort((a: any, b: any) => {
+        const aCreated = new Date(a.created_at || a.createdAt || 0).getTime();
+        const bCreated = new Date(b.created_at || b.createdAt || 0).getTime();
+        return bCreated - aCreated;
+      });
+      const primary = sorted[0];
+      const { webhookId, createdUrl, merged, secret, event } = upsertWebhook(
+        primary,
+        connection,
+        webhookUrl
+      );
+
+      const updatedConnection = await updateFathomConnectionById(db as any, connection._id, {
+        updatedByUserId,
+        webhook: {
+          ...connection.webhook,
+          token,
+          secret,
+          status: "active",
+          webhookId,
+          webhookUrl: createdUrl,
+          webhookEvent: event,
+          managedWebhooks: merged,
+          lastSyncedAt: new Date(),
+          lastError: null,
+        },
+      });
+
+      if (updatedConnection) {
+        await syncLegacyInstallationFromConnection(updatedConnection);
+      }
+
+      if (sorted.length > 1) {
+        await Promise.allSettled(
+          sorted.slice(1).map((webhook: any) =>
+            deleteFathomWebhook(accessToken, webhook)
+          )
+        );
+      }
+
+      if (connection.legacyUserId) {
+        await logFathomIntegration(
+          connection.legacyUserId,
+          "info",
+          "webhook.create",
+          "Webhook already exists.",
+          {
+            status: "existing",
+            connectionId: connection._id,
+            webhookId,
+            destinationUrl: createdUrl,
+          }
+        );
+      }
+
+      return {
+        status: "existing" as const,
+        webhookId,
+        webhookUrl: createdUrl,
+        webhookSecret: secret,
+        managedWebhooks: merged,
+      };
+    }
+  } catch (error) {
+    console.warn("Failed to list existing Fathom webhooks:", error);
+  }
+
+  try {
+    const created = await createFathomWebhook(
+      accessToken,
+      webhookUrl,
+      FATHOM_WEBHOOK_TRIGGERED_FOR
+    );
+    const { webhookId, createdUrl, merged, secret, event } = upsertWebhook(
+      created,
+      connection,
+      webhookUrl
+    );
+
+    const updatedConnection = await updateFathomConnectionById(db as any, connection._id, {
+      updatedByUserId,
+      webhook: {
+        ...connection.webhook,
+        token,
+        secret,
+        status: "active",
+        webhookId,
+        webhookUrl: createdUrl,
+        webhookEvent: event,
+        managedWebhooks: merged,
+        lastSyncedAt: new Date(),
+        lastError: null,
+      },
+    });
+
+    if (updatedConnection) {
+      await syncLegacyInstallationFromConnection(updatedConnection);
+    }
+
+    if (connection.legacyUserId) {
+      await logFathomIntegration(
+        connection.legacyUserId,
+        "info",
+        "webhook.create",
+        "Webhook created.",
+        {
+          status: "created",
+          connectionId: connection._id,
+          webhookId,
+          destinationUrl: createdUrl,
+          include_action_items: created.include_action_items ?? null,
+          include_summary: created.include_summary ?? null,
+          include_transcript: created.include_transcript ?? null,
+          include_crm_matches: created.include_crm_matches ?? null,
+          triggered_for: created.triggered_for ?? null,
+        }
+      );
+    }
+
+    try {
+      const existingWebhooks = await listFathomWebhooks(accessToken);
+      const matches = existingWebhooks.filter(
+        (webhook: any) => getWebhookUrl(webhook) === createdUrl
+      );
+      if (matches.length > 1) {
+        const duplicates = matches.filter(
+          (webhook: any) => getWebhookId(webhook) !== webhookId
+        );
+        if (duplicates.length) {
+          await Promise.allSettled(
+            duplicates.map((webhook: any) =>
+              deleteFathomWebhook(accessToken, webhook)
+            )
+          );
+        }
+      }
+    } catch (error) {
+      console.warn("Failed to cleanup duplicate Fathom webhooks:", error);
+    }
+
+    return {
+      status: "created" as const,
+      webhookId,
+      webhookUrl: createdUrl,
+      webhookSecret: secret,
+      managedWebhooks: merged,
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    const triggerFallback =
+      message.includes("triggered_for") ||
+      message.includes("shared_with_me_external_recordings") ||
+      message.includes("shared_external_recordings");
+    const isDuplicate =
+      message.includes("already") ||
+      message.includes("duplicate") ||
+      message.includes("exists") ||
+      message.includes("taken") ||
+      message.includes("409");
+
+    if (triggerFallback) {
+      try {
+        const created = await createFathomWebhook(
+          accessToken,
+          webhookUrl,
+          FATHOM_WEBHOOK_TRIGGERED_FOR_FALLBACK
+        );
+        const { webhookId, createdUrl, merged, secret, event } = upsertWebhook(
+          created,
+          connection,
+          webhookUrl
+        );
+
+        const updatedConnection = await updateFathomConnectionById(
+          db as any,
+          connection._id,
+          {
+            updatedByUserId,
+            webhook: {
+              ...connection.webhook,
+              token,
+              secret,
+              status: "active",
+              webhookId,
+              webhookUrl: createdUrl,
+              webhookEvent: event,
+              managedWebhooks: merged,
+              lastSyncedAt: new Date(),
+              lastError: null,
+            },
+          }
+        );
+
+        if (updatedConnection) {
+          await syncLegacyInstallationFromConnection(updatedConnection);
+        }
+
+        if (connection.legacyUserId) {
+          await logFathomIntegration(
+            connection.legacyUserId,
+            "info",
+            "webhook.create",
+            "Webhook created with fallback trigger.",
+            {
+              status: "created",
+              connectionId: connection._id,
+              webhookId,
+              destinationUrl: createdUrl,
+              include_action_items: created.include_action_items ?? null,
+              include_summary: created.include_summary ?? null,
+              include_transcript: created.include_transcript ?? null,
+              include_crm_matches: created.include_crm_matches ?? null,
+              triggered_for: created.triggered_for ?? null,
+            }
+          );
+        }
+
+        try {
+          const existingWebhooks = await listFathomWebhooks(accessToken);
+          const matches = existingWebhooks.filter(
+            (webhook: any) => getWebhookUrl(webhook) === createdUrl
+          );
+          if (matches.length > 1) {
+            const duplicates = matches.filter(
+              (webhook: any) => getWebhookId(webhook) !== webhookId
+            );
+            if (duplicates.length) {
+              await Promise.allSettled(
+                duplicates.map((webhook: any) =>
+                  deleteFathomWebhook(accessToken, webhook)
+                )
+              );
+            }
+          }
+        } catch (cleanupError) {
+          console.warn(
+            "Failed to cleanup duplicate Fathom webhooks after fallback:",
+            cleanupError
+          );
+        }
+
+        return {
+          status: "created" as const,
+          webhookId,
+          webhookUrl: createdUrl,
+          webhookSecret: secret,
+          managedWebhooks: merged,
+        };
+      } catch (fallbackError) {
+        const fallbackMessage =
+          fallbackError instanceof Error ? fallbackError.message : String(fallbackError);
+        if (
+          fallbackMessage.includes("already") ||
+          fallbackMessage.includes("duplicate") ||
+          fallbackMessage.includes("exists") ||
+          fallbackMessage.includes("taken") ||
+          fallbackMessage.includes("409")
+        ) {
+          const webhookId = connection.webhook.webhookId || null;
+          const merged = mergeFallbackWebhook(connection, webhookId, webhookUrl);
+          const updatedConnection = await updateFathomConnectionById(db as any, connection._id, {
+            updatedByUserId,
+            webhook: {
+              ...connection.webhook,
+              token,
+              status: "active",
+              webhookUrl,
+              webhookEvent: connection.webhook.webhookEvent || FATHOM_WEBHOOK_EVENT,
+              managedWebhooks: merged,
+              lastSyncedAt: new Date(),
+              lastError: null,
+            },
+          });
+
+          if (updatedConnection) {
+            await syncLegacyInstallationFromConnection(updatedConnection);
+          }
+
+          if (connection.legacyUserId) {
+            await logFathomIntegration(
+              connection.legacyUserId,
+              "info",
+              "webhook.create",
+              "Webhook already exists.",
+              {
+                status: "existing",
+                connectionId: connection._id,
+                webhookId,
+                destinationUrl: webhookUrl,
+              }
+            );
+          }
+
+          return {
+            status: "existing" as const,
+            webhookId,
+            webhookUrl,
+            webhookSecret: connection.webhook.secret || null,
+            managedWebhooks: merged,
+          };
+        }
+
+        if (connection.legacyUserId) {
+          await logFathomIntegration(
+            connection.legacyUserId,
+            "error",
+            "webhook.create",
+            "Webhook fallback creation failed.",
+            {
+              connectionId: connection._id,
+              error: fallbackMessage,
+            }
+          );
+        }
+        throw fallbackError;
+      }
+    }
+
+    if (!isDuplicate) {
+      if (connection.legacyUserId) {
+        await logFathomIntegration(
+          connection.legacyUserId,
+          "error",
+          "webhook.create",
+          "Webhook creation failed.",
+          {
+            connectionId: connection._id,
+            error: message,
+          }
+        );
+      }
+      throw error;
+    }
+
+    const webhookId = connection.webhook.webhookId || null;
+    const merged = mergeFallbackWebhook(connection, webhookId, webhookUrl);
+    const updatedConnection = await updateFathomConnectionById(db as any, connection._id, {
+      updatedByUserId,
+      webhook: {
+        ...connection.webhook,
+        token,
+        status: "active",
+        webhookUrl,
+        webhookEvent: connection.webhook.webhookEvent || FATHOM_WEBHOOK_EVENT,
+        managedWebhooks: merged,
+        lastSyncedAt: new Date(),
+        lastError: null,
+      },
+    });
+
+    if (updatedConnection) {
+      await syncLegacyInstallationFromConnection(updatedConnection);
+    }
+
+    if (connection.legacyUserId) {
+      await logFathomIntegration(
+        connection.legacyUserId,
+        "info",
+        "webhook.create",
+        "Webhook already exists.",
+        {
+          status: "existing",
+          connectionId: connection._id,
+          webhookId,
+          destinationUrl: webhookUrl,
+        }
+      );
+    }
+
+    return {
+      status: "existing" as const,
+      webhookId,
+      webhookUrl,
+      webhookSecret: connection.webhook.secret || null,
+      managedWebhooks: merged,
+    };
   }
 };
 

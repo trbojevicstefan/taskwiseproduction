@@ -82,10 +82,32 @@ export const applyMeetingIngestionSideEffects = async (
   const extractedTasks = Array.isArray(payload.extractedTasks)
     ? payload.extractedTasks
     : [];
-  const workspaceId =
+  let workspaceId =
     typeof payload.workspaceId === "string" && payload.workspaceId.trim()
       ? payload.workspaceId.trim()
-      : await getWorkspaceIdForUser(db, userId);
+      : null;
+
+  if (!workspaceId) {
+    const meetingDoc = await db
+      .collection("meetings")
+      .findOne(
+        {
+          userId,
+          $or: [{ _id: meetingId }, { id: meetingId }],
+        },
+        {
+          projection: { workspaceId: 1 },
+        }
+      );
+    workspaceId =
+      typeof meetingDoc?.workspaceId === "string" && meetingDoc.workspaceId.trim()
+        ? meetingDoc.workspaceId.trim()
+        : null;
+  }
+
+  if (!workspaceId) {
+    workspaceId = await getWorkspaceIdForUser(db, userId);
+  }
 
   let peopleResult = { created: 0, updated: 0 };
   if (attendees.length) {

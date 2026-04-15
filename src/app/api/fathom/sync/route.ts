@@ -5,6 +5,7 @@ import {
   mapApiError,
 } from "@/lib/api-route";
 import { getDb } from "@/lib/db";
+import { findPreferredFathomConnectionForWorkspace } from "@/lib/fathom-connections";
 import { runFathomSyncJob } from "@/lib/jobs/handlers/fathom-sync-job";
 import { enqueueJob } from "@/lib/jobs/store";
 import type { FathomSyncRange } from "@/lib/jobs/types";
@@ -12,6 +13,7 @@ import { kickJobWorker } from "@/lib/jobs/worker";
 import { recordRouteMetric } from "@/lib/observability-metrics";
 import { createLogger, getRequestCorrelationId } from "@/lib/observability";
 import { getSessionUserId } from "@/lib/server-auth";
+import { resolveWorkspaceScopeForUser } from "@/lib/workspace-scope";
 import { z } from "zod";
 
 const bodySchema = z
@@ -71,6 +73,17 @@ export async function POST(request: Request) {
     }
     metricUserId = userId;
 
+    const db = await getDb();
+    const workspaceScope = await resolveWorkspaceScopeForUser(db, userId, {
+      minimumRole: "member",
+      adminVisibilityKey: "integrations",
+    });
+    const preferredConnection = await findPreferredFathomConnectionForWorkspace(
+      db as any,
+      workspaceScope.workspaceId,
+      userId
+    );
+
     const url = new URL(request.url);
     const range = parseRange(url.searchParams.get("range"));
     const rawBody = await request
@@ -92,6 +105,7 @@ export async function POST(request: Request) {
       const result = await runFathomSyncJob({
         userId,
         range,
+        connectionId: preferredConnection?._id || null,
         correlationId,
         logger,
       });
@@ -104,12 +118,14 @@ export async function POST(request: Request) {
       return apiSuccess(result, { correlationId });
     }
 
-    const db = await getDb();
     const job = await enqueueJob(db, {
       type: "fathom-sync",
       userId,
       correlationId,
-      payload: { range },
+      payload: {
+        range,
+        connectionId: preferredConnection?._id || null,
+      },
     });
     void kickJobWorker();
 

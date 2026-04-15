@@ -1,16 +1,27 @@
 import crypto from "crypto";
 import { POST } from "@/app/api/fathom/webhook/route";
-import { getFathomInstallation, getValidFathomAccessToken, hashFathomRecordingId } from "@/lib/fathom";
+import {
+  extractFathomProviderSourceId,
+  getFathomInstallation,
+  getFathomRecordingHashScope,
+  getValidFathomAccessToken,
+  getValidFathomAccessTokenForConnection,
+  hashFathomRecordingId,
+} from "@/lib/fathom";
 import { ingestFathomMeeting } from "@/lib/fathom-ingest";
-import { findUserByFathomWebhookToken } from "@/lib/db/users";
+import { findUserByFathomWebhookToken, findUserById } from "@/lib/db/users";
+import { findFathomConnectionByWebhookToken } from "@/lib/fathom-connections";
 import { logFathomIntegration } from "@/lib/fathom-logs";
 import { getDb } from "@/lib/db";
 import { enqueueJob } from "@/lib/jobs/store";
 import { kickJobWorker } from "@/lib/jobs/worker";
 
 jest.mock("@/lib/fathom", () => ({
+  extractFathomProviderSourceId: jest.fn(),
   getFathomInstallation: jest.fn(),
+  getFathomRecordingHashScope: jest.fn(),
   getValidFathomAccessToken: jest.fn(),
+  getValidFathomAccessTokenForConnection: jest.fn(),
   hashFathomRecordingId: jest.fn(),
 }));
 
@@ -20,6 +31,11 @@ jest.mock("@/lib/fathom-ingest", () => ({
 
 jest.mock("@/lib/db/users", () => ({
   findUserByFathomWebhookToken: jest.fn(),
+  findUserById: jest.fn(),
+}));
+
+jest.mock("@/lib/fathom-connections", () => ({
+  findFathomConnectionByWebhookToken: jest.fn(),
 }));
 
 jest.mock("@/lib/fathom-logs", () => ({
@@ -38,11 +54,19 @@ jest.mock("@/lib/jobs/worker", () => ({
   kickJobWorker: jest.fn(),
 }));
 
+const mockedExtractFathomProviderSourceId =
+  extractFathomProviderSourceId as jest.MockedFunction<typeof extractFathomProviderSourceId>;
 const mockedGetFathomInstallation = getFathomInstallation as jest.MockedFunction<
   typeof getFathomInstallation
 >;
+const mockedGetFathomRecordingHashScope =
+  getFathomRecordingHashScope as jest.MockedFunction<typeof getFathomRecordingHashScope>;
 const mockedGetValidFathomAccessToken =
   getValidFathomAccessToken as jest.MockedFunction<typeof getValidFathomAccessToken>;
+const mockedGetValidFathomAccessTokenForConnection =
+  getValidFathomAccessTokenForConnection as jest.MockedFunction<
+    typeof getValidFathomAccessTokenForConnection
+  >;
 const mockedHashFathomRecordingId = hashFathomRecordingId as jest.MockedFunction<
   typeof hashFathomRecordingId
 >;
@@ -51,6 +75,11 @@ const mockedIngestFathomMeeting = ingestFathomMeeting as jest.MockedFunction<
 >;
 const mockedFindUserByFathomWebhookToken =
   findUserByFathomWebhookToken as jest.MockedFunction<typeof findUserByFathomWebhookToken>;
+const mockedFindUserById = findUserById as jest.MockedFunction<typeof findUserById>;
+const mockedFindFathomConnectionByWebhookToken =
+  findFathomConnectionByWebhookToken as jest.MockedFunction<
+    typeof findFathomConnectionByWebhookToken
+  >;
 const mockedLogFathomIntegration = logFathomIntegration as jest.MockedFunction<
   typeof logFathomIntegration
 >;
@@ -96,13 +125,27 @@ describe("POST /api/fathom/webhook", () => {
   beforeEach(() => {
     jest.clearAllMocks();
     delete process.env.CORE_FIRST_QUEUE_FIRST_WEBHOOK_INGESTION;
+    mockedFindFathomConnectionByWebhookToken.mockResolvedValue({
+      _id: "connection-1",
+      legacyUserId: "user-1",
+      createdByUserId: "user-1",
+      webhook: { secret: webhookSecret },
+    } as any);
     mockedFindUserByFathomWebhookToken.mockResolvedValue({
       _id: { toString: () => "user-1" },
     } as any);
+    mockedFindUserById.mockResolvedValue({
+      _id: { toString: () => "user-1" },
+    } as any);
+    mockedExtractFathomProviderSourceId.mockReturnValue("source-1");
     mockedGetFathomInstallation.mockResolvedValue({
       webhookSecret,
     } as any);
+    mockedGetFathomRecordingHashScope.mockImplementation(
+      ({ userId, connectionId }) => connectionId || userId
+    );
     mockedGetValidFathomAccessToken.mockResolvedValue("access-token");
+    mockedGetValidFathomAccessTokenForConnection.mockResolvedValue("access-token");
     mockedHashFathomRecordingId.mockReturnValue("recording-hash");
     mockedLogFathomIntegration.mockResolvedValue(undefined as never);
     mockedGetDb.mockResolvedValue({} as any);
@@ -164,11 +207,13 @@ describe("POST /api/fathom/webhook", () => {
       status: "duplicate",
       meetingId: "meeting-1",
     });
-    expect(mockedGetValidFathomAccessToken).toHaveBeenCalledWith("user-1");
+    expect(mockedGetValidFathomAccessTokenForConnection).toHaveBeenCalledWith("connection-1");
     expect(mockedIngestFathomMeeting).toHaveBeenCalledWith(
       expect.objectContaining({
         recordingId: "rec-123",
         accessToken: "access-token",
+        connectionId: "connection-1",
+        providerSourceId: "source-1",
       })
     );
   });
@@ -194,6 +239,7 @@ describe("POST /api/fathom/webhook", () => {
       jobId: "job-1",
     });
     expect(mockedGetValidFathomAccessToken).not.toHaveBeenCalled();
+    expect(mockedGetValidFathomAccessTokenForConnection).not.toHaveBeenCalled();
     expect(mockedIngestFathomMeeting).not.toHaveBeenCalled();
     expect(mockedGetDb).toHaveBeenCalled();
     expect(mockedEnqueueJob).toHaveBeenCalledWith(
@@ -203,6 +249,8 @@ describe("POST /api/fathom/webhook", () => {
         userId: "user-1",
         payload: expect.objectContaining({
           recordingId: "rec-789",
+          connectionId: "connection-1",
+          providerSourceId: "source-1",
         }),
       })
     );

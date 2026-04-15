@@ -1,18 +1,175 @@
 import { NextResponse } from "next/server";
 import { randomBytes } from "crypto";
 import { updateUserById } from "@/lib/db/users";
+import { getDb } from "@/lib/db";
 import {
-  consumeFathomOAuthState,
-  deleteManagedFathomWebhooks,
-  ensureFathomWebhook,
+  consumeFathomConnectionOAuthState,
+  createFathomConnection,
+  findFathomConnectionById,
+  listFathomConnectionsForWorkspace,
+  updateFathomConnectionById,
+} from "@/lib/fathom-connections";
+import {
+  ensureFathomConnectionWebhook,
+  getFathomRedirectUri,
   saveFathomInstallation,
 } from "@/lib/fathom";
 import { logFathomIntegration } from "@/lib/fathom-logs";
 
+const buildConnectionLabel = async (
+  db: Awaited<ReturnType<typeof getDb>>,
+  workspaceId: string,
+  requestedLabel?: string | null,
+  existingConnectionId?: string | null
+) => {
+  const baseLabel = requestedLabel?.trim() || "Fathom";
+  const connections = await listFathomConnectionsForWorkspace(db as any, workspaceId);
+  const takenLabels = new Set(
+    connections
+      .filter((connection) => connection._id !== existingConnectionId)
+      .map((connection) => connection.label)
+  );
+
+  if (!takenLabels.has(baseLabel)) {
+    return baseLabel;
+  }
+
+  let suffix = 2;
+  while (takenLabels.has(`${baseLabel} ${suffix}`)) {
+    suffix += 1;
+  }
+  return `${baseLabel} ${suffix}`;
+};
+
+const upsertWorkspaceFathomConnection = async (
+  db: Awaited<ReturnType<typeof getDb>>,
+  input: {
+    workspaceId: string;
+    userId: string;
+    connectionId?: string | null;
+    requestedLabel?: string | null;
+    accessToken: string;
+    refreshToken?: string | null;
+    expiresAt?: number | null;
+    scope?: string | null;
+    providerUserId?: string | null;
+    webhookToken: string;
+  }
+) => {
+  const existingConnection = input.connectionId
+    ? await findFathomConnectionById(db as any, input.connectionId)
+    : null;
+  const allConnections = existingConnection
+    ? []
+    : await listFathomConnectionsForWorkspace(db as any, input.workspaceId);
+  const matchedConnection =
+    existingConnection ||
+    allConnections.find(
+      (connection) =>
+        connection.status !== "revoked" &&
+        connection.source.providerUserId &&
+        connection.source.providerUserId === input.providerUserId
+    ) ||
+    allConnections.find(
+      (connection) =>
+        connection.status !== "revoked" &&
+        connection.createdByUserId === input.userId &&
+        !connection.source.providerUserId
+    ) ||
+    null;
+
+  const label = await buildConnectionLabel(
+    db,
+    input.workspaceId,
+    matchedConnection?.label || input.requestedLabel,
+    matchedConnection?._id || null
+  );
+
+  if (matchedConnection) {
+    return updateFathomConnectionById(db as any, matchedConnection._id, {
+      label,
+      status: "active",
+      updatedByUserId: input.userId,
+      legacyUserId: input.userId,
+      oauth: {
+        accessToken: input.accessToken,
+        refreshToken: input.refreshToken || null,
+        expiresAt: input.expiresAt || null,
+        scope: input.scope || null,
+        stateId: null,
+        connectedAt: new Date(),
+        lastRefreshedAt: null,
+        lastError: null,
+      },
+      webhook: {
+        token: input.webhookToken,
+        secret: matchedConnection.webhook.secret || null,
+        status: "not_configured",
+        webhookId: matchedConnection.webhook.webhookId || null,
+        webhookUrl: matchedConnection.webhook.webhookUrl || null,
+        webhookEvent: matchedConnection.webhook.webhookEvent || null,
+        managedWebhooks: matchedConnection.webhook.managedWebhooks || [],
+        lastSyncedAt: null,
+        lastError: null,
+      },
+      source: {
+        providerUserId: input.providerUserId || null,
+        providerAccountId: matchedConnection.source.providerAccountId || null,
+        providerSourceIds: matchedConnection.source.providerSourceIds || [],
+      },
+      sync: {
+        lastAttemptedAt: null,
+        lastSucceededAt: matchedConnection.sync.lastSucceededAt || null,
+        lastError: null,
+      },
+      revokedAt: null,
+    });
+  }
+
+  return createFathomConnection(db as any, {
+    workspaceId: input.workspaceId,
+    label,
+    createdByUserId: input.userId,
+    updatedByUserId: input.userId,
+    status: "active",
+    legacyUserId: input.userId,
+    oauth: {
+      accessToken: input.accessToken,
+      refreshToken: input.refreshToken || null,
+      expiresAt: input.expiresAt || null,
+      scope: input.scope || null,
+      stateId: null,
+      connectedAt: new Date(),
+      lastRefreshedAt: null,
+      lastError: null,
+    },
+    webhook: {
+      token: input.webhookToken,
+      secret: null,
+      status: "not_configured",
+      webhookId: null,
+      webhookUrl: null,
+      webhookEvent: null,
+      managedWebhooks: [],
+      lastSyncedAt: null,
+      lastError: null,
+    },
+    source: {
+      providerUserId: input.providerUserId || null,
+      providerAccountId: null,
+      providerSourceIds: [],
+    },
+    sync: {
+      lastAttemptedAt: null,
+      lastSucceededAt: null,
+      lastError: null,
+    },
+  });
+};
+
 export async function GET(request: Request) {
   const url = new URL(request.url);
-  const baseUrl =
-    process.env.NEXTAUTH_URL || `${url.protocol}//${url.host}`;
+  const baseUrl = process.env.NEXTAUTH_URL || `${url.protocol}//${url.host}`;
   const redirectToSettings = (params: Record<string, string>) => {
     const query = new URLSearchParams(params);
     return NextResponse.redirect(`${baseUrl}/settings?${query.toString()}`);
@@ -22,22 +179,20 @@ export async function GET(request: Request) {
   const error = url.searchParams.get("error");
   const errorDescription = url.searchParams.get("error_description");
   const state = url.searchParams.get("state");
-  const configuredRedirectUri = process.env.FATHOM_OAUTH_REDIRECT_URI?.trim()
-    ? process.env.FATHOM_OAUTH_REDIRECT_URI.trim().replace(/\/$/, "")
-    : null;
-  const redirectUri =
-    configuredRedirectUri || `${url.origin}/api/fathom/oauth/callback`;
+  const redirectUri = getFathomRedirectUri();
+
+  const db = await getDb();
 
   if (error) {
     if (state) {
-      const userId = await consumeFathomOAuthState(state);
-      if (userId) {
+      const stateDoc = await consumeFathomConnectionOAuthState(db as any, state);
+      if (stateDoc?.userId) {
         await logFathomIntegration(
-          userId,
+          stateDoc.userId,
           "error",
           "oauth.callback",
           "Fathom OAuth error from provider.",
-          { error, errorDescription }
+          { error, errorDescription, workspaceId: stateDoc.workspaceId }
         );
       }
     }
@@ -54,14 +209,15 @@ export async function GET(request: Request) {
     });
   }
 
-  const userId = await consumeFathomOAuthState(state);
-  if (!userId) {
+  const stateDoc = await consumeFathomConnectionOAuthState(db as any, state);
+  if (!stateDoc) {
     return redirectToSettings({
       error: "fathom_callback_failed",
       message: "Invalid or expired OAuth state.",
     });
   }
 
+  const userId = stateDoc.userId;
   if (!process.env.FATHOM_CLIENT_ID || !process.env.FATHOM_CLIENT_SECRET) {
     return redirectToSettings({
       error: "fathom_callback_failed",
@@ -78,14 +234,11 @@ export async function GET(request: Request) {
   });
 
   try {
-    const response = await fetch(
-      "https://fathom.video/external/v1/oauth2/token",
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body,
-      }
-    );
+    const response = await fetch("https://fathom.video/external/v1/oauth2/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body,
+    });
 
     const payload = (await response.json()) as {
       access_token?: string;
@@ -105,52 +258,85 @@ export async function GET(request: Request) {
       });
     }
 
+    const webhookToken = randomBytes(24).toString("hex");
+    const connection = await upsertWorkspaceFathomConnection(db, {
+      workspaceId: stateDoc.workspaceId,
+      userId,
+      connectionId: stateDoc.connectionId || null,
+      requestedLabel: stateDoc.label || null,
+      accessToken: payload.access_token,
+      refreshToken: payload.refresh_token || null,
+      expiresAt: payload.expires_in ? Date.now() + payload.expires_in * 1000 : null,
+      scope: payload.scope || null,
+      providerUserId: payload.user_id || null,
+      webhookToken,
+    });
+    if (!connection) {
+      throw new Error("Failed to persist Fathom connection.");
+    }
+
     await saveFathomInstallation({
       _id: userId,
       userId,
       accessToken: payload.access_token,
       refreshToken: payload.refresh_token || null,
-      expiresAt: payload.expires_in
-        ? Date.now() + payload.expires_in * 1000
-        : null,
+      expiresAt: payload.expires_in ? Date.now() + payload.expires_in * 1000 : null,
       scope: payload.scope || null,
       fathomUserId: payload.user_id || null,
       updatedAt: new Date(),
     });
 
-    const webhookToken = randomBytes(24).toString("hex");
-
     await updateUserById(userId, {
       fathomWebhookToken: webhookToken,
       fathomConnected: true,
+      fathomUserId: payload.user_id || null,
     });
 
     let webhookStatus = "unknown";
     let webhookErrorMessage: string | null = null;
     try {
-      try {
-        await deleteManagedFathomWebhooks(payload.access_token);
-      } catch (cleanupError) {
-        await logFathomIntegration(
-          userId,
-          "warn",
-          "webhook.cleanup",
-          "Failed to delete existing Fathom webhooks before setup.",
-          { error: cleanupError instanceof Error ? cleanupError.message : String(cleanupError) }
-        );
-      }
-      const result = await ensureFathomWebhook(
-        userId,
+      const result = await ensureFathomConnectionWebhook(
+        connection._id,
         payload.access_token,
-        webhookToken
+        webhookToken,
+        { updatedByUserId: userId }
       );
       webhookStatus = result.status;
+      await updateFathomConnectionById(db as any, connection?._id || stateDoc.connectionId || "", {
+        status: "active",
+        updatedByUserId: userId,
+        webhook: {
+          token: webhookToken,
+          secret: result.webhookSecret || null,
+          status: "active",
+          webhookId: result.webhookId || null,
+          webhookUrl: result.webhookUrl || null,
+          webhookEvent: "new-meeting-content-ready",
+          managedWebhooks: result.managedWebhooks || [],
+          lastSyncedAt: new Date(),
+          lastError: null,
+        },
+      });
     } catch (webhookError) {
       const message =
         webhookError instanceof Error ? webhookError.message : String(webhookError);
-      console.error("Fathom webhook setup failed:", webhookError);
       webhookStatus = "failed";
       webhookErrorMessage = message;
+      await updateFathomConnectionById(db as any, connection?._id || stateDoc.connectionId || "", {
+        updatedByUserId: userId,
+        webhook: {
+          token: webhookToken,
+          secret: connection?.webhook.secret || null,
+          status: "error",
+          webhookId: connection?.webhook.webhookId || null,
+          webhookUrl: connection?.webhook.webhookUrl || null,
+          webhookEvent: connection?.webhook.webhookEvent || null,
+          managedWebhooks: connection?.webhook.managedWebhooks || [],
+          lastSyncedAt: new Date(),
+          lastError: { message },
+        },
+      });
+      console.error("Fathom webhook setup failed:", webhookError);
     }
 
     await logFathomIntegration(
@@ -158,7 +344,11 @@ export async function GET(request: Request) {
       "info",
       "oauth.callback",
       "Fathom OAuth completed.",
-      { webhookStatus }
+      {
+        workspaceId: stateDoc.workspaceId,
+        connectionId: connection?._id || null,
+        webhookStatus,
+      }
     );
 
     return redirectToSettings({
@@ -173,7 +363,7 @@ export async function GET(request: Request) {
       "error",
       "oauth.callback",
       "Fathom OAuth callback failed.",
-      { error: err instanceof Error ? err.message : String(err) }
+      { error: err instanceof Error ? err.message : String(err), workspaceId: stateDoc.workspaceId }
     );
     return redirectToSettings({
       error: "fathom_callback_failed",

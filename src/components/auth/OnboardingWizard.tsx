@@ -254,7 +254,7 @@ const OnboardingWizard = ({ onClose }: { onClose?: () => void }) => {
                                     <Button
                                         size="lg"
                                         className="w-full"
-                                        onClick={connectFathom}
+                                        onClick={() => connectFathom()}
                                         disabled={isLoadingFathomConnection || isFathomConnected}
                                     >
                                         {isLoadingFathomConnection ? (

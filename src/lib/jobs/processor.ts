@@ -38,6 +38,7 @@ export const processJob = async (
       return runFathomSyncJob({
         userId: job.userId,
         range: payload.range,
+        connectionId: payload.connectionId,
         correlationId: context?.correlationId,
         logger: context?.logger,
       });
@@ -56,6 +57,8 @@ export const processJob = async (
       return runFathomWebhookIngestJob({
         userId: job.userId,
         recordingId: payload.recordingId,
+        connectionId: payload.connectionId,
+        providerSourceId: payload.providerSourceId,
         data: payload.data,
         correlationId: context?.correlationId,
         logger: context?.logger,

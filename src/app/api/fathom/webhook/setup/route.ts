@@ -2,15 +2,18 @@ import { NextResponse } from "next/server";
 import { apiError } from "@/lib/api-route";
 import { randomBytes } from "crypto";
 import { getDb } from "@/lib/db";
-import { getSessionUserId } from "@/lib/server-auth";
+import { updateUserById } from "@/lib/db/users";
 import {
-  deleteManagedFathomWebhooks,
-  ensureFathomWebhook,
-  getFathomInstallation,
+  findPreferredFathomConnectionForWorkspace,
+  updateFathomConnectionById,
+} from "@/lib/fathom-connections";
+import {
+  ensureFathomConnectionWebhook,
+  FATHOM_WEBHOOK_EVENT,
   getFathomWebhookUrl,
-  getValidFathomAccessToken,
+  getValidFathomAccessTokenForConnection,
 } from "@/lib/fathom";
-import { findUserById, updateUserById } from "@/lib/db/users";
+import { getSessionUserId } from "@/lib/server-auth";
 import { logFathomIntegration } from "@/lib/fathom-logs";
 import { resolveWorkspaceScopeForUser } from "@/lib/workspace-scope";
 
@@ -19,9 +22,11 @@ export async function POST() {
   if (!userId) {
     return apiError(401, "request_error", "Unauthorized");
   }
+
+  const db = await getDb();
+  let workspaceScope;
   try {
-    const db = await getDb();
-    await resolveWorkspaceScopeForUser(db, userId, {
+    workspaceScope = await resolveWorkspaceScopeForUser(db, userId, {
       minimumRole: "member",
       adminVisibilityKey: "integrations",
     });
@@ -29,57 +34,75 @@ export async function POST() {
     return apiError(error?.status || 403, "request_error", error?.message || "Forbidden");
   }
 
-  console.log("Fathom webhook setup requested", { userId });
-
-  const installation = await getFathomInstallation(userId);
-  if (!installation) {
+  const connection = await findPreferredFathomConnectionForWorkspace(
+    db as any,
+    workspaceScope.workspaceId,
+    userId
+  );
+  if (!connection) {
     return apiError(400, "request_error", "Fathom integration not connected.");
   }
 
-  const user = await findUserById(userId);
-  if (!user) {
-    return apiError(404, "request_error", "User not found.");
-  }
-
+  const targetUserId = connection.legacyUserId || connection.createdByUserId;
   const webhookToken = randomBytes(24).toString("hex");
-  await updateUserById(userId, { fathomWebhookToken: webhookToken });
+  await updateFathomConnectionById(db as any, connection._id, {
+    updatedByUserId: userId,
+    webhook: {
+      ...connection.webhook,
+      token: webhookToken,
+      status: "not_configured",
+      lastError: null,
+    },
+  });
+  await updateUserById(targetUserId, { fathomWebhookToken: webhookToken });
 
   try {
-    const accessToken = await getValidFathomAccessToken(userId);
-    try {
-      await deleteManagedFathomWebhooks(accessToken);
-    } catch (error) {
-      await logFathomIntegration(
-        userId,
-        "warn",
-        "webhook.cleanup",
-        "Failed to delete existing Fathom webhooks before setup.",
-        { error: error instanceof Error ? error.message : String(error) }
-      );
-    }
-    const result = await ensureFathomWebhook(userId, accessToken, webhookToken);
-    console.log("Fathom webhook setup result", {
-      userId,
-      status: result.status,
-      webhookId: result.webhookId,
-      webhookUrl: result.webhookUrl,
+    const accessToken = await getValidFathomAccessTokenForConnection(connection._id);
+    const result = await ensureFathomConnectionWebhook(
+      connection._id,
+      accessToken,
+      webhookToken,
+      { updatedByUserId: userId }
+    );
+
+    await updateFathomConnectionById(db as any, connection._id, {
+      updatedByUserId: userId,
+      webhook: {
+        token: webhookToken,
+        secret: result.webhookSecret || null,
+        status: "active",
+        webhookId: result.webhookId || null,
+        webhookUrl: result.webhookUrl || null,
+        webhookEvent: FATHOM_WEBHOOK_EVENT,
+        managedWebhooks: result.managedWebhooks || [],
+        lastSyncedAt: new Date(),
+        lastError: null,
+      },
     });
 
     return NextResponse.json({
       status: result.status,
+      connectionId: connection._id,
       webhookId: result.webhookId,
       webhookUrl: result.webhookUrl || getFathomWebhookUrl(webhookToken),
     });
   } catch (error) {
-    console.error("Fathom webhook setup failed", {
-      userId,
-      error: error instanceof Error ? error.message : String(error),
+    const message = error instanceof Error ? error.message : "Webhook setup failed.";
+    await updateFathomConnectionById(db as any, connection._id, {
+      updatedByUserId: userId,
+      webhook: {
+        ...connection.webhook,
+        token: webhookToken,
+        status: "error",
+        lastSyncedAt: new Date(),
+        lastError: { message },
+      },
     });
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Webhook setup failed." },
-      { status: 500 }
-    );
+    await logFathomIntegration(userId, "error", "webhook.create", "Webhook setup failed.", {
+      workspaceId: workspaceScope.workspaceId,
+      connectionId: connection._id,
+      error: message,
+    });
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }
-
-

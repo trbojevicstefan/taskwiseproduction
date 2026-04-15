@@ -2,6 +2,7 @@ import { randomUUID } from "crypto";
 import { analyzeMeeting } from "@/ai/flows/analyze-meeting-flow";
 import { getDb } from "@/lib/db";
 import {
+  getFathomRecordingHashScope,
   fetchFathomSummary,
   fetchFathomTranscript,
   formatFathomTranscript,
@@ -15,6 +16,7 @@ import {
   buildCompletionSuggestions,
   mergeCompletionSuggestions,
 } from "@/lib/task-completion";
+import { findFathomConnectionById } from "@/lib/fathom-connections";
 import { runMeetingIngestionCommand } from "@/lib/services/meeting-ingestion-command";
 import { postMeetingAutomationToSlack } from "@/lib/slack-automation";
 
@@ -148,22 +150,53 @@ const applyAutoApprovalFlags = (
 export const ingestFathomMeeting = async ({
   user,
   recordingId,
+  connectionId,
+  providerSourceId,
   data,
   accessToken,
 }: {
   user: DbUser;
   recordingId: string;
+  connectionId?: string | null;
+  providerSourceId?: string | null;
   data?: any;
   accessToken: string;
 }): Promise<FathomIngestResult> => {
   const db = await getDb();
   const userId = user._id.toString();
-  const recordingIdHash = hashFathomRecordingId(userId, recordingId);
+  const connection = connectionId
+    ? await findFathomConnectionById(db as any, connectionId)
+    : null;
+  const connectionWorkspaceId = connection?.workspaceId || null;
+  const recordingHashScope = getFathomRecordingHashScope({ userId, connectionId });
+  const legacyRecordingHashScope = getFathomRecordingHashScope({ userId });
+  const recordingIdHash = hashFathomRecordingId(recordingHashScope, recordingId);
+  const legacyRecordingIdHash = connectionId
+    ? hashFathomRecordingId(legacyRecordingHashScope, recordingId)
+    : null;
   const existing = await db
     .collection("meetings")
     .findOne({
-      userId,
-      $or: [{ recordingIdHash }, { recordingId }],
+      $and: [
+        { userId },
+        connectionId
+          ? {
+              $or: [
+                { connectionId },
+                { connectionId: null },
+                { connectionId: { $exists: false } },
+              ],
+            }
+          : {
+              $or: [{ connectionId: null }, { connectionId: { $exists: false } }],
+            },
+        {
+          $or: [
+            { recordingIdHash: legacyRecordingIdHash ? { $in: [recordingIdHash, legacyRecordingIdHash] } : recordingIdHash },
+            { recordingId },
+          ],
+        },
+      ],
     });
   if (existing) {
     const payload = data || {};
@@ -172,6 +205,15 @@ export const ingestFathomMeeting = async ({
       recordingIdHash,
       ingestSource: existing.ingestSource || "fathom",
     };
+    if (connectionId && existing.connectionId !== connectionId) {
+      update.connectionId = connectionId;
+    }
+    if (connectionWorkspaceId && !existing.workspaceId) {
+      update.workspaceId = connectionWorkspaceId;
+    }
+    if (providerSourceId && existing.providerSourceId !== providerSourceId) {
+      update.providerSourceId = providerSourceId;
+    }
     const existingTranscript =
       typeof existing.originalTranscript === "string"
         ? existing.originalTranscript.trim()
@@ -264,7 +306,11 @@ export const ingestFathomMeeting = async ({
     );
 
     const workspaceId =
-      existing.workspaceId || user.activeWorkspaceId || user.workspace?.id || null;
+      existing.workspaceId ||
+      connectionWorkspaceId ||
+      user.activeWorkspaceId ||
+      user.workspace?.id ||
+      null;
     const hasExistingExtractedTasks =
       Array.isArray(existing.extractedTasks) && existing.extractedTasks.length > 0;
     const hasAlreadyBeenAnalyzed =
@@ -427,6 +473,8 @@ export const ingestFathomMeeting = async ({
           _id: planningSessionId,
           userId,
           workspaceId,
+          connectionId: connectionId || existing.connectionId || null,
+          providerSourceId: providerSourceId || existing.providerSourceId || null,
           title: `Plan from "${meetingTitle}"`,
           inputText: meetingSummary,
           extractedTasks: finalizedTasks,
@@ -451,6 +499,8 @@ export const ingestFathomMeeting = async ({
           },
           {
             $set: {
+              connectionId: connectionId || existing.connectionId || null,
+              providerSourceId: providerSourceId || existing.providerSourceId || null,
               title: `Plan from "${meetingTitle}"`,
               inputText: meetingSummary,
               extractedTasks: finalizedTasks,
@@ -566,7 +616,8 @@ export const ingestFathomMeeting = async ({
   const summaryText = resolveSummaryText(payload, summaryPayload);
 
   const detailLevel = resolveDetailLevel(user);
-  const workspaceId = user.activeWorkspaceId || user.workspace?.id || null;
+  const workspaceId =
+    connectionWorkspaceId || user.activeWorkspaceId || user.workspace?.id || null;
   const analysisResult = await analyzeMeeting({
     transcript: transcriptText,
     requestedDetailLevel: detailLevel,
@@ -687,6 +738,8 @@ export const ingestFathomMeeting = async ({
     _id: meetingId,
     userId,
     workspaceId,
+    connectionId: connectionId || null,
+    providerSourceId: providerSourceId || null,
     title: meetingTitle,
     originalTranscript: transcriptText,
     summary: meetingSummary,
@@ -754,6 +807,8 @@ export const ingestFathomMeeting = async ({
     _id: planId,
     userId,
     workspaceId,
+    connectionId: connectionId || null,
+    providerSourceId: providerSourceId || null,
     title: `Plan from "${meetingTitle}"`,
     inputText: meetingSummary,
     extractedTasks: finalizedTasks,
@@ -771,7 +826,29 @@ export const ingestFathomMeeting = async ({
   // Ensure idempotent insertion: upsert by userId + recordingIdHash to avoid duplicates
   if (meeting.recordingIdHash) {
     try {
-      const filter = { userId, recordingIdHash: meeting.recordingIdHash };
+      const filter = {
+        $and: [
+          { userId },
+          connectionId
+            ? {
+                $or: [
+                  { connectionId },
+                  { connectionId: null },
+                  { connectionId: { $exists: false } },
+                ],
+              }
+            : {
+                $or: [{ connectionId: null }, { connectionId: { $exists: false } }],
+              },
+          legacyRecordingIdHash
+            ? {
+                recordingIdHash: {
+                  $in: [meeting.recordingIdHash, legacyRecordingIdHash],
+                },
+              }
+            : { recordingIdHash: meeting.recordingIdHash },
+        ],
+      };
       const { _id: insertId } = meeting;
       const setFields: Record<string, any> = { ...meeting };
       delete setFields._id;
