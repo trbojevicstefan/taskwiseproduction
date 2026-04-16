@@ -9,12 +9,14 @@ export async function GET() {
   if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
+  let workspaceId: string | null = null;
   try {
     const db = await getDb();
-    await resolveWorkspaceScopeForUser(db, userId, {
+    const scope = await resolveWorkspaceScopeForUser(db, userId, {
       minimumRole: "member",
       adminVisibilityKey: "integrations",
     });
+    workspaceId = scope.workspaceId;
   } catch (error: any) {
     return NextResponse.json(
       { error: error?.message || "Forbidden" },
@@ -23,7 +25,10 @@ export async function GET() {
   }
 
   try {
-    const accessToken = await getGoogleAccessTokenForUser(userId);
+    const accessToken = await getGoogleAccessTokenForUser(userId, {
+      workspaceId,
+      actorUserId: userId,
+    });
     if (!accessToken) {
       return NextResponse.json({ error: "Google not connected." }, { status: 404 });
     }

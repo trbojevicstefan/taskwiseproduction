@@ -4,9 +4,15 @@ import GoogleProvider from "next-auth/providers/google";
 import { randomBytes, randomUUID } from "crypto";
 import { cookies } from "next/headers";
 import { findUserByEmail, findUserById, verifyUserPassword, createUser, updateUserById } from "@/lib/db/users";
+import { logGoogleIntegration } from "@/lib/google-logs";
 import { GOOGLE_INTEGRATION_USER_COOKIE } from "@/lib/integration-cookies";
 
 type WorkspaceInfo = { id: string; name: string };
+
+const resolveWorkspaceIdForLogging = (input: {
+  activeWorkspaceId?: string | null;
+  workspace?: { id?: string | null } | null;
+}) => input.activeWorkspaceId || input.workspace?.id || null;
 
 const ensureWorkspaceId = async (user: {
   _id: { toString: () => string };
@@ -147,6 +153,14 @@ export const authOptions: NextAuthOptions = {
         if (!dbUser) {
           return false;
         }
+        await logGoogleIntegration({
+          workspaceId: resolveWorkspaceIdForLogging(dbUser as any),
+          userId: integrationUserId,
+          actorUserId: integrationUserId,
+          level: "info",
+          event: "oauth.connect.callback.authorized",
+          message: "Google Workspace OAuth callback was accepted.",
+        });
       }
       return true;
     },
@@ -233,6 +247,31 @@ export const authOptions: NextAuthOptions = {
             update.googleTokenExpiry = account.expires_at * 1000;
           }
           await updateUserById(userId, update);
+
+          await logGoogleIntegration({
+            workspaceId: resolveWorkspaceIdForLogging(dbUser as any),
+            userId,
+            actorUserId: userId,
+            level: "info",
+            event: "oauth.connect.success",
+            message: "Google Workspace integration connected successfully.",
+            metadata: {
+              scopes: account.scope || null,
+              hasRefreshToken: Boolean(account.refresh_token),
+            },
+          });
+        } else {
+          const tokenWorkspaceId =
+            (token.activeWorkspaceId as string | undefined) ||
+            ((token.workspace as { id?: string } | undefined)?.id || null);
+          await logGoogleIntegration({
+            workspaceId: tokenWorkspaceId,
+            userId: candidateUserId || null,
+            actorUserId: candidateUserId || null,
+            level: "error",
+            event: "oauth.connect.failed",
+            message: "Google OAuth callback completed, but no matching user was found.",
+          });
         }
       }
 

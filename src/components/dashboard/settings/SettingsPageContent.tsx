@@ -39,6 +39,29 @@ const scaleLabels: { [key in UIScale]: string } = {
 };
 const scaleValues: UIScale[] = ['small', 'medium', 'large', 'very-large'];
 
+const GOOGLE_INTEGRATION_LOCAL_CALLBACK_URL =
+  "http://localhost:9002/api/auth/callback/google-integration";
+const GOOGLE_INTEGRATION_PRODUCTION_CALLBACK_URL = "${NEXTAUTH_URL}/api/auth/callback/google-integration";
+
+const resolveGoogleIntegrationOauthErrorMessage = (code: string, message?: string | null) => {
+  if (code === "OAuthSignin") {
+    return "Google OAuth could not start. Verify Google OAuth app settings for the integration client.";
+  }
+  if (code === "OAuthCallback") {
+    return `Google OAuth callback failed. Ensure Google Cloud allows ${GOOGLE_INTEGRATION_LOCAL_CALLBACK_URL} locally and ${GOOGLE_INTEGRATION_PRODUCTION_CALLBACK_URL} in production.`;
+  }
+  if (code === "Configuration") {
+    return "Google Workspace integration is not configured. Set GOOGLE_INTEGRATION_CLIENT_ID and GOOGLE_INTEGRATION_CLIENT_SECRET.";
+  }
+  if (code === "AccessDenied") {
+    return "Google Workspace authorization was canceled or denied.";
+  }
+  if (code === "google-integration") {
+    return "Google Workspace integration provider is unavailable. Verify OAuth configuration and callback URLs.";
+  }
+  return message || `Google Workspace connection failed (${code}).`;
+};
+
 type SlackChannel = {
   id: string;
   name: string;
@@ -373,6 +396,7 @@ const IntegrationCard: React.FC<{
   isConnected: boolean;
   isLoading: boolean;
   onConnect: () => void;
+  onConnectDisabled?: boolean;
   onDisconnect: () => void;
   onDisconnectDisabled?: boolean;
   extraActions?: React.ReactNode;
@@ -389,6 +413,7 @@ const IntegrationCard: React.FC<{
   isConnected,
   isLoading,
   onConnect,
+  onConnectDisabled = false,
   onDisconnect,
   onDisconnectDisabled = false,
   extraActions,
@@ -451,7 +476,7 @@ const IntegrationCard: React.FC<{
               <Settings2 className="h-4 w-4" />
             </Button>
           )}
-          <Button variant="outline" size="sm" onClick={onConnect}>
+          <Button variant="outline" size="sm" onClick={onConnect} disabled={onConnectDisabled}>
             <Power className="mr-2 h-4 w-4 text-green-500" />
             Connect
           </Button>
@@ -542,6 +567,8 @@ export default function SettingsPageContent() {
   const workspaceSlack = user?.workspaceIntegrations?.slack;
   const workspaceGoogle = user?.workspaceIntegrations?.google;
   const workspaceFathom = user?.workspaceIntegrations?.fathom;
+  const [isGoogleIntegrationProviderAvailable, setIsGoogleIntegrationProviderAvailable] =
+    useState<boolean | null>(null);
   const formatIntegrationOwner = (email: string | null | undefined) =>
     email || "another workspace admin";
   const slackStatusNote =
@@ -554,12 +581,20 @@ export default function SettingsPageContent() {
     !!workspaceSlack?.connected &&
     !workspaceSlack?.connectedByCurrentUser &&
     !user?.slackTeamId;
-  const googleStatusNote =
+  const workspaceGoogleStatusNote =
     workspaceGoogle?.connected && !workspaceGoogle.connectedByCurrentUser
       ? `Connected in this workspace by ${formatIntegrationOwner(
           workspaceGoogle.connectedByEmail
         )}.`
       : null;
+  const googleProviderStatusNote =
+    isGoogleIntegrationProviderAvailable === false
+      ? `Google integration is not configured. Allow ${GOOGLE_INTEGRATION_LOCAL_CALLBACK_URL} locally and ${GOOGLE_INTEGRATION_PRODUCTION_CALLBACK_URL} in production.`
+      : null;
+  const googleStatusNote = [workspaceGoogleStatusNote, googleProviderStatusNote]
+    .filter(Boolean)
+    .join(" ")
+    .trim();
   const fathomStatusNote =
     workspaceFathom?.connected && !workspaceFathom.connectedByCurrentUser
       ? `Connected in this workspace by ${formatIntegrationOwner(
@@ -580,6 +615,20 @@ export default function SettingsPageContent() {
   const workspaceInviteInputRef = useRef<HTMLInputElement>(null);
   const webhookUrlInputRef = useRef<HTMLInputElement>(null);
   const [isCreatingFathomWebhook, setIsCreatingFathomWebhook] = useState(false);
+  const [isGoogleLogsOpen, setIsGoogleLogsOpen] = useState(false);
+  const [isLoadingGoogleLogs, setIsLoadingGoogleLogs] = useState(false);
+  const [googleLogs, setGoogleLogs] = useState<
+    Array<{
+      id?: string;
+      level: string;
+      event: string;
+      message: string;
+      metadata?: Record<string, unknown> | null;
+      createdAt: string;
+      userId?: string | null;
+      actorUserId?: string | null;
+    }>
+  >([]);
   const [isFathomLogsOpen, setIsFathomLogsOpen] = useState(false);
   const [fathomLogs, setFathomLogs] = useState<Array<{
     id?: string;
@@ -758,11 +807,49 @@ export default function SettingsPageContent() {
         }
       }
       else if (error) {
-        toast({
-            title: `Connection Failed: ${error}`,
-            description: message || "Please try again or contact support.",
+        const normalizedError = error.trim();
+        const googleOauthErrors = new Set([
+          "OAuthSignin",
+          "OAuthCallback",
+          "Configuration",
+          "AccessDenied",
+          "google-integration",
+        ]);
+        if (googleOauthErrors.has(normalizedError)) {
+          const googleErrorMessage = resolveGoogleIntegrationOauthErrorMessage(
+            normalizedError,
+            message
+          );
+          if (activeWorkspaceId) {
+            void fetch(
+              `/api/workspaces/${encodeURIComponent(activeWorkspaceId)}/google/logs`,
+              {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  level: "error",
+                  event: "oauth.connect.failed",
+                  message: googleErrorMessage,
+                  metadata: {
+                    errorCode: normalizedError,
+                    source: "settings.redirect",
+                  },
+                }),
+              }
+            );
+          }
+          toast({
+            title: "Google Workspace Connection Failed",
+            description: googleErrorMessage,
             variant: "destructive",
-        });
+          });
+        } else {
+          toast({
+              title: `Connection Failed: ${error}`,
+              description: message || "Please try again or contact support.",
+              variant: "destructive",
+          });
+        }
       }
       
       if (needsRefresh) {
@@ -773,7 +860,27 @@ export default function SettingsPageContent() {
     
     handleRedirect();
 
-  }, [searchParams, router, toast, triggerTokenFetch, refreshUserProfile]);
+  }, [searchParams, router, toast, triggerTokenFetch, refreshUserProfile, activeWorkspaceId]);
+
+  useEffect(() => {
+    let active = true;
+    const loadGoogleIntegrationProviderAvailability = async () => {
+      try {
+        const response = await fetch("/api/auth/providers", { cache: "no-store" });
+        const payload = await response.json().catch(() => ({}));
+        if (!active) return;
+        setIsGoogleIntegrationProviderAvailable(Boolean(payload?.["google-integration"]));
+      } catch {
+        if (!active) return;
+        setIsGoogleIntegrationProviderAvailable(false);
+      }
+    };
+
+    void loadGoogleIntegrationProviderAvailability();
+    return () => {
+      active = false;
+    };
+  }, []);
 
 
   useEffect(() => {
@@ -1293,6 +1400,39 @@ export default function SettingsPageContent() {
     } finally {
       setIsLoadingFathomLogs(false);
     }
+  };
+
+  const loadGoogleLogs = async () => {
+    if (!activeWorkspaceId) {
+      setGoogleLogs([]);
+      return;
+    }
+    setIsLoadingGoogleLogs(true);
+    try {
+      const response = await fetch(
+        `/api/workspaces/${encodeURIComponent(activeWorkspaceId)}/google/logs?limit=200`,
+        { cache: "no-store" }
+      );
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(payload?.error || "Failed to load logs.");
+      }
+      setGoogleLogs(Array.isArray(payload?.logs) ? payload.logs : []);
+    } catch (error) {
+      console.error("Failed to load Google logs:", error);
+      toast({
+        title: "Could not load Google logs",
+        description: error instanceof Error ? error.message : "Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsLoadingGoogleLogs(false);
+    }
+  };
+
+  const handleOpenGoogleLogs = async () => {
+    setIsGoogleLogsOpen(true);
+    await loadGoogleLogs();
   };
 
   const handleOpenFathomLogs = async () => {
@@ -3215,15 +3355,22 @@ export default function SettingsPageContent() {
                             icon={Bot}
                             title="Google Workspace"
                             description="Connect Meet, Calendar, and Drive for meeting ingestion."
-                            statusNote={googleStatusNote}
+                            statusNote={googleStatusNote || null}
                             isConnected={isGoogleTasksConnected}
                             isLoading={isLoadingGoogleConnection}
                             onConnect={connectGoogleTasks}
+                            onConnectDisabled={isGoogleIntegrationProviderAvailable === false}
                             onDisconnect={disconnectGoogleTasks}
                             settingsAction={{
                               onClick: () => handleIntegrationSettingsComingSoon("Google Workspace"),
                               disabled: !isGoogleTasksConnected,
                             }}
+                            extraActions={isGoogleTasksConnected ? (
+                              <Button variant="outline" size="sm" onClick={handleOpenGoogleLogs}>
+                                <FileText className="mr-2 h-4 w-4" />
+                                Logs
+                              </Button>
+                            ) : null}
                         />
                         <IntegrationCard 
                             icon={ToyBrick}
@@ -3273,6 +3420,40 @@ export default function SettingsPageContent() {
                               </Button>
                             ) : null}
                         />
+                        <div className="rounded-lg border border-border/50 bg-background/60 p-4">
+                          <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                            <div className="space-y-1">
+                              <p className="text-sm font-semibold flex items-center gap-2">
+                                <Webhook className="h-4 w-4 text-primary" />
+                                Workflow Builder
+                              </p>
+                              <p className="text-xs text-muted-foreground">
+                                Build outbound automation workflows for meeting events.
+                              </p>
+                              <p className="text-[11px] text-muted-foreground">
+                                Add filters, transform payloads, send test deliveries, and replay failures.
+                              </p>
+                              {!isWorkspaceFathomConnected ? (
+                                <p className="text-[11px] text-muted-foreground">
+                                  Connect Fathom to start receiving live workflow trigger events.
+                                </p>
+                              ) : null}
+                            </div>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => void handleOpenFathomSettings()}
+                              disabled={!activeWorkspaceId || isLoadingWorkflows || isLoadingFathomWebhooks}
+                            >
+                              {isLoadingWorkflows || isLoadingFathomWebhooks ? (
+                                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                              ) : (
+                                <Settings2 className="mr-2 h-4 w-4" />
+                              )}
+                              Open Workflow Builder
+                            </Button>
+                          </div>
+                        </div>
                         <div className="rounded-lg border border-border/50 bg-background/60 p-4">
                           <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
                             <div className="space-y-1">
@@ -3415,6 +3596,76 @@ export default function SettingsPageContent() {
                   Save Avatar
                 </Button>
             </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={isGoogleLogsOpen} onOpenChange={setIsGoogleLogsOpen}>
+        <DialogContent className="sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Google Workspace Logs</DialogTitle>
+            <DialogDescription>
+              Recent OAuth, token refresh, and revoke events for this workspace.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex items-center justify-between">
+            <p className="text-xs text-muted-foreground">
+              Showing {googleLogs.length} entries
+            </p>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={loadGoogleLogs}
+              disabled={isLoadingGoogleLogs}
+            >
+              {isLoadingGoogleLogs ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <RefreshCw className="mr-2 h-4 w-4" />
+              )}
+              Refresh
+            </Button>
+          </div>
+          <div className="max-h-[420px] overflow-y-auto space-y-3">
+            {isLoadingGoogleLogs && (
+              <div className="text-sm text-muted-foreground">Loading logs...</div>
+            )}
+            {!isLoadingGoogleLogs && googleLogs.length === 0 && (
+              <div className="text-sm text-muted-foreground">No logs yet.</div>
+            )}
+            {googleLogs.map((log: any) => (
+              <div
+                key={log.id || `${log.event}-${log.createdAt}`}
+                className="rounded-lg border bg-muted/30 p-3"
+              >
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Badge variant="outline" className="uppercase text-[10px]">
+                      {log.level}
+                    </Badge>
+                    <span className="text-xs font-semibold text-foreground">
+                      {log.event}
+                    </span>
+                  </div>
+                  <span className="text-xs text-muted-foreground">
+                    {log.createdAt
+                      ? new Date(log.createdAt).toLocaleString()
+                      : "Unknown time"}
+                  </span>
+                </div>
+                <p className="text-sm text-foreground mt-2">{log.message}</p>
+                {log.metadata && (
+                  <pre className="mt-2 rounded-md bg-background px-3 py-2 text-xs text-muted-foreground whitespace-pre-wrap">
+                    {JSON.stringify(log.metadata, null, 2)}
+                  </pre>
+                )}
+              </div>
+            ))}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsGoogleLogsOpen(false)}>
+              Close
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 

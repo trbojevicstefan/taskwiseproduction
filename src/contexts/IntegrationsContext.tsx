@@ -58,6 +58,29 @@ interface IntegrationsContextType {
 
 const IntegrationsContext = createContext<IntegrationsContextType | undefined>(undefined);
 
+const GOOGLE_INTEGRATION_LOCAL_CALLBACK_URL =
+  "http://localhost:9002/api/auth/callback/google-integration";
+const GOOGLE_INTEGRATION_PRODUCTION_CALLBACK_URL = "${NEXTAUTH_URL}/api/auth/callback/google-integration";
+
+const resolveGoogleIntegrationConnectErrorMessage = (code: string) => {
+  if (code === "OAuthSignin") {
+    return "Google OAuth could not start. Verify Google OAuth client settings.";
+  }
+  if (code === "OAuthCallback") {
+    return `Google OAuth callback failed. Ensure Google Cloud allows ${GOOGLE_INTEGRATION_LOCAL_CALLBACK_URL} locally and ${GOOGLE_INTEGRATION_PRODUCTION_CALLBACK_URL} in production.`;
+  }
+  if (code === "Configuration") {
+    return "Google integration is not configured. Set GOOGLE_INTEGRATION_CLIENT_ID and GOOGLE_INTEGRATION_CLIENT_SECRET.";
+  }
+  if (code === "AccessDenied") {
+    return "Google Workspace authorization was canceled or denied.";
+  }
+  if (code === "google-integration") {
+    return "Google Workspace provider is unavailable. Verify integration OAuth env vars and callback URL.";
+  }
+  return `Google Workspace connect failed (${code}).`;
+};
+
 export const IntegrationsProvider = ({ children }: { children: ReactNode }) => {
   const { toast } = useToast();
   const { user, loading, refreshUserProfile } = useAuth();
@@ -110,7 +133,46 @@ export const IntegrationsProvider = ({ children }: { children: ReactNode }) => {
       cookieParts.push("Secure");
     }
     document.cookie = cookieParts.join("; ");
-    await signIn("google-integration", { callbackUrl: "/settings?google_success=true" });
+    try {
+      const result = await signIn("google-integration", {
+        redirect: false,
+        callbackUrl: "/settings?google_success=true",
+      });
+      if (!result) {
+        throw new Error("No response from Google sign-in.");
+      }
+      if (result.error) {
+        throw new Error(resolveGoogleIntegrationConnectErrorMessage(result.error));
+      }
+      if (result.url && typeof window !== "undefined") {
+        window.location.assign(result.url);
+        return;
+      }
+      throw new Error("Google sign-in redirect URL is missing.");
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Could not start Google OAuth.";
+      console.error("Failed to connect Google:", error);
+      if (activeWorkspaceId) {
+        void fetch(`/api/workspaces/${encodeURIComponent(activeWorkspaceId)}/google/logs`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            level: "error",
+            event: "oauth.connect.failed",
+            message,
+            metadata: {
+              source: "integrations.context",
+            },
+          }),
+        });
+      }
+      toast({
+        title: "Google Connect Failed",
+        description: message,
+        variant: "destructive",
+      });
+    }
   };
 
   const disconnectGoogleTasks = async () => {
@@ -122,14 +184,46 @@ export const IntegrationsProvider = ({ children }: { children: ReactNode }) => {
       return;
     }
     try {
-      await fetch("/api/google/revoke", { method: "POST" });
+      let endpoint = "/api/google/revoke";
+      let payload: Record<string, unknown> = {};
+      if (activeWorkspaceId) {
+        endpoint = `/api/workspaces/${encodeURIComponent(activeWorkspaceId)}/google/revoke`;
+        if (
+          canManageWorkspaceIntegrations &&
+          workspaceGoogle?.connectedByUserId &&
+          workspaceGoogle.connectedByUserId !== user?.uid
+        ) {
+          payload.targetUserId = workspaceGoogle.connectedByUserId;
+        }
+      }
+
+      const response = await fetch(endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const responsePayload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(responsePayload?.error || "Could not disconnect Google.");
+      }
+      if (responsePayload?.warning) {
+        toast({
+          title: "Google Disconnect Warning",
+          description: String(responsePayload.warning),
+          variant: "destructive",
+        });
+      }
       await refreshUserProfile();
       setGoogleTokenInfo(null);
     } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Could not disconnect Google. Please try again.";
       console.error("Failed to disconnect Google:", error);
       toast({
         title: "Google Disconnect Failed",
-        description: "Could not disconnect Google. Please try again.",
+        description: message,
         variant: "destructive",
       });
     }

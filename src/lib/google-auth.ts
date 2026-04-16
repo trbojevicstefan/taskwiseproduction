@@ -1,4 +1,5 @@
 import { findUserById, updateUserById } from "@/lib/db/users";
+import { logGoogleIntegration } from "@/lib/google-logs";
 import { recordExternalApiFailure } from "@/lib/observability-metrics";
 
 const GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token";
@@ -11,6 +12,27 @@ type GoogleTokenResponse = {
   token_type?: string;
 };
 
+export type GoogleRevokeResult = {
+  revokedUserId: string;
+  remotelyRevoked: boolean;
+  warning?: string;
+};
+
+const resolveWorkspaceIdFromUser = (user: {
+  activeWorkspaceId?: string | null;
+  workspace?: { id?: string | null };
+}) => {
+  const activeWorkspaceId = user.activeWorkspaceId?.trim();
+  if (activeWorkspaceId) {
+    return activeWorkspaceId;
+  }
+  const legacyWorkspaceId = user.workspace?.id?.trim();
+  return legacyWorkspaceId || null;
+};
+
+const isAlreadyRevokedError = (value: unknown) =>
+  typeof value === "string" && value.toLowerCase().includes("invalid_token");
+
 const getEnv = (key: string) => {
   const value = process.env[key];
   if (!value) {
@@ -21,12 +43,13 @@ const getEnv = (key: string) => {
 
 export const getGoogleAccessTokenForUser = async (
   userId: string,
-  context?: { correlationId?: string | null }
+  context?: { correlationId?: string | null; workspaceId?: string | null; actorUserId?: string | null }
 ): Promise<string | null> => {
   const user = await findUserById(userId);
   if (!user || !user.googleConnected) {
     return null;
   }
+  const workspaceId = context?.workspaceId || resolveWorkspaceIdFromUser(user);
 
   const now = Date.now();
   if (user.googleAccessToken && user.googleTokenExpiry) {
@@ -66,6 +89,17 @@ export const getGoogleAccessTokenForUser = async (
       durationMs: Date.now() - refreshStartedAtMs,
       error,
     });
+    await logGoogleIntegration({
+      workspaceId,
+      userId,
+      actorUserId: context?.actorUserId || userId,
+      level: "error",
+      event: "oauth.token.refresh.failed",
+      message: "Google token refresh failed due to a network/runtime error.",
+      metadata: {
+        error: error instanceof Error ? error.message : String(error),
+      },
+    });
     throw error;
   }
 
@@ -80,6 +114,18 @@ export const getGoogleAccessTokenForUser = async (
       statusCode: response.status,
       error: payload?.error || "Failed to refresh Google access token.",
       metadata: payload,
+    });
+    await logGoogleIntegration({
+      workspaceId,
+      userId,
+      actorUserId: context?.actorUserId || userId,
+      level: "error",
+      event: "oauth.token.refresh.failed",
+      message: payload?.error || "Google token refresh failed.",
+      metadata: {
+        statusCode: response.status,
+        response: payload,
+      },
     });
     throw new Error(payload.error || "Failed to refresh Google access token.");
   }
@@ -99,15 +145,39 @@ export const getGoogleAccessTokenForUser = async (
 
 export const revokeGoogleTokensForUser = async (
   userId: string,
-  context?: { correlationId?: string | null }
-) => {
+  context?: { correlationId?: string | null; workspaceId?: string | null; actorUserId?: string | null }
+): Promise<GoogleRevokeResult> => {
   const user = await findUserById(userId);
-  if (!user) return;
+  if (!user) {
+    return {
+      revokedUserId: userId,
+      remotelyRevoked: false,
+      warning: "User not found.",
+    };
+  }
+
+  const workspaceId = context?.workspaceId || resolveWorkspaceIdFromUser(user);
+  const actorUserId = context?.actorUserId || userId;
 
   const tokenToRevoke = user.googleRefreshToken || user.googleAccessToken;
+  let remotelyRevoked = false;
+  let warning: string | undefined;
+
+  await logGoogleIntegration({
+    workspaceId,
+    userId,
+    actorUserId,
+    level: "info",
+    event: "oauth.token.revoke.attempt",
+    message: "Attempting to revoke Google integration credentials.",
+    metadata: {
+      hasRemoteToken: Boolean(tokenToRevoke),
+    },
+  });
+
   if (tokenToRevoke) {
     const revokeStartedAtMs = Date.now();
-    let response: Response;
+    let response: Response | null = null;
     try {
       response = await fetch("https://oauth2.googleapis.com/revoke", {
         method: "POST",
@@ -123,21 +193,38 @@ export const revokeGoogleTokensForUser = async (
         durationMs: Date.now() - revokeStartedAtMs,
         error,
       });
-      throw error;
+      warning = error instanceof Error ? error.message : "Remote revoke request failed.";
+      await logGoogleIntegration({
+        workspaceId,
+        userId,
+        actorUserId,
+        level: "warn",
+        event: "oauth.token.revoke.warning",
+        message: "Google remote revoke failed. Local credentials will still be cleared.",
+        metadata: {
+          error: warning,
+        },
+      });
     }
 
-    if (!response.ok) {
+    if (response && !response.ok) {
       const payload = await response.text().catch(() => "");
-      void recordExternalApiFailure({
-        provider: "google",
-        operation: "oauth.token.revoke",
-        userId,
-        correlationId: context?.correlationId,
-        durationMs: Date.now() - revokeStartedAtMs,
-        statusCode: response.status,
-        error: payload || response.statusText,
-      });
-      throw new Error(payload || "Failed to revoke Google token.");
+      if (isAlreadyRevokedError(payload)) {
+        remotelyRevoked = true;
+      } else {
+        void recordExternalApiFailure({
+          provider: "google",
+          operation: "oauth.token.revoke",
+          userId,
+          correlationId: context?.correlationId,
+          durationMs: Date.now() - revokeStartedAtMs,
+          statusCode: response.status,
+          error: payload || response.statusText,
+        });
+        warning = payload || response.statusText || "Failed to revoke Google token remotely.";
+      }
+    } else if (response?.ok) {
+      remotelyRevoked = true;
     }
   }
 
@@ -148,4 +235,26 @@ export const revokeGoogleTokensForUser = async (
     googleScopes: null,
     googleConnected: false,
   });
+
+  await logGoogleIntegration({
+    workspaceId,
+    userId,
+    actorUserId,
+    level: warning ? "warn" : "info",
+    event: warning ? "oauth.token.revoke.completed_with_warning" : "oauth.token.revoke.completed",
+    message: warning
+      ? "Google credentials were cleared locally, but remote revoke returned a warning."
+      : "Google credentials were revoked successfully.",
+    metadata: {
+      remotelyRevoked,
+      hasRemoteToken: Boolean(tokenToRevoke),
+      warning: warning || null,
+    },
+  });
+
+  return {
+    revokedUserId: userId,
+    remotelyRevoked,
+    ...(warning ? { warning } : {}),
+  };
 };
