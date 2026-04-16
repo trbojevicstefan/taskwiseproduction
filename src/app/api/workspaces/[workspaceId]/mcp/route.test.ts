@@ -324,6 +324,35 @@ describe("workspace mcp route", () => {
     expect(mockedTouchMcpApiKeyUsage).not.toHaveBeenCalled();
   });
 
+  it("continues MCP request handling when rate-limit enforcement throws", async () => {
+    mockedEnforceMcpApiKeyRateLimit.mockRejectedValueOnce(
+      new Error("rate-limit storage unavailable")
+    );
+
+    const response = await POST(
+      createJsonRpcRequest({
+        jsonrpc: "2.0",
+        id: "init-fail-open-1",
+        method: "initialize",
+        params: {},
+      }),
+      {
+        params: { workspaceId: "workspace-1" },
+      }
+    );
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload.result).toMatchObject({
+      protocolVersion: "2025-03-26",
+      serverInfo: {
+        name: "taskwise-mcp",
+      },
+    });
+    expect(response.headers.get("x-taskwise-mcp-ratelimit-limit")).toBeNull();
+    expect(mockedTouchMcpApiKeyUsage).toHaveBeenCalled();
+  });
+
   it("returns method-not-found JSON-RPC error payload for unknown methods", async () => {
     const response = await POST(
       createJsonRpcRequest({

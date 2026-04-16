@@ -379,17 +379,24 @@ export async function POST(
 
     const isWriteRequest =
       requestBody.method === "tools/call" && requiredScope === "mcp:write";
-    const rateLimitResult = await enforceMcpApiKeyRateLimit(db as any, {
-      workspaceId,
-      apiKeyId: keyDoc._id,
-      isWriteRequest,
-    });
+    let rateLimitResult: McpRateLimitResult | null = null;
+    try {
+      rateLimitResult = await enforceMcpApiKeyRateLimit(db as any, {
+        workspaceId,
+        apiKeyId: keyDoc._id,
+        isWriteRequest,
+      });
+    } catch (error) {
+      // Keep MCP available if rate-limit persistence/index setup is unavailable.
+      console.error("MCP rate-limit enforcement failed; proceeding without limit checks.", error);
+    }
+
     const responseHeaders = {
       ...buildBaseHeaders(workspaceId, keyDoc),
-      ...buildRateLimitHeaders(rateLimitResult),
+      ...(rateLimitResult ? buildRateLimitHeaders(rateLimitResult) : {}),
     };
 
-    if (!rateLimitResult.allowed) {
+    if (rateLimitResult && !rateLimitResult.allowed) {
       const blockedLimit = rateLimitResult.blocked || rateLimitResult.request;
       const blockedHeaders = {
         ...responseHeaders,

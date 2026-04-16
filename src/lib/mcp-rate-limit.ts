@@ -53,9 +53,10 @@ const WRITES_PER_MINUTE_LIMIT = parsePositiveInteger(
 
 let indexesEnsured = false;
 let ensureIndexesPromise: Promise<void> | null = null;
+let indexSetupFailed = false;
 
 const ensureMcpRateLimitIndexes = async (db: Db) => {
-  if (indexesEnsured) {
+  if (indexesEnsured || indexSetupFailed) {
     return;
   }
   if (ensureIndexesPromise) {
@@ -64,15 +65,21 @@ const ensureMcpRateLimitIndexes = async (db: Db) => {
   }
 
   ensureIndexesPromise = (async () => {
-    const collection = db.collection<McpRateLimitDoc>(MCP_RATE_LIMITS_COLLECTION);
-    await Promise.all([
-      collection.createIndex({ workspaceId: 1, apiKeyId: 1, category: 1, windowStart: 1 }),
-      collection.createIndex(
-        { expiresAt: 1 },
-        { expireAfterSeconds: 0, name: "mcp_rate_limits_expires_at_ttl" }
-      ),
-    ]);
-    indexesEnsured = true;
+    try {
+      const collection = db.collection<McpRateLimitDoc>(MCP_RATE_LIMITS_COLLECTION);
+      await Promise.all([
+        collection.createIndex({ workspaceId: 1, apiKeyId: 1, category: 1, windowStart: 1 }),
+        collection.createIndex(
+          { expiresAt: 1 },
+          { expireAfterSeconds: 0, name: "mcp_rate_limits_expires_at_ttl" }
+        ),
+      ]);
+      indexesEnsured = true;
+    } catch (error) {
+      // Do not block MCP traffic when index creation is not permitted/available.
+      indexSetupFailed = true;
+      console.error("MCP rate limit index setup failed; continuing without indexes.", error);
+    }
   })().finally(() => {
     ensureIndexesPromise = null;
   });
