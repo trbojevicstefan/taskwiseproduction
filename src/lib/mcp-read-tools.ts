@@ -366,18 +366,21 @@ export const executeMcpReadTool = async (
     case "attendees.list": {
       const args = parseArgs(peopleListArgsSchema, rawArgs);
       const workspaceMemberUserIds = await getWorkspaceMemberUserIds(db, workspaceId);
-      const filter: Record<string, unknown> = buildWorkspaceFallbackScope(
+      const workspaceScope = buildWorkspaceFallbackScope(
         workspaceId,
         workspaceMemberUserIds
       );
+      let filter: Record<string, unknown> = workspaceScope;
       if (args.query) {
         const pattern = new RegExp(escapeRegex(args.query), "i");
-        filter.$and = [
-          filter,
-          {
-            $or: [{ name: pattern }, { email: pattern }, { aliases: pattern }],
-          },
-        ];
+        filter = {
+          $and: [
+            workspaceScope,
+            {
+              $or: [{ name: pattern }, { email: pattern }, { aliases: pattern }],
+            },
+          ],
+        };
       }
       const limit = args.limit || 50;
       const attendees = await db

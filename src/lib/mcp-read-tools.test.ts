@@ -147,6 +147,52 @@ describe("mcp-read-tools", () => {
     );
   });
 
+  it("supports people.list query filter without circular matcher errors", async () => {
+    const peopleCursor = createCursor([
+      {
+        _id: "person-1",
+        workspaceId: "workspace-1",
+        name: "Alex Parker",
+        email: "alex@example.com",
+        createdAt: new Date("2026-04-15T10:00:00.000Z"),
+        lastSeenAt: new Date("2026-04-16T08:00:00.000Z"),
+      },
+    ]);
+    const find = jest.fn(() => peopleCursor);
+
+    const db = {
+      collection: jest.fn((name: string) => {
+        if (name === "people") {
+          return { find };
+        }
+        throw new Error(`Unexpected collection: ${name}`);
+      }),
+    } as any;
+
+    const result = await executeMcpReadTool(db, "workspace-1", "people.list", {
+      query: "alex",
+      limit: 5,
+    });
+
+    expect(find).toHaveBeenCalled();
+    const firstCall = (find.mock.calls as any[])[0] || [];
+    const filter = firstCall[0];
+    expect(filter).toMatchObject({
+      $and: [
+        expect.any(Object),
+        {
+          $or: [expect.any(Object), expect.any(Object), expect.any(Object)],
+        },
+      ],
+    });
+    const data = result.data as any;
+    expect(data.totalCount).toBe(1);
+    expect(data.people[0]).toMatchObject({
+      id: "person-1",
+      name: "Alex Parker",
+    });
+  });
+
   it("throws a typed error for unknown tools", async () => {
     const db = { collection: jest.fn() } as any;
     await expect(
