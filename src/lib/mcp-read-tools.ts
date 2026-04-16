@@ -155,6 +155,39 @@ const serializeDate = (value: unknown) => {
   return value ?? null;
 };
 
+const normalizeMeetingTitleKey = (value: unknown) => {
+  if (typeof value !== "string") return null;
+  const normalized = value
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return normalized || null;
+};
+
+const normalizeMeetingUrlKey = (value: unknown) => {
+  if (typeof value !== "string") return null;
+  const raw = value.trim();
+  if (!raw) return null;
+  try {
+    const parsed = new URL(raw);
+    parsed.hash = "";
+    const path = parsed.pathname.replace(/\/+$/, "");
+    const search = parsed.searchParams.toString();
+    return `${parsed.protocol}//${parsed.host}${path || "/"}${
+      search ? `?${search}` : ""
+    }`.toLowerCase();
+  } catch {
+    return raw.replace(/\/+$/, "").toLowerCase();
+  }
+};
+
+const toFiveMinuteBucket = (value: unknown) => {
+  const date = value instanceof Date ? value : value ? new Date(String(value)) : null;
+  if (!date || Number.isNaN(date.getTime())) return null;
+  return String(Math.floor(date.getTime() / (5 * 60 * 1000)));
+};
+
 const serializeMeeting = (meeting: any) => {
   const { recordingId, recordingIdHash, _id, ...rest } = meeting || {};
   return {
@@ -165,6 +198,41 @@ const serializeMeeting = (meeting: any) => {
     startTime: serializeDate(meeting?.startTime),
     endTime: serializeDate(meeting?.endTime),
   };
+};
+
+const buildMeetingListDedupeKey = (meeting: any) => {
+  const fingerprint = Array.isArray(meeting?.dedupeFingerprints)
+    ? meeting.dedupeFingerprints.find((value: any) => typeof value === "string" && value.trim())
+    : null;
+  if (fingerprint) {
+    return `fp:${fingerprint}`;
+  }
+
+  const bucket =
+    toFiveMinuteBucket(meeting?.startTime) ||
+    toFiveMinuteBucket(meeting?.endTime) ||
+    toFiveMinuteBucket(meeting?.createdAt);
+  const titleKey = normalizeMeetingTitleKey(meeting?.title);
+  const shareUrlKey = normalizeMeetingUrlKey(meeting?.shareUrl);
+  const recordingUrlKey = normalizeMeetingUrlKey(meeting?.recordingUrl);
+
+  if (shareUrlKey && bucket) return `share:${shareUrlKey}|t:${bucket}`;
+  if (recordingUrlKey && bucket) return `url:${recordingUrlKey}|t:${bucket}`;
+  if (titleKey && bucket) return `title:${titleKey}|t:${bucket}`;
+  return `id:${String(meeting?._id || meeting?.id || "")}`;
+};
+
+const dedupeMeetings = (meetings: any[], limit: number) => {
+  const deduped: any[] = [];
+  const seen = new Set<string>();
+  for (const meeting of meetings) {
+    const key = buildMeetingListDedupeKey(meeting);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    deduped.push(meeting);
+    if (deduped.length >= limit) break;
+  }
+  return deduped;
 };
 
 const serializeTask = (task: any) => ({
@@ -280,9 +348,10 @@ export const executeMcpReadTool = async (
           workspaceId,
           isHidden: { $ne: true },
         }),
-        1
+        10
       );
-      const meeting = meetings[0] ? serializeMeeting(meetings[0]) : null;
+      const deduped = dedupeMeetings(meetings, 1);
+      const meeting = deduped[0] ? serializeMeeting(deduped[0]) : null;
       return {
         toolName,
         summary: meeting
@@ -294,14 +363,16 @@ export const executeMcpReadTool = async (
     case "meetings.list": {
       const args = parseArgs(meetingsListArgsSchema, rawArgs);
       const limit = args.limit || 20;
+      const fetchLimit = Math.min(MAX_LIST_LIMIT * 5, Math.max(limit * 4, limit + 10));
       const meetings = await toArrayCursor(
         db.collection("meetings").find({
           workspaceId,
           isHidden: { $ne: true },
         }),
-        limit
+        fetchLimit
       );
-      const data = meetings.map(serializeMeeting);
+      const deduped = dedupeMeetings(meetings, limit);
+      const data = deduped.map(serializeMeeting);
       return {
         toolName,
         summary: `Returned ${data.length} meeting(s).`,

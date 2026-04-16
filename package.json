@@ -29,7 +29,9 @@
     "migrate:workspace:phase1:dry": "node scripts/migrate-multi-workspace-phase1.js",
     "migrate:workspace:phase1:apply": "node scripts/migrate-multi-workspace-phase1.js --apply",
     "migrate:fathom:legacy:dry": "node scripts/migrate-fathom-legacy-connections.js",
-    "migrate:fathom:legacy:apply": "node scripts/migrate-fathom-legacy-connections.js --apply"
+    "migrate:fathom:legacy:apply": "node scripts/migrate-fathom-legacy-connections.js --apply",
+    "meetings:fathom:dedupe:dry": "node scripts/cleanup-fathom-meeting-duplicates.js",
+    "meetings:fathom:dedupe:apply": "node scripts/cleanup-fathom-meeting-duplicates.js --apply"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",

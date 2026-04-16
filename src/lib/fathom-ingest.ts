@@ -34,6 +34,412 @@ const toDateOrNull = (value: any) => {
   return Number.isNaN(date.getTime()) ? null : date;
 };
 
+const toNumberOrNull = (value: any) => {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim()) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+};
+
+const normalizeMeetingTitleKey = (value: any) => {
+  if (typeof value !== "string") return null;
+  const normalized = value
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return normalized || null;
+};
+
+const normalizeMeetingUrlKey = (value: any) => {
+  if (typeof value !== "string") return null;
+  const raw = value.trim();
+  if (!raw) return null;
+  try {
+    const parsed = new URL(raw);
+    parsed.hash = "";
+    const path = parsed.pathname.replace(/\/+$/, "");
+    const search = parsed.searchParams.toString();
+    const normalized = `${parsed.protocol}//${parsed.host}${path || "/"}${
+      search ? `?${search}` : ""
+    }`.toLowerCase();
+    return normalized;
+  } catch {
+    return raw.replace(/\/+$/, "").toLowerCase();
+  }
+};
+
+const normalizeDurationBucket = (durationSeconds: number | null) => {
+  if (durationSeconds === null) return null;
+  const minutes = Math.max(0, Math.round(durationSeconds / 60));
+  return String(minutes);
+};
+
+const toFiveMinuteBucket = (value: Date | null) => {
+  if (!value) return null;
+  return String(Math.floor(value.getTime() / (5 * 60 * 1000)));
+};
+
+const extractMeetingTitle = (payload: any, fallbackTitle?: string | null) =>
+  pickFirst(
+    payload?.meeting_title,
+    payload?.title,
+    payload?.recording?.title,
+    payload?.recording_name,
+    fallbackTitle
+  );
+
+const extractMeetingRecordingUrl = (payload: any) =>
+  pickFirst(payload?.url, payload?.meeting_url, payload?.recording?.url);
+
+const extractMeetingShareUrl = (payload: any) =>
+  pickFirst(payload?.share_url, payload?.meeting_share_url, payload?.recording?.share_url);
+
+const extractMeetingStartTime = (payload: any) =>
+  toDateOrNull(
+    payload?.recording_start_time ||
+      payload?.start_time ||
+      payload?.started_at ||
+      payload?.recording?.start_time ||
+      payload?.scheduled_start_time
+  );
+
+const extractMeetingEndTime = (payload: any) =>
+  toDateOrNull(
+    payload?.recording_end_time ||
+      payload?.end_time ||
+      payload?.ended_at ||
+      payload?.recording?.end_time ||
+      payload?.scheduled_end_time
+  );
+
+const extractMeetingDurationSeconds = (payload: any) =>
+  toNumberOrNull(payload?.duration || payload?.duration_seconds || payload?.recording?.duration);
+
+const escapeRegex = (value: string) =>
+  value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+const normalizeAttendeeKey = (value: unknown) => {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return String(value);
+  }
+  if (typeof value !== "string") return null;
+  const raw = value.trim();
+  if (!raw) return null;
+  if (raw.includes("@")) {
+    return raw.toLowerCase();
+  }
+  const normalized = raw
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return normalized || null;
+};
+
+const collectAttendeeKeys = (values: any[]) => {
+  const keys = new Set<string>();
+  for (const value of values) {
+    if (!value) continue;
+    if (Array.isArray(value)) {
+      collectAttendeeKeys(value).forEach((key) => keys.add(key));
+      continue;
+    }
+    if (typeof value === "string" || typeof value === "number") {
+      const key = normalizeAttendeeKey(value);
+      if (key) keys.add(key);
+      continue;
+    }
+    if (typeof value === "object") {
+      const candidates = [
+        value.name,
+        value.fullName,
+        value.full_name,
+        value.displayName,
+        value.display_name,
+        value.email,
+      ];
+      candidates.forEach((candidate) => {
+        const key = normalizeAttendeeKey(candidate);
+        if (key) keys.add(key);
+      });
+    }
+  }
+  return Array.from(keys);
+};
+
+const extractMeetingAttendeeKeysFromPayload = (payload: any) => {
+  const sources = [
+    payload?.attendees,
+    payload?.participants,
+    payload?.participant_list,
+    payload?.participantList,
+    payload?.people,
+    payload?.speakers,
+    payload?.recording?.attendees,
+    payload?.recording?.participants,
+    payload?.recording?.participant_list,
+    payload?.recording?.participantList,
+    payload?.recording?.people,
+    payload?.recording?.speakers,
+  ];
+  return collectAttendeeKeys(sources);
+};
+
+const extractMeetingAttendeeKeysFromDocument = (meeting: any) => {
+  const sources = [meeting?.attendees, meeting?.people, meeting?.meetingParticipants];
+  return collectAttendeeKeys(sources);
+};
+
+const computeAttendeeOverlapRatio = (a: string[], b: string[]) => {
+  if (!a.length || !b.length) return 0;
+  const aSet = new Set(a);
+  const bSet = new Set(b);
+  let intersection = 0;
+  aSet.forEach((key) => {
+    if (bSet.has(key)) intersection += 1;
+  });
+  return intersection / Math.min(aSet.size, bSet.size);
+};
+
+const selectBestAttendeeOverlapCandidate = (candidates: any[], incomingAttendeeKeys: string[]) => {
+  let bestCandidate: any = null;
+  let bestRatio = 0;
+  for (const candidate of candidates) {
+    const candidateAttendeeKeys = extractMeetingAttendeeKeysFromDocument(candidate);
+    if (!candidateAttendeeKeys.length) continue;
+    const ratio = computeAttendeeOverlapRatio(incomingAttendeeKeys, candidateAttendeeKeys);
+    if (ratio > bestRatio) {
+      bestRatio = ratio;
+      bestCandidate = candidate;
+    }
+  }
+  return { candidate: bestCandidate, ratio: bestRatio };
+};
+
+const hasStrongFingerprint = (fingerprint: string) =>
+  fingerprint.startsWith("recording_url:") || fingerprint.startsWith("share_url:");
+
+type MeetingDedupeFingerprintInput = {
+  title?: string | null;
+  recordingUrl?: string | null;
+  shareUrl?: string | null;
+  startTime?: Date | null;
+  endTime?: Date | null;
+  durationSeconds?: number | null;
+};
+
+const buildMeetingDedupeFingerprints = ({
+  title,
+  recordingUrl,
+  shareUrl,
+  startTime,
+  endTime,
+  durationSeconds,
+}: MeetingDedupeFingerprintInput) => {
+  const keys = new Set<string>();
+  const titleKey = normalizeMeetingTitleKey(title);
+  const recordingUrlKey = normalizeMeetingUrlKey(recordingUrl);
+  const shareUrlKey = normalizeMeetingUrlKey(shareUrl);
+  const durationBucket = normalizeDurationBucket(durationSeconds ?? null);
+  const anchors = Array.from(
+    new Set([toFiveMinuteBucket(startTime || null), toFiveMinuteBucket(endTime || null)].filter(Boolean))
+  ) as string[];
+
+  anchors.forEach((anchor) => {
+    if (titleKey) {
+      keys.add(`title:${titleKey}|t:${anchor}`);
+      if (durationBucket) {
+        keys.add(`title:${titleKey}|t:${anchor}|d:${durationBucket}`);
+      }
+    }
+    if (recordingUrlKey) {
+      keys.add(`recording_url:${recordingUrlKey}|t:${anchor}`);
+    }
+    if (shareUrlKey) {
+      keys.add(`share_url:${shareUrlKey}|t:${anchor}`);
+    }
+  });
+
+  return Array.from(keys);
+};
+
+const buildMeetingScopeFilter = ({
+  userId,
+  workspaceId,
+}: {
+  userId: string;
+  workspaceId: string | null;
+}) => {
+  if (!workspaceId) {
+    return { userId };
+  }
+  return {
+    userId,
+    $or: [
+      { workspaceId },
+      { workspaceId: null },
+      { workspaceId: { $exists: false } },
+    ],
+  };
+};
+
+const CROSS_NOTETAKER_DEDUPE_WINDOW_MS = Math.max(
+  5 * 60 * 1000,
+  Number(process.env.FATHOM_CROSS_NOTETAKER_DEDUPE_WINDOW_MS || 20 * 60 * 1000)
+);
+
+const CROSS_NOTETAKER_DEDUPE_DURATION_TOLERANCE_SECONDS = Math.max(
+  0,
+  Number(process.env.FATHOM_CROSS_NOTETAKER_DEDUPE_DURATION_TOLERANCE_SECONDS || 180)
+);
+
+const CROSS_NOTETAKER_ATTENDEE_OVERLAP_MIN = Math.min(
+  1,
+  Math.max(
+    0,
+    Number(process.env.FATHOM_CROSS_NOTETAKER_ATTENDEE_OVERLAP_MIN || 0.5)
+  )
+);
+
+const findCanonicalFathomDuplicate = async ({
+  db,
+  userId,
+  workspaceId,
+  dedupeFingerprints,
+  incomingAttendeeKeys,
+  title,
+  startTime,
+  durationSeconds,
+}: {
+  db: any;
+  userId: string;
+  workspaceId: string | null;
+  dedupeFingerprints: string[];
+  incomingAttendeeKeys: string[];
+  title: string | null;
+  startTime: Date | null;
+  durationSeconds: number | null;
+}) => {
+  const meetings = db.collection("meetings");
+  const scopeFilter = buildMeetingScopeFilter({ userId, workspaceId });
+
+  if (dedupeFingerprints.length) {
+    const incomingFingerprintSet = new Set(dedupeFingerprints);
+    const fingerprintCandidates = await meetings
+      .find({
+      $and: [
+        scopeFilter,
+        { ingestSource: "fathom" },
+        { dedupeFingerprints: { $in: dedupeFingerprints } },
+      ],
+      })
+      .sort({ lastActivityAt: -1, _id: -1 })
+      .limit(12)
+      .toArray();
+    if (fingerprintCandidates.length) {
+      const strongMatches: any[] = [];
+      const weakMatches: any[] = [];
+      for (const candidate of fingerprintCandidates) {
+        const candidateFingerprints = Array.isArray(candidate?.dedupeFingerprints)
+          ? candidate.dedupeFingerprints.filter((value: any) => typeof value === "string")
+          : [];
+        const matchedFingerprints = candidateFingerprints.filter((fingerprint: string) =>
+          incomingFingerprintSet.has(fingerprint)
+        );
+        if (!matchedFingerprints.length) continue;
+        if (matchedFingerprints.some((fingerprint: string) => hasStrongFingerprint(fingerprint))) {
+          strongMatches.push(candidate);
+        } else {
+          weakMatches.push(candidate);
+        }
+      }
+
+      if (strongMatches.length > 0) {
+        if (strongMatches.length === 1) {
+          return strongMatches[0];
+        }
+        if (incomingAttendeeKeys.length) {
+          const bestStrong = selectBestAttendeeOverlapCandidate(
+            strongMatches,
+            incomingAttendeeKeys
+          );
+          if (
+            bestStrong.candidate &&
+            bestStrong.ratio >= CROSS_NOTETAKER_ATTENDEE_OVERLAP_MIN
+          ) {
+            return bestStrong.candidate;
+          }
+        }
+        return strongMatches[0];
+      }
+
+      if (weakMatches.length > 0 && incomingAttendeeKeys.length) {
+        const bestWeak = selectBestAttendeeOverlapCandidate(
+          weakMatches,
+          incomingAttendeeKeys
+        );
+        if (
+          bestWeak.candidate &&
+          bestWeak.ratio >= CROSS_NOTETAKER_ATTENDEE_OVERLAP_MIN
+        ) {
+          return bestWeak.candidate;
+        }
+      }
+    }
+  }
+
+  if (!startTime || !title) {
+    return null;
+  }
+
+  const rangeStart = new Date(startTime.getTime() - CROSS_NOTETAKER_DEDUPE_WINDOW_MS);
+  const rangeEnd = new Date(startTime.getTime() + CROSS_NOTETAKER_DEDUPE_WINDOW_MS);
+  const titleRegex = new RegExp(`^${escapeRegex(title.trim())}$`, "i");
+
+  const titleTimeMatches = await meetings
+    .find({
+    $and: [
+      scopeFilter,
+      { ingestSource: "fathom" },
+      { title: titleRegex },
+      { startTime: { $gte: rangeStart, $lte: rangeEnd } },
+      ...(durationSeconds === null
+        ? []
+        : [
+            {
+              duration: {
+                $gte: durationSeconds - CROSS_NOTETAKER_DEDUPE_DURATION_TOLERANCE_SECONDS,
+                $lte: durationSeconds + CROSS_NOTETAKER_DEDUPE_DURATION_TOLERANCE_SECONDS,
+              },
+            },
+          ]),
+    ],
+    })
+    .sort({ lastActivityAt: -1, _id: -1 })
+    .limit(12)
+    .toArray();
+
+  if (!titleTimeMatches.length || !incomingAttendeeKeys.length) {
+    return null;
+  }
+
+  const bestTitleTimeMatch = selectBestAttendeeOverlapCandidate(
+    titleTimeMatches,
+    incomingAttendeeKeys
+  );
+  if (
+    bestTitleTimeMatch.candidate &&
+    bestTitleTimeMatch.ratio >= CROSS_NOTETAKER_ATTENDEE_OVERLAP_MIN
+  ) {
+    return bestTitleTimeMatch.candidate;
+  }
+
+  return null;
+};
+
 const sanitizeLevels = (levels: any) =>
   levels
     ? {
@@ -75,6 +481,83 @@ const DUPLICATE_REANALYZE_MAX_AGE_MS = Math.max(
   0,
   Number(process.env.FATHOM_DUPLICATE_REANALYZE_MAX_AGE_MS || 1000 * 60 * 60 * 24)
 );
+
+let meetingRecordingHashIndexPromise: Promise<void> | null = null;
+
+const isDuplicateKeyError = (error: any) => {
+  if (!error) return false;
+  if (error.code === 11000) return true;
+  if (Array.isArray(error.writeErrors)) {
+    return error.writeErrors.some((entry: any) => entry?.code === 11000);
+  }
+  const message = String(error.message || "");
+  return message.includes("E11000 duplicate key error");
+};
+
+const ensureMeetingRecordingHashIndex = async (db: any) => {
+  if (meetingRecordingHashIndexPromise) {
+    await meetingRecordingHashIndexPromise;
+    return;
+  }
+
+  meetingRecordingHashIndexPromise = (async () => {
+    const meetings = db.collection("meetings");
+    if (!meetings || typeof meetings.createIndex !== "function") {
+      return;
+    }
+
+    try {
+      await meetings.createIndex(
+        { userId: 1, recordingIdHash: 1 },
+        {
+          unique: true,
+          name: "meetings_user_recording_hash_unique",
+          partialFilterExpression: { recordingIdHash: { $type: "string" } },
+        }
+      );
+    } catch (error) {
+      // Keep ingestion available even if index creation fails (e.g. existing dupes).
+      console.warn("Failed to ensure meeting recording hash unique index:", error);
+    }
+
+    try {
+      await meetings.createIndex(
+        { userId: 1, recordingIdHashes: 1 },
+        {
+          name: "meetings_user_recording_hashes_idx",
+          sparse: true,
+          partialFilterExpression: { recordingIdHashes: { $exists: true } },
+        }
+      );
+    } catch (error) {
+      console.warn("Failed to ensure meeting recording hash aliases index:", error);
+    }
+
+    try {
+      await meetings.createIndex(
+        { userId: 1, workspaceId: 1, startTime: -1, ingestSource: 1 },
+        { name: "meetings_user_workspace_start_ingest_idx" }
+      );
+    } catch (error) {
+      console.warn("Failed to ensure meeting start-time dedupe index:", error);
+    }
+
+    try {
+      await meetings.createIndex(
+        { userId: 1, dedupeFingerprints: 1 },
+        {
+          name: "meetings_user_dedupe_fingerprints_idx",
+          sparse: true,
+          partialFilterExpression: { dedupeFingerprints: { $exists: true } },
+        }
+      );
+    } catch (error) {
+      console.warn("Failed to ensure meeting dedupe fingerprint index:", error);
+    }
+  })();
+
+  await meetingRecordingHashIndexPromise;
+};
 
 const resolveSummaryText = (payload: any, summaryPayload: any) => {
   const payloadSummary =
@@ -163,48 +646,100 @@ export const ingestFathomMeeting = async ({
   accessToken: string;
 }): Promise<FathomIngestResult> => {
   const db = await getDb();
+  await ensureMeetingRecordingHashIndex(db);
   const userId = user._id.toString();
   const connection = connectionId
     ? await findFathomConnectionById(db as any, connectionId)
     : null;
   const connectionWorkspaceId = connection?.workspaceId || null;
+  const ingestWorkspaceId =
+    connectionWorkspaceId || user.activeWorkspaceId || user.workspace?.id || null;
+  const workspaceScopeFilter = buildMeetingScopeFilter({
+    userId,
+    workspaceId: ingestWorkspaceId,
+  });
+  const payload = data || {};
+  const meetingTitleFromPayload = extractMeetingTitle(payload);
+  const recordingUrlFromPayload = extractMeetingRecordingUrl(payload);
+  const shareUrlFromPayload = extractMeetingShareUrl(payload);
+  const startTimeFromPayload = extractMeetingStartTime(payload);
+  const endTimeFromPayload = extractMeetingEndTime(payload);
+  const durationSecondsFromPayload = extractMeetingDurationSeconds(payload);
+  const incomingAttendeeKeys = extractMeetingAttendeeKeysFromPayload(payload);
+  const dedupeFingerprintsFromPayload = buildMeetingDedupeFingerprints({
+    title: meetingTitleFromPayload,
+    recordingUrl: recordingUrlFromPayload,
+    shareUrl: shareUrlFromPayload,
+    startTime: startTimeFromPayload,
+    endTime: endTimeFromPayload,
+    durationSeconds: durationSecondsFromPayload,
+  });
   const recordingHashScope = getFathomRecordingHashScope({ userId, connectionId });
   const legacyRecordingHashScope = getFathomRecordingHashScope({ userId });
   const recordingIdHash = hashFathomRecordingId(recordingHashScope, recordingId);
   const legacyRecordingIdHash = connectionId
     ? hashFathomRecordingId(legacyRecordingHashScope, recordingId)
     : null;
-  const existing = await db
+  const candidateRecordingHashes = Array.from(
+    new Set([recordingIdHash, legacyRecordingIdHash].filter(Boolean))
+  ) as string[];
+  const recordingHashMatcher =
+    candidateRecordingHashes.length > 1
+      ? { recordingIdHash: { $in: candidateRecordingHashes } }
+      : { recordingIdHash: candidateRecordingHashes[0] };
+
+  let existing = await db
     .collection("meetings")
     .findOne({
       $and: [
-        { userId },
-        connectionId
-          ? {
-              $or: [
-                { connectionId },
-                { connectionId: null },
-                { connectionId: { $exists: false } },
-              ],
-            }
-          : {
-              $or: [{ connectionId: null }, { connectionId: { $exists: false } }],
-            },
+        workspaceScopeFilter,
         {
           $or: [
-            { recordingIdHash: legacyRecordingIdHash ? { $in: [recordingIdHash, legacyRecordingIdHash] } : recordingIdHash },
+            recordingHashMatcher,
+            { recordingIdHashes: { $in: candidateRecordingHashes } },
             { recordingId },
           ],
         },
       ],
     });
+  if (!existing) {
+    existing = await findCanonicalFathomDuplicate({
+      db,
+      userId,
+      workspaceId: ingestWorkspaceId,
+      dedupeFingerprints: dedupeFingerprintsFromPayload,
+      incomingAttendeeKeys,
+      title: meetingTitleFromPayload,
+      startTime: startTimeFromPayload,
+      durationSeconds: durationSecondsFromPayload,
+    });
+  }
   if (existing) {
-    const payload = data || {};
+    const existingRecordingIdHashes = Array.isArray(existing.recordingIdHashes)
+      ? existing.recordingIdHashes.filter((value: any) => typeof value === "string")
+      : [];
+    const mergedRecordingIdHashes = Array.from(
+      new Set([...existingRecordingIdHashes, ...candidateRecordingHashes])
+    );
+    const existingDedupeFingerprints = Array.isArray(existing.dedupeFingerprints)
+      ? existing.dedupeFingerprints.filter((value: any) => typeof value === "string")
+      : [];
+    const mergedDedupeFingerprints = Array.from(
+      new Set([...existingDedupeFingerprints, ...dedupeFingerprintsFromPayload])
+    );
     const update: Record<string, any> = {
       lastActivityAt: new Date(),
-      recordingIdHash,
       ingestSource: existing.ingestSource || "fathom",
     };
+    if (!existing.recordingIdHash) {
+      update.recordingIdHash = recordingIdHash;
+    }
+    if (mergedRecordingIdHashes.length) {
+      update.recordingIdHashes = mergedRecordingIdHashes;
+    }
+    if (mergedDedupeFingerprints.length) {
+      update.dedupeFingerprints = mergedDedupeFingerprints;
+    }
     if (connectionId && existing.connectionId !== connectionId) {
       update.connectionId = connectionId;
     }
@@ -252,45 +787,24 @@ export const ingestFathomMeeting = async ({
       }
     }
 
-    const recordingUrl = pickFirst(
-      payload.url,
-      payload.meeting_url,
-      payload?.recording?.url
-    );
+    const recordingUrl = recordingUrlFromPayload;
     if (recordingUrl && !existing.recordingUrl) {
       update.recordingUrl = recordingUrl;
     }
-    const shareUrl = pickFirst(
-      payload.share_url,
-      payload.meeting_share_url,
-      payload?.recording?.share_url
-    );
+    const shareUrl = shareUrlFromPayload;
     if (shareUrl && !existing.shareUrl) {
       update.shareUrl = shareUrl;
     }
 
-    const startTime = toDateOrNull(
-      payload.recording_start_time ||
-        payload.start_time ||
-        payload.started_at ||
-        payload?.recording?.start_time ||
-        payload.scheduled_start_time
-    );
+    const startTime = startTimeFromPayload;
     if (startTime && !existing.startTime) {
       update.startTime = startTime;
     }
-    const endTime = toDateOrNull(
-      payload.recording_end_time ||
-        payload.end_time ||
-        payload.ended_at ||
-        payload?.recording?.end_time ||
-        payload.scheduled_end_time
-    );
+    const endTime = endTimeFromPayload;
     if (endTime && !existing.endTime) {
       update.endTime = endTime;
     }
-    const duration =
-      payload.duration || payload.duration_seconds || payload?.recording?.duration;
+    const duration = durationSecondsFromPayload;
     if (duration && !existing.duration) {
       update.duration = duration;
     }
@@ -305,12 +819,7 @@ export const ingestFathomMeeting = async ({
       updateOps
     );
 
-    const workspaceId =
-      existing.workspaceId ||
-      connectionWorkspaceId ||
-      user.activeWorkspaceId ||
-      user.workspace?.id ||
-      null;
+    const workspaceId = existing.workspaceId || ingestWorkspaceId || null;
     const hasExistingExtractedTasks =
       Array.isArray(existing.extractedTasks) && existing.extractedTasks.length > 0;
     const hasAlreadyBeenAnalyzed =
@@ -424,10 +933,7 @@ export const ingestFathomMeeting = async ({
 
       const meetingTitle = pickFirst(
         existing.title,
-        payload.meeting_title,
-        payload.title,
-        payload?.recording?.title,
-        payload?.recording_name,
+        meetingTitleFromPayload,
         analysisResult.sessionTitle,
         "Fathom Meeting"
       );
@@ -457,6 +963,22 @@ export const ingestFathomMeeting = async ({
         meetingMetadata: analysisResult.meetingMetadata || undefined,
         state: "tasks_ready",
       };
+      const refreshedDedupeFingerprints = buildMeetingDedupeFingerprints({
+        title: meetingTitle,
+        recordingUrl: recordingUrl || existing.recordingUrl || null,
+        shareUrl: shareUrl || existing.shareUrl || null,
+        startTime: startTime || existing.startTime || null,
+        endTime: endTime || existing.endTime || null,
+        durationSeconds:
+          (typeof duration === "number" ? duration : null) ??
+          toNumberOrNull(existing.duration) ??
+          null,
+      });
+      if (refreshedDedupeFingerprints.length) {
+        meetingUpdate.dedupeFingerprints = Array.from(
+          new Set([...mergedDedupeFingerprints, ...refreshedDedupeFingerprints])
+        );
+      }
 
       // Defer updating chat sessions until after tasks are synced and board items ensured
       const chatSessionId = existing.chatSessionId
@@ -596,7 +1118,6 @@ export const ingestFathomMeeting = async ({
     return { status: "duplicate", meetingId: existing._id.toString() };
   }
 
-  const payload = data || {};
   let transcriptPayload =
     payload.transcript ||
     payload.transcript_segments ||
@@ -618,8 +1139,7 @@ export const ingestFathomMeeting = async ({
   const summaryText = resolveSummaryText(payload, summaryPayload);
 
   const detailLevel = resolveDetailLevel(user);
-  const workspaceId =
-    connectionWorkspaceId || user.activeWorkspaceId || user.workspace?.id || null;
+  const workspaceId = ingestWorkspaceId;
   const analysisResult = await analyzeMeeting({
     transcript: transcriptText,
     requestedDetailLevel: detailLevel,
@@ -717,10 +1237,7 @@ export const ingestFathomMeeting = async ({
   }
 
   const meetingTitle = pickFirst(
-    payload.meeting_title,
-    payload.title,
-    payload?.recording?.title,
-    payload?.recording_name,
+    meetingTitleFromPayload,
     analysisResult.sessionTitle,
     "Fathom Meeting"
   );
@@ -769,33 +1286,15 @@ export const ingestFathomMeeting = async ({
     speakerActivity: analysisResult.speakerActivity || [],
     meetingMetadata: analysisResult.meetingMetadata || undefined,
     recordingIdHash,
-    recordingUrl: pickFirst(
-      payload.url,
-      payload.meeting_url,
-      payload?.recording?.url
-    ),
+    recordingIdHashes: candidateRecordingHashes,
+    dedupeFingerprints: dedupeFingerprintsFromPayload,
+    recordingUrl: recordingUrlFromPayload,
     ingestSource: "fathom",
     fathomNotificationReadAt: null,
-    shareUrl: pickFirst(
-      payload.share_url,
-      payload.meeting_share_url,
-      payload?.recording?.share_url
-    ),
-    startTime: toDateOrNull(
-      payload.recording_start_time ||
-        payload.start_time ||
-        payload.started_at ||
-        payload?.recording?.start_time ||
-        payload.scheduled_start_time
-    ),
-    endTime: toDateOrNull(
-      payload.recording_end_time ||
-        payload.end_time ||
-        payload.ended_at ||
-        payload?.recording?.end_time ||
-        payload.scheduled_end_time
-    ),
-    duration: payload.duration || payload.duration_seconds || payload?.recording?.duration,
+    shareUrl: shareUrlFromPayload,
+    startTime: startTimeFromPayload,
+    endTime: endTimeFromPayload,
+    duration: durationSecondsFromPayload,
     state: "tasks_ready",
     analysisAttemptedAt: now,
     completionAuditAttemptedAt: now,
@@ -818,64 +1317,88 @@ export const ingestFathomMeeting = async ({
     originalAllTaskLevels: sanitizedTaskLevels,
     taskRevisions: [],
     folderId: null,
-    sourceMeetingId: meetingId,
+    sourceMeetingId: meetingId as string,
     allTaskLevels: sanitizedTaskLevels,
     meetingMetadata: analysisResult.meetingMetadata || undefined,
     createdAt: now,
     lastActivityAt: now,
   };
 
+  const meetingsCollection = db.collection("meetings");
+  let insertedMeeting = false;
+  let canonicalMeetingId: string = meetingId;
+
   // Ensure idempotent insertion: upsert by userId + recordingIdHash to avoid duplicates
   if (meeting.recordingIdHash) {
+    const recordingHashFilter =
+      candidateRecordingHashes.length > 1
+        ? { recordingIdHash: { $in: candidateRecordingHashes } }
+        : { recordingIdHash: candidateRecordingHashes[0] };
+    const filter = {
+      $and: [
+        workspaceScopeFilter,
+        {
+          $or: [
+            recordingHashFilter,
+            { recordingIdHashes: { $in: candidateRecordingHashes } },
+            { recordingId },
+          ],
+        },
+      ],
+    };
+    const resolveCanonicalMeetingId = async () => {
+      const existingMeeting = await meetingsCollection.findOne(filter, {
+        projection: { _id: 1 },
+      });
+      return existingMeeting?._id ? String(existingMeeting._id) : null;
+    };
+
     try {
-      const filter = {
-        $and: [
-          { userId },
-          connectionId
-            ? {
-                $or: [
-                  { connectionId },
-                  { connectionId: null },
-                  { connectionId: { $exists: false } },
-                ],
-              }
-            : {
-                $or: [{ connectionId: null }, { connectionId: { $exists: false } }],
-              },
-          legacyRecordingIdHash
-            ? {
-                recordingIdHash: {
-                  $in: [meeting.recordingIdHash, legacyRecordingIdHash],
-                },
-              }
-            : { recordingIdHash: meeting.recordingIdHash },
-        ],
-      };
       const { _id: insertId } = meeting;
       const setFields: Record<string, any> = { ...meeting };
       delete setFields._id;
       // Avoid conflicting updates when using $setOnInsert for createdAt
       delete setFields.createdAt;
-      await db.collection("meetings").updateOne(
+      const upsertResult = await meetingsCollection.updateOne(
         filter,
         { $set: setFields, $setOnInsert: { createdAt: meeting.createdAt, _id: insertId } },
         { upsert: true }
       );
+
+      if (upsertResult.upsertedId) {
+        insertedMeeting = true;
+        canonicalMeetingId = String(upsertResult.upsertedId);
+      } else {
+        canonicalMeetingId = (await resolveCanonicalMeetingId()) || canonicalMeetingId;
+      }
     } catch (error) {
-      // Fallback to a plain insert if something unexpected happens
-      console.error("Meeting upsert failed, falling back to insert:", error);
-      await db.collection("meetings").insertOne(meeting);
+      if (isDuplicateKeyError(error)) {
+        canonicalMeetingId = (await resolveCanonicalMeetingId()) || canonicalMeetingId;
+      } else {
+        // Fallback to a plain insert if something unexpected happens
+        console.error("Meeting upsert failed, falling back to insert:", error);
+        await meetingsCollection.insertOne(meeting);
+        insertedMeeting = true;
+      }
     }
   } else {
-    await db.collection("meetings").insertOne(meeting);
+    await meetingsCollection.insertOne(meeting);
+    insertedMeeting = true;
   }
+
+  if (!insertedMeeting) {
+    return { status: "duplicate", meetingId: canonicalMeetingId };
+  }
+
+  planningSession.sourceMeetingId = canonicalMeetingId;
+
   await db.collection("planningSessions").insertOne(planningSession);
   await runMeetingIngestionCommand(db, {
     mode: "flagged-event",
     eventType: "meeting.ingested",
     userId,
     payload: {
-      meetingId,
+      meetingId: canonicalMeetingId,
       workspaceId,
       title: meetingTitle,
       attendees: uniquePeople,
@@ -890,5 +1413,5 @@ export const ingestFathomMeeting = async ({
     tasks: finalizedTasks,
   });
 
-  return { status: "created", meetingId };
+  return { status: "created", meetingId: canonicalMeetingId };
 };

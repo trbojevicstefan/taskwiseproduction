@@ -90,6 +90,57 @@ describe("mcp-read-tools", () => {
     expect(result.data.meeting).not.toHaveProperty("recordingId");
   });
 
+  it("dedupes duplicate meeting rows in meetings.list", async () => {
+    const meetingsCursor = createCursor([
+      {
+        _id: "meeting-1",
+        workspaceId: "workspace-1",
+        title: "Roadmap Sync",
+        startTime: new Date("2026-04-16T10:00:00.000Z"),
+        createdAt: new Date("2026-04-16T10:00:00.000Z"),
+        lastActivityAt: new Date("2026-04-16T10:40:00.000Z"),
+      },
+      {
+        _id: "meeting-2",
+        workspaceId: "workspace-1",
+        title: "Roadmap Sync",
+        startTime: new Date("2026-04-16T10:01:00.000Z"),
+        createdAt: new Date("2026-04-16T10:01:00.000Z"),
+        lastActivityAt: new Date("2026-04-16T10:39:00.000Z"),
+      },
+      {
+        _id: "meeting-3",
+        workspaceId: "workspace-1",
+        title: "Hiring Sync",
+        startTime: new Date("2026-04-16T12:00:00.000Z"),
+        createdAt: new Date("2026-04-16T12:00:00.000Z"),
+        lastActivityAt: new Date("2026-04-16T12:20:00.000Z"),
+      },
+    ]);
+
+    const db = {
+      collection: jest.fn((name: string) => {
+        if (name === "meetings") {
+          return {
+            find: jest.fn(() => meetingsCursor),
+          };
+        }
+        throw new Error(`Unexpected collection: ${name}`);
+      }),
+    } as any;
+
+    const result = await executeMcpReadTool(db, "workspace-1", "meetings.list", {
+      limit: 2,
+    });
+
+    const data = result.data as any;
+    expect(data.totalCount).toBe(2);
+    expect(data.meetings.map((meeting: any) => meeting.id)).toEqual([
+      "meeting-1",
+      "meeting-3",
+    ]);
+  });
+
   it("returns person details with assigned action items", async () => {
     const tasksCursor = createCursor([
       {
