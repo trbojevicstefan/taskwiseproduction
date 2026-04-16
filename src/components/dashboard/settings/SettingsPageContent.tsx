@@ -7,10 +7,11 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter }
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
 import { Button } from '@/components/ui/button';
 import { useAuth } from '@/contexts/AuthContext';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import { Loader2, Power, PowerOff, RefreshCw, Copy, Check, Save, Video, Users, Building, Send, Image as ImageIcon, Link as LinkIcon, Settings as SettingsIcon, Settings2, ZoomIn, Bot, Slack, FileText, MessageSquare, User, Info as InfoIcon, ToyBrick, Webhook, ClipboardCheck, Trash2, Download } from 'lucide-react';
+import { Loader2, Power, PowerOff, RefreshCw, Copy, Check, Save, Video, Users, Building, Send, Image as ImageIcon, Link as LinkIcon, Settings as SettingsIcon, Settings2, ZoomIn, Bot, Slack, FileText, MessageSquare, User, Info as InfoIcon, ToyBrick, Webhook, ClipboardCheck, Trash2, Download, Key } from 'lucide-react';
 import { useIntegrations } from '@/contexts/IntegrationsContext';
 import { useToast } from '@/hooks/use-toast';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogClose } from '@/components/ui/dialog';
@@ -57,6 +58,260 @@ type FathomConnectionSummary = {
     webhookUrl?: string | null;
     managedWebhooks?: Array<Record<string, any>> | null;
   };
+};
+
+type WorkflowTrigger = "meeting.ingested" | "meeting.updated";
+type WorkflowFilterOperator =
+  | "equals"
+  | "not_equals"
+  | "contains"
+  | "not_contains"
+  | "in"
+  | "not_in"
+  | "exists"
+  | "not_exists"
+  | "greater_than"
+  | "greater_than_or_equal"
+  | "less_than"
+  | "less_than_or_equal"
+  | "contains_any"
+  | "contains_all";
+
+type WorkflowSummary = {
+  id: string;
+  name: string;
+  description?: string | null;
+  enabled: boolean;
+  trigger: WorkflowTrigger;
+  version: number;
+  updatedAt: string | null;
+  canManage?: boolean;
+  autoDisabledAt?: string | null;
+  autoDisabledReason?: string | null;
+  autoDisabledFailureCount?: number | null;
+};
+
+type WorkflowDeliverySummary = {
+  id: string;
+  status: "queued" | "sending" | "sent" | "failed" | "disabled";
+  eventType: string;
+  attemptCount: number;
+  maxAttempts: number;
+  failedAt?: string | null;
+  disabledAt?: string | null;
+  updatedAt: string | null;
+  lastError?: {
+    message?: string;
+  } | null;
+  latestResponse?: {
+    statusCode?: number | null;
+  } | null;
+};
+
+type WorkflowDetail = WorkflowSummary & {
+  filters: Array<{
+    field: string;
+    operator: WorkflowFilterOperator;
+    value?: string | number | boolean | null | Array<string | number | boolean>;
+    caseSensitive?: boolean;
+  }>;
+  fieldSelection: {
+    mode: "all" | "subset";
+    fields: string[];
+  };
+  transform: {
+    runtime: "quickjs";
+    script: string | null;
+    timeoutMs: number;
+  };
+  destination: {
+    type: "webhook";
+    url: string;
+    signingSecret?: string | null;
+    headers?: Record<string, string> | null;
+  };
+};
+
+type WorkflowPlaygroundMeetingSummary = {
+  id: string;
+  title: string;
+  summary?: string | null;
+  lastActivityAt?: string | null;
+  matched: boolean;
+};
+
+type WorkflowPlaygroundPreviewResult = {
+  consideredMeetingCount: number;
+  matchedMeetingCount: number;
+  meetings: WorkflowPlaygroundMeetingSummary[];
+  selectedMeeting: WorkflowPlaygroundMeetingSummary | null;
+  selectedPayload: unknown;
+  selectedPayloadBytes: number | null;
+  selectedPayloadTruncated: boolean;
+  selectedPayloadError?: string | null;
+  transformOutput: unknown;
+  transformOutputBytes: number | null;
+  transformOutputTruncated: boolean;
+  transformOutputError?: {
+    message?: string;
+  } | null;
+};
+
+type McpApiKeySummary = {
+  id: string;
+  workspaceId: string;
+  name: string;
+  description?: string | null;
+  keyPrefix: string;
+  scopes: string[];
+  status: "active" | "revoked";
+  expiresAt?: string | null;
+  lastUsedAt?: string | null;
+  createdByUserId: string;
+  revokedByUserId?: string | null;
+  revokedAt?: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+type McpAuditLogSummary = {
+  id: string;
+  workspaceId: string;
+  actorType: "api_key" | "user";
+  actorUserId?: string | null;
+  apiKeyId?: string | null;
+  apiKeyName?: string | null;
+  action: string;
+  resourceType?: string | null;
+  resourceId?: string | null;
+  status: "success" | "error";
+  message: string;
+  metadata?: Record<string, unknown> | null;
+  createdAt: string;
+};
+
+const formatWorkflowTriggerLabel = (trigger: WorkflowTrigger) =>
+  trigger === "meeting.updated" ? "Meeting Updated" : "Meeting Ingested";
+
+const formatDateTimeValue = (value: string | null | undefined, emptyLabel = "Never") => {
+  if (!value) {
+    return emptyLabel;
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return "Unknown";
+  }
+  return date.toLocaleString();
+};
+
+const WORKFLOW_FILTER_OPERATOR_OPTIONS: Array<{
+  value: WorkflowFilterOperator;
+  label: string;
+}> = [
+  { value: "equals", label: "Equals" },
+  { value: "not_equals", label: "Not Equals" },
+  { value: "contains", label: "Contains" },
+  { value: "not_contains", label: "Not Contains" },
+  { value: "in", label: "In List" },
+  { value: "not_in", label: "Not In List" },
+  { value: "exists", label: "Exists" },
+  { value: "not_exists", label: "Does Not Exist" },
+  { value: "greater_than", label: "Greater Than" },
+  { value: "greater_than_or_equal", label: "Greater Than Or Equal" },
+  { value: "less_than", label: "Less Than" },
+  { value: "less_than_or_equal", label: "Less Than Or Equal" },
+  { value: "contains_any", label: "Contains Any" },
+  { value: "contains_all", label: "Contains All" },
+];
+
+const WORKFLOW_FILTER_OPERATORS_WITHOUT_VALUE = new Set<WorkflowFilterOperator>([
+  "exists",
+  "not_exists",
+]);
+
+const WORKFLOW_FILTER_OPERATORS_WITH_ARRAY_VALUE = new Set<WorkflowFilterOperator>([
+  "in",
+  "not_in",
+  "contains_any",
+  "contains_all",
+]);
+
+const createDraftId = () =>
+  typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+    ? crypto.randomUUID()
+    : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+
+type WorkflowFilterDraft = {
+  id: string;
+  field: string;
+  operator: WorkflowFilterOperator;
+  value: string;
+  caseSensitive: boolean;
+};
+
+type WorkflowFormState = {
+  name: string;
+  description: string;
+  enabled: boolean;
+  trigger: WorkflowTrigger;
+  destinationUrl: string;
+  destinationSigningSecret: string;
+  destinationHeadersJson: string;
+  fieldSelectionMode: "all" | "subset";
+  fieldSelectionFields: string;
+  transformScript: string;
+  transformTimeoutMs: number;
+  filters: WorkflowFilterDraft[];
+};
+
+const createEmptyWorkflowFilter = (): WorkflowFilterDraft => ({
+  id: createDraftId(),
+  field: "",
+  operator: "contains",
+  value: "",
+  caseSensitive: false,
+});
+
+const createEmptyWorkflowFormState = (): WorkflowFormState => ({
+  name: "",
+  description: "",
+  enabled: true,
+  trigger: "meeting.ingested",
+  destinationUrl: "",
+  destinationSigningSecret: "",
+  destinationHeadersJson: "{}",
+  fieldSelectionMode: "all",
+  fieldSelectionFields: "",
+  transformScript: "",
+  transformTimeoutMs: 1000,
+  filters: [],
+});
+
+const parseScalarWorkflowValue = (input: string): string | number | boolean | null => {
+  const value = input.trim();
+  if (value === "true") return true;
+  if (value === "false") return false;
+  if (value === "null") return null;
+  if (/^-?\d+(\.\d+)?$/.test(value)) {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) {
+      return parsed;
+    }
+  }
+  return value;
+};
+
+const serializeWorkflowFilterValue = (value: unknown): string => {
+  if (value === undefined) return "";
+  if (typeof value === "string") return value;
+  if (value === null) return "null";
+  if (typeof value === "number" || typeof value === "boolean") {
+    return String(value);
+  }
+  if (Array.isArray(value)) {
+    return JSON.stringify(value);
+  }
+  return "";
 };
 
 const resolveWorkspaceFathomConnection = (
@@ -336,6 +591,7 @@ export default function SettingsPageContent() {
   }>>([]);
   const [isLoadingFathomLogs, setIsLoadingFathomLogs] = useState(false);
   const [isFathomSettingsOpen, setIsFathomSettingsOpen] = useState(false);
+  const [isMcpSettingsOpen, setIsMcpSettingsOpen] = useState(false);
   const [fathomConnections, setFathomConnections] = useState<FathomConnectionSummary[]>([]);
   const [isLoadingFathomConnections, setIsLoadingFathomConnections] = useState(false);
   const [fathomWebhooks, setFathomWebhooks] = useState<any[]>([]);
@@ -343,6 +599,51 @@ export default function SettingsPageContent() {
   const [isLoadingFathomWebhooks, setIsLoadingFathomWebhooks] = useState(false);
   const [isDeletingFathomWebhooks, setIsDeletingFathomWebhooks] = useState(false);
   const [pendingFathomConnectionId, setPendingFathomConnectionId] = useState<string | null>(null);
+  const [workflows, setWorkflows] = useState<WorkflowSummary[]>([]);
+  const [isLoadingWorkflows, setIsLoadingWorkflows] = useState(false);
+  const [pendingWorkflowId, setPendingWorkflowId] = useState<string | null>(null);
+  const [expandedWorkflowId, setExpandedWorkflowId] = useState<string | null>(null);
+  const [workflowFailuresById, setWorkflowFailuresById] = useState<
+    Record<string, WorkflowDeliverySummary[]>
+  >({});
+  const [loadingWorkflowFailuresId, setLoadingWorkflowFailuresId] = useState<string | null>(null);
+  const [pendingReplayDeliveryId, setPendingReplayDeliveryId] = useState<string | null>(null);
+  const [isWorkflowEditorOpen, setIsWorkflowEditorOpen] = useState(false);
+  const [workflowEditorMode, setWorkflowEditorMode] = useState<"create" | "edit">("create");
+  const [editingWorkflowId, setEditingWorkflowId] = useState<string | null>(null);
+  const [isLoadingWorkflowEditor, setIsLoadingWorkflowEditor] = useState(false);
+  const [isSavingWorkflowEditor, setIsSavingWorkflowEditor] = useState(false);
+  const [workflowForm, setWorkflowForm] = useState<WorkflowFormState>(() =>
+    createEmptyWorkflowFormState()
+  );
+  const [isRunningWorkflowPlayground, setIsRunningWorkflowPlayground] = useState(false);
+  const [workflowPlaygroundPreview, setWorkflowPlaygroundPreview] =
+    useState<WorkflowPlaygroundPreviewResult | null>(null);
+  const [workflowPlaygroundMeetingId, setWorkflowPlaygroundMeetingId] =
+    useState<string>("");
+  const [isSendingWorkflowPlaygroundTest, setIsSendingWorkflowPlaygroundTest] =
+    useState(false);
+  const [workflowPlaygroundTestResult, setWorkflowPlaygroundTestResult] =
+    useState<{
+      responseOk: boolean;
+      responseStatusCode: number | null;
+      deliveryId: string | null;
+      deliveryStatus: string | null;
+      message: string;
+    } | null>(null);
+  const [mcpApiKeys, setMcpApiKeys] = useState<McpApiKeySummary[]>([]);
+  const [isLoadingMcpApiKeys, setIsLoadingMcpApiKeys] = useState(false);
+  const [pendingMcpApiKeyId, setPendingMcpApiKeyId] = useState<string | null>(null);
+  const [mcpKeyName, setMcpKeyName] = useState("Default MCP Key");
+  const [mcpKeyDescription, setMcpKeyDescription] = useState("");
+  const [mcpKeyAllowRead, setMcpKeyAllowRead] = useState(true);
+  const [mcpKeyAllowWrite, setMcpKeyAllowWrite] = useState(false);
+  const [isCreatingMcpApiKey, setIsCreatingMcpApiKey] = useState(false);
+  const [newMcpApiKeySecret, setNewMcpApiKeySecret] = useState<string | null>(null);
+  const [hasCopiedMcpSecret, setHasCopiedMcpSecret] = useState(false);
+  const [hasCopiedMcpEndpoint, setHasCopiedMcpEndpoint] = useState(false);
+  const [mcpAuditLogs, setMcpAuditLogs] = useState<McpAuditLogSummary[]>([]);
+  const [isLoadingMcpAuditLogs, setIsLoadingMcpAuditLogs] = useState(false);
   const hasHandledOauthRedirect = useRef(false);
   const activeFathomConnection = useMemo(() => {
     return resolveWorkspaceFathomConnection(
@@ -350,6 +651,50 @@ export default function SettingsPageContent() {
       workspaceFathom?.activeConnectionId || null
     );
   }, [fathomConnections, workspaceFathom?.activeConnectionId]);
+  const mcpEndpointUrl = useMemo(() => {
+    if (!activeWorkspaceId) return "";
+    if (typeof window === "undefined") return "";
+    return `${window.location.origin}/api/workspaces/${encodeURIComponent(
+      activeWorkspaceId
+    )}/mcp`;
+  }, [activeWorkspaceId]);
+  const canManageWorkflow = (workflow: WorkflowSummary) =>
+    workflow.canManage ?? canManageWorkspaceIntegrations;
+  const workflowFormFromDetail = useCallback((workflow: WorkflowDetail): WorkflowFormState => {
+    return {
+      name: workflow.name || "",
+      description: workflow.description || "",
+      enabled: Boolean(workflow.enabled),
+      trigger: workflow.trigger,
+      destinationUrl: workflow.destination?.url || "",
+      destinationSigningSecret: workflow.destination?.signingSecret || "",
+      destinationHeadersJson: JSON.stringify(workflow.destination?.headers || {}, null, 2),
+      fieldSelectionMode:
+        workflow.fieldSelection?.mode === "subset" ? "subset" : "all",
+      fieldSelectionFields:
+        workflow.fieldSelection?.fields?.join("\n") || "",
+      transformScript: workflow.transform?.script || "",
+      transformTimeoutMs:
+        typeof workflow.transform?.timeoutMs === "number"
+          ? workflow.transform.timeoutMs
+          : 1000,
+      filters: Array.isArray(workflow.filters)
+        ? workflow.filters.map((filter) => ({
+            id: createDraftId(),
+            field: String(filter?.field || ""),
+            operator:
+              filter?.operator &&
+              WORKFLOW_FILTER_OPERATOR_OPTIONS.some(
+                (candidate) => candidate.value === filter.operator
+              )
+                ? filter.operator
+                : "contains",
+            value: serializeWorkflowFilterValue(filter?.value),
+            caseSensitive: Boolean(filter?.caseSensitive),
+          }))
+        : [],
+    };
+  }, []);
 
   useEffect(() => {
     // This function will run when the component mounts and when searchParams change.
@@ -903,6 +1248,32 @@ export default function SettingsPageContent() {
       }
   };
 
+  const copyTextToClipboard = async (
+    value: string,
+    input: {
+      successTitle: string;
+      successDescription: string;
+      fallbackDescription: string;
+      onSuccess?: () => void;
+    }
+  ) => {
+    try {
+      await navigator.clipboard.writeText(value);
+      if (input.onSuccess) input.onSuccess();
+      toast({
+        title: input.successTitle,
+        description: input.successDescription,
+      });
+    } catch (error) {
+      console.error("Clipboard copy failed:", error);
+      toast({
+        title: "Copy failed",
+        description: input.fallbackDescription,
+        variant: "destructive",
+      });
+    }
+  };
+
   const loadFathomLogs = async () => {
     setIsLoadingFathomLogs(true);
     try {
@@ -1018,19 +1389,931 @@ export default function SettingsPageContent() {
     }
   }, [activeWorkspaceId, loadFathomConnections, toast, workspaceFathom?.activeConnectionId]);
 
+  const loadWorkflows = useCallback(
+    async (showErrorToast = true): Promise<WorkflowSummary[]> => {
+      if (!activeWorkspaceId) {
+        setWorkflows([]);
+        setWorkflowFailuresById({});
+        setExpandedWorkflowId(null);
+        return [];
+      }
+      setIsLoadingWorkflows(true);
+      try {
+        const response = await fetch(
+          `/api/workspaces/${encodeURIComponent(activeWorkspaceId)}/automation/workflows`,
+          { cache: "no-store" }
+        );
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          throw new Error(payload?.error || "Failed to load workflows.");
+        }
+        const nextWorkflows = Array.isArray(payload?.workflows)
+          ? (payload.workflows as WorkflowSummary[])
+          : [];
+        setWorkflows(nextWorkflows);
+        setWorkflowFailuresById((previous) => {
+          const next: Record<string, WorkflowDeliverySummary[]> = {};
+          nextWorkflows.forEach((workflow) => {
+            if (previous[workflow.id]) {
+              next[workflow.id] = previous[workflow.id];
+            }
+          });
+          return next;
+        });
+        setExpandedWorkflowId((current) =>
+          current && !nextWorkflows.some((workflow) => workflow.id === current) ? null : current
+        );
+        return nextWorkflows;
+      } catch (error) {
+        console.error("Failed to load automation workflows:", error);
+        if (showErrorToast) {
+          toast({
+            title: "Could not load workflows",
+            description: error instanceof Error ? error.message : "Please try again.",
+            variant: "destructive",
+          });
+        }
+        return [];
+      } finally {
+        setIsLoadingWorkflows(false);
+      }
+    },
+    [activeWorkspaceId, toast]
+  );
+
+  const loadMcpApiKeys = useCallback(
+    async (showErrorToast = true): Promise<McpApiKeySummary[]> => {
+      if (!activeWorkspaceId) {
+        setMcpApiKeys([]);
+        return [];
+      }
+
+      setIsLoadingMcpApiKeys(true);
+      try {
+        const response = await fetch(
+          `/api/workspaces/${encodeURIComponent(activeWorkspaceId)}/mcp/keys`,
+          {
+            cache: "no-store",
+          }
+        );
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          throw new Error(payload?.error || "Failed to load MCP API keys.");
+        }
+        const keys = Array.isArray(payload?.keys) ? (payload.keys as McpApiKeySummary[]) : [];
+        setMcpApiKeys(keys);
+        return keys;
+      } catch (error) {
+        console.error("Failed to load MCP API keys:", error);
+        if (showErrorToast) {
+          toast({
+            title: "Could not load MCP keys",
+            description: error instanceof Error ? error.message : "Please try again.",
+            variant: "destructive",
+          });
+        }
+        setMcpApiKeys([]);
+        return [];
+      } finally {
+        setIsLoadingMcpApiKeys(false);
+      }
+    },
+    [activeWorkspaceId, toast]
+  );
+
+  const loadMcpAuditLogs = useCallback(
+    async (showErrorToast = true): Promise<McpAuditLogSummary[]> => {
+      if (!activeWorkspaceId) {
+        setMcpAuditLogs([]);
+        return [];
+      }
+
+      setIsLoadingMcpAuditLogs(true);
+      try {
+        const response = await fetch(
+          `/api/workspaces/${encodeURIComponent(activeWorkspaceId)}/mcp/audit-logs?limit=20`,
+          {
+            cache: "no-store",
+          }
+        );
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          throw new Error(payload?.error || "Failed to load MCP audit logs.");
+        }
+        const logs = Array.isArray(payload?.logs) ? (payload.logs as McpAuditLogSummary[]) : [];
+        setMcpAuditLogs(logs);
+        return logs;
+      } catch (error) {
+        console.error("Failed to load MCP audit logs:", error);
+        if (showErrorToast) {
+          toast({
+            title: "Could not load MCP logs",
+            description: error instanceof Error ? error.message : "Please try again.",
+            variant: "destructive",
+          });
+        }
+        setMcpAuditLogs([]);
+        return [];
+      } finally {
+        setIsLoadingMcpAuditLogs(false);
+      }
+    },
+    [activeWorkspaceId, toast]
+  );
+
+  const loadWorkflowFailures = useCallback(
+    async (
+      workflowId: string,
+      showErrorToast = true
+    ): Promise<WorkflowDeliverySummary[]> => {
+      if (!activeWorkspaceId) {
+        return [];
+      }
+      setLoadingWorkflowFailuresId(workflowId);
+      try {
+        const response = await fetch(
+          `/api/workspaces/${encodeURIComponent(
+            activeWorkspaceId
+          )}/automation/workflows/${encodeURIComponent(
+            workflowId
+          )}/deliveries?status=failed&limit=10`,
+          { cache: "no-store" }
+        );
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          throw new Error(payload?.error || "Failed to load failed deliveries.");
+        }
+        const deliveries = Array.isArray(payload?.deliveries)
+          ? (payload.deliveries as WorkflowDeliverySummary[])
+          : [];
+        setWorkflowFailuresById((current) => ({
+          ...current,
+          [workflowId]: deliveries,
+        }));
+        return deliveries;
+      } catch (error) {
+        console.error("Failed to load workflow failures:", error);
+        if (showErrorToast) {
+          toast({
+            title: "Could not load failed deliveries",
+            description: error instanceof Error ? error.message : "Please try again.",
+            variant: "destructive",
+          });
+        }
+        return [];
+      } finally {
+        setLoadingWorkflowFailuresId((current) => (current === workflowId ? null : current));
+      }
+    },
+    [activeWorkspaceId, toast]
+  );
+
+  const handleOpenMcpSettings = async () => {
+    setIsMcpSettingsOpen(true);
+    setNewMcpApiKeySecret(null);
+    await Promise.all([loadMcpApiKeys(), loadMcpAuditLogs()]);
+  };
+
+  const handleCreateMcpApiKey = async () => {
+    if (!activeWorkspaceId) {
+      return;
+    }
+    if (!canManageWorkspaceIntegrations) {
+      toast({
+        title: "Permission required",
+        description: "Only workspace integration admins can create MCP keys.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const name = mcpKeyName.trim();
+    if (!name) {
+      toast({
+        title: "Missing key name",
+        description: "Enter a name so your team can identify this key later.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const scopes: string[] = [];
+    if (mcpKeyAllowRead) scopes.push("mcp:read");
+    if (mcpKeyAllowWrite) scopes.push("mcp:write");
+    if (!scopes.length) {
+      toast({
+        title: "Select at least one scope",
+        description: "Enable read and/or write access for this MCP key.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setIsCreatingMcpApiKey(true);
+    try {
+      const response = await fetch(
+        `/api/workspaces/${encodeURIComponent(activeWorkspaceId)}/mcp/keys`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            name,
+            description: mcpKeyDescription.trim() || null,
+            scopes,
+          }),
+        }
+      );
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(payload?.error || "Failed to create MCP key.");
+      }
+
+      const apiKey = typeof payload?.apiKey === "string" ? payload.apiKey : "";
+      if (!apiKey) {
+        throw new Error("Key was created, but secret token was not returned.");
+      }
+
+      setNewMcpApiKeySecret(apiKey);
+      setHasCopiedMcpSecret(false);
+      setMcpKeyName("Default MCP Key");
+      setMcpKeyDescription("");
+      setMcpKeyAllowRead(true);
+      setMcpKeyAllowWrite(false);
+
+      await Promise.all([loadMcpApiKeys(false), loadMcpAuditLogs(false)]);
+      toast({
+        title: "MCP key created",
+        description: "Copy the secret now. You won't be able to view it again.",
+      });
+    } catch (error) {
+      console.error("Failed to create MCP key:", error);
+      toast({
+        title: "Could not create key",
+        description: error instanceof Error ? error.message : "Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsCreatingMcpApiKey(false);
+    }
+  };
+
+  const handleRevokeMcpApiKey = async (key: McpApiKeySummary) => {
+    if (!activeWorkspaceId) return;
+    if (!canManageWorkspaceIntegrations) {
+      toast({
+        title: "Permission required",
+        description: "Only workspace integration admins can revoke MCP keys.",
+        variant: "destructive",
+      });
+      return;
+    }
+    if (key.status === "revoked") return;
+
+    const confirmed = window.confirm(`Revoke MCP key "${key.name}"?`);
+    if (!confirmed) return;
+
+    setPendingMcpApiKeyId(key.id);
+    try {
+      const response = await fetch(
+        `/api/workspaces/${encodeURIComponent(activeWorkspaceId)}/mcp/keys/${encodeURIComponent(
+          key.id
+        )}`,
+        { method: "DELETE" }
+      );
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(payload?.error || "Failed to revoke MCP key.");
+      }
+      await Promise.all([loadMcpApiKeys(false), loadMcpAuditLogs(false)]);
+      toast({
+        title: "MCP key revoked",
+        description: `${key.name} can no longer access the MCP endpoint.`,
+      });
+    } catch (error) {
+      console.error("Failed to revoke MCP key:", error);
+      toast({
+        title: "Could not revoke key",
+        description: error instanceof Error ? error.message : "Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setPendingMcpApiKeyId(null);
+    }
+  };
+
+  const handleCopyMcpEndpoint = async () => {
+    if (!mcpEndpointUrl) return;
+    await copyTextToClipboard(mcpEndpointUrl, {
+      successTitle: "Endpoint copied",
+      successDescription: "MCP endpoint URL copied to clipboard.",
+      fallbackDescription: "Copy the endpoint URL manually.",
+      onSuccess: () => {
+        setHasCopiedMcpEndpoint(true);
+        setTimeout(() => setHasCopiedMcpEndpoint(false), 2500);
+      },
+    });
+  };
+
+  const handleCopyMcpSecret = async () => {
+    if (!newMcpApiKeySecret) return;
+    await copyTextToClipboard(newMcpApiKeySecret, {
+      successTitle: "Secret copied",
+      successDescription: "MCP key secret copied to clipboard.",
+      fallbackDescription: "Copy the key secret manually.",
+      onSuccess: () => {
+        setHasCopiedMcpSecret(true);
+        setTimeout(() => setHasCopiedMcpSecret(false), 2500);
+      },
+    });
+  };
+
   useEffect(() => {
     if (!isWorkspaceFathomConnected || !activeWorkspaceId) {
       setFathomConnections([]);
       setFathomWebhooks([]);
       setFathomWebhookUrl("");
+      setWorkflows([]);
+      setWorkflowFailuresById({});
+      setExpandedWorkflowId(null);
       return;
     }
     void loadFathomConnections(false);
   }, [activeWorkspaceId, isWorkspaceFathomConnected, loadFathomConnections]);
 
+  useEffect(() => {
+    if (!activeWorkspaceId) {
+      setMcpApiKeys([]);
+      setMcpAuditLogs([]);
+      setNewMcpApiKeySecret(null);
+      return;
+    }
+    if (isMcpSettingsOpen) {
+      void loadMcpApiKeys(false);
+      void loadMcpAuditLogs(false);
+    }
+  }, [activeWorkspaceId, isMcpSettingsOpen, loadMcpApiKeys, loadMcpAuditLogs]);
+
   const handleOpenFathomSettings = async () => {
     setIsFathomSettingsOpen(true);
-    await loadFathomWebhooks();
+    await Promise.all([loadFathomWebhooks(), loadWorkflows()]);
+  };
+
+  const handleWorkflowEditorOpenChange = (nextOpen: boolean) => {
+    if (!nextOpen && isSavingWorkflowEditor) {
+      return;
+    }
+    setIsWorkflowEditorOpen(nextOpen);
+    if (!nextOpen) {
+      setEditingWorkflowId(null);
+      setWorkflowEditorMode("create");
+      setIsLoadingWorkflowEditor(false);
+      setWorkflowForm(createEmptyWorkflowFormState());
+      setWorkflowPlaygroundPreview(null);
+      setWorkflowPlaygroundMeetingId("");
+      setWorkflowPlaygroundTestResult(null);
+    }
+  };
+
+  const handleOpenCreateWorkflowEditor = () => {
+    if (!canManageWorkspaceIntegrations) {
+      toast({
+        title: "Permission required",
+        description: "Only workspace integration admins can create workflows.",
+        variant: "destructive",
+      });
+      return;
+    }
+    setWorkflowEditorMode("create");
+    setEditingWorkflowId(null);
+    setWorkflowForm(createEmptyWorkflowFormState());
+    setIsLoadingWorkflowEditor(false);
+    setWorkflowPlaygroundPreview(null);
+    setWorkflowPlaygroundMeetingId("");
+    setWorkflowPlaygroundTestResult(null);
+    setIsWorkflowEditorOpen(true);
+  };
+
+  const handleOpenEditWorkflowEditor = async (workflow: WorkflowSummary) => {
+    if (!activeWorkspaceId) {
+      return;
+    }
+    if (!canManageWorkflow(workflow)) {
+      toast({
+        title: "Permission required",
+        description: "Only workspace integration admins can edit workflows.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setWorkflowEditorMode("edit");
+    setEditingWorkflowId(workflow.id);
+    setIsLoadingWorkflowEditor(true);
+    setWorkflowPlaygroundPreview(null);
+    setWorkflowPlaygroundMeetingId("");
+    setWorkflowPlaygroundTestResult(null);
+    setIsWorkflowEditorOpen(true);
+    try {
+      const response = await fetch(
+        `/api/workspaces/${encodeURIComponent(
+          activeWorkspaceId
+        )}/automation/workflows/${encodeURIComponent(workflow.id)}`,
+        { cache: "no-store" }
+      );
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(payload?.error || "Failed to load workflow details.");
+      }
+      const detail = payload?.workflow as WorkflowDetail | undefined;
+      if (!detail?.id) {
+        throw new Error("Workflow details were not returned.");
+      }
+      setWorkflowForm(workflowFormFromDetail(detail));
+    } catch (error) {
+      console.error("Failed to load workflow details:", error);
+      toast({
+        title: "Workflow Load Failed",
+        description: error instanceof Error ? error.message : "Could not load workflow details.",
+        variant: "destructive",
+      });
+      setIsWorkflowEditorOpen(false);
+      setEditingWorkflowId(null);
+      setWorkflowEditorMode("create");
+      setWorkflowForm(createEmptyWorkflowFormState());
+    } finally {
+      setIsLoadingWorkflowEditor(false);
+    }
+  };
+
+  const handleWorkflowFilterChange = (
+    filterId: string,
+    patch: Partial<WorkflowFilterDraft>
+  ) => {
+    setWorkflowForm((current) => ({
+      ...current,
+      filters: current.filters.map((filter) =>
+        filter.id === filterId ? { ...filter, ...patch } : filter
+      ),
+    }));
+  };
+
+  const handleAddWorkflowFilter = () => {
+    setWorkflowForm((current) => ({
+      ...current,
+      filters: [...current.filters, createEmptyWorkflowFilter()],
+    }));
+  };
+
+  const handleRemoveWorkflowFilter = (filterId: string) => {
+    setWorkflowForm((current) => ({
+      ...current,
+      filters: current.filters.filter((filter) => filter.id !== filterId),
+    }));
+  };
+
+  const buildWorkflowPayloadFromForm = useCallback(() => {
+    const name = workflowForm.name.trim();
+    if (!name) {
+      throw new Error("Workflow name is required.");
+    }
+
+    const destinationUrl = workflowForm.destinationUrl.trim();
+    if (!destinationUrl) {
+      throw new Error("Destination webhook URL is required.");
+    }
+
+    const headersInput = workflowForm.destinationHeadersJson.trim();
+    let destinationHeaders: Record<string, string> = {};
+    if (headersInput) {
+      let parsedHeaders: unknown;
+      try {
+        parsedHeaders = JSON.parse(headersInput);
+      } catch {
+        throw new Error("Destination headers must be valid JSON.");
+      }
+      if (
+        typeof parsedHeaders !== "object" ||
+        parsedHeaders === null ||
+        Array.isArray(parsedHeaders)
+      ) {
+        throw new Error("Destination headers must be a JSON object.");
+      }
+      destinationHeaders = Object.entries(parsedHeaders as Record<string, unknown>).reduce<
+        Record<string, string>
+      >((acc, [key, value]) => {
+        const normalizedKey = String(key || "").trim();
+        if (!normalizedKey) return acc;
+        if (value === null || value === undefined) return acc;
+        acc[normalizedKey] = typeof value === "string" ? value : String(value);
+        return acc;
+      }, {});
+    }
+
+    const parsedFilters = workflowForm.filters.map((filter, index) => {
+      const field = filter.field.trim();
+      if (!field) {
+        throw new Error(`Filter ${index + 1} requires a field.`);
+      }
+
+      const operator = filter.operator;
+      const requiresNoValue = WORKFLOW_FILTER_OPERATORS_WITHOUT_VALUE.has(operator);
+      const expectsArrayValue = WORKFLOW_FILTER_OPERATORS_WITH_ARRAY_VALUE.has(operator);
+      if (requiresNoValue) {
+        return {
+          field,
+          operator,
+          ...(filter.caseSensitive ? { caseSensitive: true } : {}),
+        };
+      }
+
+      const rawValue = filter.value.trim();
+      if (!rawValue) {
+        throw new Error(`Filter ${index + 1} requires a value.`);
+      }
+
+      let parsedValue:
+        | string
+        | number
+        | boolean
+        | null
+        | Array<string | number | boolean>;
+
+      if (expectsArrayValue) {
+        if (rawValue.startsWith("[")) {
+          let parsedArray: unknown;
+          try {
+            parsedArray = JSON.parse(rawValue);
+          } catch {
+            throw new Error(
+              `Filter ${index + 1} expects an array. Use JSON like ["alpha","beta"].`
+            );
+          }
+          if (
+            !Array.isArray(parsedArray) ||
+            parsedArray.some(
+              (value) =>
+                typeof value !== "string" &&
+                typeof value !== "number" &&
+                typeof value !== "boolean"
+            )
+          ) {
+            throw new Error(
+              `Filter ${index + 1} array values must be string, number, or boolean.`
+            );
+          }
+          parsedValue = parsedArray as Array<string | number | boolean>;
+        } else {
+          const values = rawValue
+            .split(",")
+            .map((value) => value.trim())
+            .filter(Boolean)
+            .map((value) => parseScalarWorkflowValue(value))
+            .filter((value): value is string | number | boolean => value !== null);
+          if (!values.length) {
+            throw new Error(`Filter ${index + 1} list value cannot be empty.`);
+          }
+          parsedValue = values;
+        }
+      } else {
+        parsedValue = parseScalarWorkflowValue(rawValue);
+      }
+
+      return {
+        field,
+        operator,
+        value: parsedValue,
+        ...(filter.caseSensitive ? { caseSensitive: true } : {}),
+      };
+    });
+
+    const fieldSelectionFields =
+      workflowForm.fieldSelectionMode === "subset"
+        ? workflowForm.fieldSelectionFields
+            .split(/\r?\n|,/)
+            .map((field) => field.trim())
+            .filter(Boolean)
+        : [];
+
+    if (workflowForm.fieldSelectionMode === "subset" && fieldSelectionFields.length === 0) {
+      throw new Error("Add at least one field when selection mode is subset.");
+    }
+
+    const timeoutMs = Number.parseInt(String(workflowForm.transformTimeoutMs || 1000), 10);
+    const safeTimeoutMs = Number.isFinite(timeoutMs)
+      ? Math.min(10_000, Math.max(100, timeoutMs))
+      : 1000;
+
+    return {
+      name,
+      description: workflowForm.description.trim() || null,
+      enabled: workflowForm.enabled,
+      trigger: workflowForm.trigger,
+      filters: parsedFilters,
+      fieldSelection: {
+        mode: workflowForm.fieldSelectionMode,
+        fields: fieldSelectionFields,
+      },
+      transform: {
+        runtime: "quickjs" as const,
+        script: workflowForm.transformScript.trim() || null,
+        timeoutMs: safeTimeoutMs,
+      },
+      destination: {
+        type: "webhook" as const,
+        url: destinationUrl,
+        signingSecret: workflowForm.destinationSigningSecret.trim() || null,
+        headers: destinationHeaders,
+      },
+    };
+  }, [workflowForm]);
+
+  const handleRunWorkflowPlayground = async (input: { previewMeetingId?: string } = {}) => {
+    if (!activeWorkspaceId) {
+      return;
+    }
+
+    const previewMeetingId = input.previewMeetingId || workflowPlaygroundMeetingId || null;
+    setIsRunningWorkflowPlayground(true);
+    setWorkflowPlaygroundTestResult(null);
+    try {
+      const payload = buildWorkflowPayloadFromForm();
+      const response = await fetch(
+        `/api/workspaces/${encodeURIComponent(
+          activeWorkspaceId
+        )}/automation/workflows/playground/preview`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            workflow: {
+              trigger: payload.trigger,
+              filters: payload.filters,
+              fieldSelection: payload.fieldSelection,
+              transform: payload.transform,
+            },
+            previewMeetingId,
+            meetingLimit: 12,
+          }),
+        }
+      );
+      const responsePayload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(responsePayload?.error || "Failed to run workflow playground.");
+      }
+
+      const preview = responsePayload as WorkflowPlaygroundPreviewResult;
+      setWorkflowPlaygroundPreview(preview);
+      setWorkflowPlaygroundMeetingId(preview.selectedMeeting?.id || "");
+    } catch (error) {
+      console.error("Failed to run workflow playground:", error);
+      setWorkflowPlaygroundPreview(null);
+      toast({
+        title: "Playground Failed",
+        description: error instanceof Error ? error.message : "Could not run workflow preview.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsRunningWorkflowPlayground(false);
+    }
+  };
+
+  const handleWorkflowPlaygroundMeetingChange = async (meetingId: string) => {
+    setWorkflowPlaygroundMeetingId(meetingId);
+    await handleRunWorkflowPlayground({ previewMeetingId: meetingId });
+  };
+
+  const handleSendWorkflowPlaygroundTestDelivery = async () => {
+    if (!activeWorkspaceId || !editingWorkflowId) {
+      return;
+    }
+
+    setIsSendingWorkflowPlaygroundTest(true);
+    try {
+      const payload = buildWorkflowPayloadFromForm();
+      const previewPayload =
+        workflowPlaygroundPreview?.transformOutput ??
+        workflowPlaygroundPreview?.selectedPayload ??
+        null;
+      const response = await fetch(
+        `/api/workspaces/${encodeURIComponent(
+          activeWorkspaceId
+        )}/automation/workflows/${encodeURIComponent(editingWorkflowId)}/test`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            eventType: payload.trigger,
+            payload: previewPayload,
+          }),
+        }
+      );
+      const responsePayload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(responsePayload?.error || "Failed to send test delivery.");
+      }
+      setWorkflowPlaygroundTestResult({
+        responseOk: Boolean(responsePayload?.responseOk),
+        responseStatusCode:
+          typeof responsePayload?.responseStatusCode === "number"
+            ? responsePayload.responseStatusCode
+            : null,
+        deliveryId: responsePayload?.delivery?.id || null,
+        deliveryStatus: responsePayload?.delivery?.status || null,
+        message: responsePayload?.responseOk
+          ? "Test delivery completed successfully."
+          : "Test delivery failed. Check response status and destination logs.",
+      });
+      toast({
+        title: "Test Delivery Sent",
+        description: responsePayload?.responseOk
+          ? "Destination acknowledged test delivery."
+          : "Destination returned a non-success response.",
+      });
+    } catch (error) {
+      console.error("Failed to send workflow playground test delivery:", error);
+      setWorkflowPlaygroundTestResult({
+        responseOk: false,
+        responseStatusCode: null,
+        deliveryId: null,
+        deliveryStatus: null,
+        message: error instanceof Error ? error.message : "Could not send test delivery.",
+      });
+      toast({
+        title: "Test Delivery Failed",
+        description: error instanceof Error ? error.message : "Could not send test delivery.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsSendingWorkflowPlaygroundTest(false);
+    }
+  };
+
+  const handleSaveWorkflowEditor = async () => {
+    if (!activeWorkspaceId) {
+      return;
+    }
+
+    setIsSavingWorkflowEditor(true);
+    try {
+      const payload = buildWorkflowPayloadFromForm();
+      const isEditMode = workflowEditorMode === "edit" && Boolean(editingWorkflowId);
+      const endpoint = isEditMode
+        ? `/api/workspaces/${encodeURIComponent(
+            activeWorkspaceId
+          )}/automation/workflows/${encodeURIComponent(editingWorkflowId || "")}`
+        : `/api/workspaces/${encodeURIComponent(activeWorkspaceId)}/automation/workflows`;
+      const response = await fetch(endpoint, {
+        method: isEditMode ? "PATCH" : "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const responsePayload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(responsePayload?.error || "Failed to save workflow.");
+      }
+
+      const savedWorkflow = responsePayload?.workflow as WorkflowSummary | undefined;
+      await loadWorkflows(false);
+      if (savedWorkflow?.id && expandedWorkflowId === savedWorkflow.id) {
+        await loadWorkflowFailures(savedWorkflow.id, false);
+      }
+
+      toast({
+        title: isEditMode ? "Workflow Updated" : "Workflow Created",
+        description: `${payload.name} was ${isEditMode ? "updated" : "created"} successfully.`,
+      });
+      setIsWorkflowEditorOpen(false);
+      setEditingWorkflowId(null);
+      setWorkflowEditorMode("create");
+      setWorkflowForm(createEmptyWorkflowFormState());
+      setWorkflowPlaygroundPreview(null);
+      setWorkflowPlaygroundMeetingId("");
+      setWorkflowPlaygroundTestResult(null);
+    } catch (error) {
+      console.error("Failed to save workflow:", error);
+      toast({
+        title: "Workflow Save Failed",
+        description: error instanceof Error ? error.message : "Could not save workflow.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsSavingWorkflowEditor(false);
+    }
+  };
+
+  const handleToggleWorkflowEnabled = async (workflow: WorkflowSummary) => {
+    if (!activeWorkspaceId) {
+      return;
+    }
+    if (!canManageWorkflow(workflow)) {
+      toast({
+        title: "Permission required",
+        description: "Only workspace integration admins can update workflows.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const nextEnabled = !workflow.enabled;
+    setPendingWorkflowId(workflow.id);
+    try {
+      const response = await fetch(
+        `/api/workspaces/${encodeURIComponent(
+          activeWorkspaceId
+        )}/automation/workflows/${encodeURIComponent(workflow.id)}`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ enabled: nextEnabled }),
+        }
+      );
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(payload?.error || "Failed to update workflow.");
+      }
+
+      const updatedWorkflow = payload?.workflow as WorkflowSummary | undefined;
+      if (updatedWorkflow?.id) {
+        setWorkflows((current) =>
+          current.map((item) => (item.id === updatedWorkflow.id ? updatedWorkflow : item))
+        );
+      }
+      toast({
+        title: nextEnabled ? "Workflow Enabled" : "Workflow Disabled",
+        description: `${workflow.name} is now ${nextEnabled ? "active" : "paused"}.`,
+      });
+    } catch (error) {
+      console.error("Failed to update workflow status:", error);
+      toast({
+        title: "Workflow Update Failed",
+        description: error instanceof Error ? error.message : "Could not update workflow.",
+        variant: "destructive",
+      });
+    } finally {
+      setPendingWorkflowId((current) => (current === workflow.id ? null : current));
+    }
+  };
+
+  const handleToggleWorkflowFailures = async (workflow: WorkflowSummary) => {
+    if (expandedWorkflowId === workflow.id) {
+      setExpandedWorkflowId(null);
+      return;
+    }
+    setExpandedWorkflowId(workflow.id);
+    if (!workflowFailuresById[workflow.id]) {
+      await loadWorkflowFailures(workflow.id);
+    }
+  };
+
+  const handleReplayWorkflowDelivery = async (
+    workflow: WorkflowSummary,
+    delivery: WorkflowDeliverySummary
+  ) => {
+    if (!activeWorkspaceId) {
+      return;
+    }
+    if (!canManageWorkflow(workflow)) {
+      toast({
+        title: "Permission required",
+        description: "Only workspace integration admins can replay deliveries.",
+        variant: "destructive",
+      });
+      return;
+    }
+    setPendingReplayDeliveryId(delivery.id);
+    try {
+      const response = await fetch(
+        `/api/workspaces/${encodeURIComponent(
+          activeWorkspaceId
+        )}/automation/workflows/${encodeURIComponent(
+          workflow.id
+        )}/deliveries/${encodeURIComponent(delivery.id)}/replay`,
+        {
+          method: "POST",
+        }
+      );
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(payload?.error || "Failed to replay delivery.");
+      }
+      toast({
+        title: "Delivery Replayed",
+        description: "A replay delivery was queued for this workflow.",
+      });
+      await Promise.all([
+        loadWorkflowFailures(workflow.id, false),
+        loadWorkflows(false),
+      ]);
+    } catch (error) {
+      console.error("Failed to replay workflow delivery:", error);
+      toast({
+        title: "Replay Failed",
+        description: error instanceof Error ? error.message : "Could not replay delivery.",
+        variant: "destructive",
+      });
+    } finally {
+      setPendingReplayDeliveryId((current) => (current === delivery.id ? null : current));
+    }
   };
 
   const handleSelectFathomConnection = async (connection: FathomConnectionSummary) => {
@@ -1990,6 +3273,31 @@ export default function SettingsPageContent() {
                               </Button>
                             ) : null}
                         />
+                        <div className="rounded-lg border border-border/50 bg-background/60 p-4">
+                          <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                            <div className="space-y-1">
+                              <p className="text-sm font-semibold flex items-center gap-2">
+                                <Key className="h-4 w-4 text-primary" />
+                                MCP API
+                              </p>
+                              <p className="text-xs text-muted-foreground">
+                                Connect external AI clients to TaskWise using secure MCP keys.
+                              </p>
+                              <p className="text-[11px] text-muted-foreground">
+                                Manage read/write scopes, generate keys, and review recent MCP activity.
+                              </p>
+                            </div>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => void handleOpenMcpSettings()}
+                              disabled={!activeWorkspaceId}
+                            >
+                              <Settings2 className="mr-2 h-4 w-4" />
+                              Open MCP Setup
+                            </Button>
+                          </div>
+                        </div>
                           </>
                         )}
                   </CardContent>
@@ -2509,10 +3817,1092 @@ export default function SettingsPageContent() {
                 })}
               </div>
             </div>
+
+            <div className="rounded-lg border bg-muted/20 p-4 space-y-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2">
+                    <ClipboardCheck className="h-5 w-5 text-blue-400" />
+                    <span className="text-sm font-semibold">Automation Workflows</span>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Toggle workflow delivery and replay recent failed webhook attempts.
+                  </p>
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => void loadWorkflows()}
+                  disabled={isLoadingWorkflows}
+                >
+                  {isLoadingWorkflows ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <RefreshCw className="mr-2 h-4 w-4" />
+                  )}
+                  Refresh
+                </Button>
+                <Button
+                  size="sm"
+                  onClick={handleOpenCreateWorkflowEditor}
+                  disabled={!canManageWorkspaceIntegrations}
+                >
+                  <Save className="mr-2 h-4 w-4" />
+                  Create Workflow
+                </Button>
+              </div>
+              <div className="max-h-[360px] overflow-y-auto space-y-3">
+                {isLoadingWorkflows && workflows.length === 0 ? (
+                  <div className="text-sm text-muted-foreground">Loading workflows...</div>
+                ) : workflows.length === 0 ? (
+                  <div className="text-sm text-muted-foreground">
+                    No workflows configured yet.
+                  </div>
+                ) : (
+                  workflows.map((workflow) => {
+                    const canManageCurrentWorkflow = canManageWorkflow(workflow);
+                    const isPendingWorkflow = pendingWorkflowId === workflow.id;
+                    const isExpanded = expandedWorkflowId === workflow.id;
+                    const failedDeliveries = workflowFailuresById[workflow.id] || [];
+                    const isLoadingFailures = loadingWorkflowFailuresId === workflow.id;
+
+                    return (
+                      <div
+                        key={workflow.id}
+                        className="rounded-md border bg-background/60 p-3 space-y-2"
+                      >
+                        <div className="flex flex-wrap items-start justify-between gap-2">
+                          <div className="min-w-0 space-y-1">
+                            <p className="text-sm font-semibold truncate">{workflow.name}</p>
+                            <div className="flex flex-wrap items-center gap-2">
+                              <Badge variant={workflow.enabled ? "secondary" : "outline"}>
+                                {workflow.enabled ? "Enabled" : "Paused"}
+                              </Badge>
+                              <Badge variant="outline">
+                                {formatWorkflowTriggerLabel(workflow.trigger)}
+                              </Badge>
+                              <Badge variant="outline">v{workflow.version}</Badge>
+                            </div>
+                            {workflow.updatedAt ? (
+                              <p className="text-xs text-muted-foreground">
+                                Updated {new Date(workflow.updatedAt).toLocaleString()}
+                              </p>
+                            ) : null}
+                            {workflow.autoDisabledAt ? (
+                              <p className="text-xs text-amber-700">
+                                Auto-disabled:{" "}
+                                {workflow.autoDisabledReason || "repeated delivery failures"}
+                                {typeof workflow.autoDisabledFailureCount === "number"
+                                  ? ` (${workflow.autoDisabledFailureCount} failures)`
+                                  : ""}
+                              </p>
+                            ) : null}
+                          </div>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => void handleOpenEditWorkflowEditor(workflow)}
+                              disabled={!canManageCurrentWorkflow}
+                            >
+                              Edit
+                            </Button>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => void handleToggleWorkflowEnabled(workflow)}
+                              disabled={!canManageCurrentWorkflow || isPendingWorkflow}
+                            >
+                              {isPendingWorkflow ? (
+                                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                              ) : workflow.enabled ? (
+                                <PowerOff className="mr-2 h-4 w-4 text-red-500" />
+                              ) : (
+                                <Power className="mr-2 h-4 w-4 text-green-500" />
+                              )}
+                              {workflow.enabled ? "Disable" : "Enable"}
+                            </Button>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => void handleToggleWorkflowFailures(workflow)}
+                            >
+                              {isExpanded ? "Hide Failures" : "View Failures"}
+                            </Button>
+                          </div>
+                        </div>
+
+                        {isExpanded ? (
+                          <div className="rounded-md border bg-muted/20 p-3 space-y-2">
+                            <div className="flex items-center justify-between gap-2">
+                              <p className="text-xs text-muted-foreground">
+                                Showing up to 10 recent failed deliveries.
+                              </p>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => void loadWorkflowFailures(workflow.id)}
+                                disabled={isLoadingFailures}
+                              >
+                                {isLoadingFailures ? (
+                                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                ) : (
+                                  <RefreshCw className="mr-2 h-4 w-4" />
+                                )}
+                                Refresh Failures
+                              </Button>
+                            </div>
+                            {isLoadingFailures && failedDeliveries.length === 0 ? (
+                              <p className="text-sm text-muted-foreground">Loading failures...</p>
+                            ) : failedDeliveries.length === 0 ? (
+                              <p className="text-sm text-muted-foreground">
+                                No failed deliveries found.
+                              </p>
+                            ) : (
+                              failedDeliveries.map((delivery) => {
+                                const isReplaying = pendingReplayDeliveryId === delivery.id;
+                                return (
+                                  <div
+                                    key={delivery.id}
+                                    className="rounded-md border bg-background/70 p-3 space-y-2"
+                                  >
+                                    <div className="flex flex-wrap items-center justify-between gap-2">
+                                      <div className="flex flex-wrap items-center gap-2">
+                                        <Badge variant="outline" className="uppercase text-[10px]">
+                                          {delivery.status}
+                                        </Badge>
+                                        <Badge variant="outline">
+                                          Attempts {delivery.attemptCount}/{delivery.maxAttempts}
+                                        </Badge>
+                                        {delivery.latestResponse?.statusCode ? (
+                                          <Badge variant="outline">
+                                            HTTP {delivery.latestResponse.statusCode}
+                                          </Badge>
+                                        ) : null}
+                                      </div>
+                                      <Button
+                                        variant="outline"
+                                        size="sm"
+                                        onClick={() =>
+                                          void handleReplayWorkflowDelivery(workflow, delivery)
+                                        }
+                                        disabled={!canManageCurrentWorkflow || isReplaying}
+                                      >
+                                        {isReplaying ? (
+                                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                        ) : (
+                                          <Send className="mr-2 h-4 w-4" />
+                                        )}
+                                        Replay
+                                      </Button>
+                                    </div>
+                                    <p className="text-xs text-muted-foreground">
+                                      {delivery.failedAt
+                                        ? `Failed ${new Date(delivery.failedAt).toLocaleString()}`
+                                        : delivery.updatedAt
+                                          ? `Updated ${new Date(delivery.updatedAt).toLocaleString()}`
+                                          : "Failure time unavailable"}
+                                      {" | "}
+                                      Event {delivery.eventType}
+                                    </p>
+                                    {delivery.lastError?.message ? (
+                                      <p className="text-xs text-red-600">
+                                        {delivery.lastError.message}
+                                      </p>
+                                    ) : null}
+                                  </div>
+                                );
+                              })
+                            )}
+                          </div>
+                        ) : null}
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            </div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setIsFathomSettingsOpen(false)}>
               Close
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={isMcpSettingsOpen}
+        onOpenChange={(nextOpen) => {
+          setIsMcpSettingsOpen(nextOpen);
+          if (!nextOpen) {
+            setNewMcpApiKeySecret(null);
+            setHasCopiedMcpSecret(false);
+            setHasCopiedMcpEndpoint(false);
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-4xl max-h-[92vh] overflow-hidden">
+          <DialogHeader>
+            <DialogTitle>MCP API Setup</DialogTitle>
+            <DialogDescription>
+              Connect external AI clients to this workspace with scoped MCP keys and audit logs.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="max-h-[70vh] overflow-y-auto pr-1 space-y-5">
+            <div className="rounded-lg border bg-muted/20 p-4 space-y-4">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="space-y-1">
+                  <h4 className="text-sm font-semibold">Get Started</h4>
+                  <p className="text-xs text-muted-foreground">
+                    1) Copy endpoint, 2) create a scoped key, 3) connect your MCP client.
+                  </p>
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    void Promise.all([loadMcpApiKeys(), loadMcpAuditLogs()]);
+                  }}
+                  disabled={isLoadingMcpApiKeys || isLoadingMcpAuditLogs}
+                >
+                  {isLoadingMcpApiKeys || isLoadingMcpAuditLogs ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <RefreshCw className="mr-2 h-4 w-4" />
+                  )}
+                  Refresh
+                </Button>
+              </div>
+
+              <div className="space-y-1">
+                <Label htmlFor="mcp-endpoint-url">MCP Endpoint</Label>
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                  <Input
+                    id="mcp-endpoint-url"
+                    readOnly
+                    value={mcpEndpointUrl || "Select a workspace to generate your MCP endpoint."}
+                    className="font-mono text-xs"
+                  />
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => void handleCopyMcpEndpoint()}
+                    disabled={!mcpEndpointUrl}
+                    className="w-full sm:w-auto"
+                  >
+                    {hasCopiedMcpEndpoint ? (
+                      <Check className="mr-2 h-4 w-4 text-green-500" />
+                    ) : (
+                      <Copy className="mr-2 h-4 w-4" />
+                    )}
+                    {hasCopiedMcpEndpoint ? "Copied!" : "Copy"}
+                  </Button>
+                </div>
+              </div>
+
+              <div className="space-y-1">
+                <Label>MCP Auth Header</Label>
+                <pre className="rounded-md border bg-background px-3 py-2 text-xs text-foreground whitespace-pre-wrap">
+{`Authorization: Bearer <YOUR_MCP_KEY>`}
+                </pre>
+                <p className="text-xs text-muted-foreground">
+                  Alternate headers supported: <code>x-taskwise-mcp-key</code>,{" "}
+                  <code>x-mcp-api-key</code>, <code>x-api-key</code>.
+                </p>
+              </div>
+            </div>
+
+            <div className="rounded-lg border bg-muted/20 p-4 space-y-4">
+              <div className="space-y-1">
+                <h4 className="text-sm font-semibold">Generate MCP Key</h4>
+                <p className="text-xs text-muted-foreground">
+                  Start with <code>mcp:read</code>. Enable <code>mcp:write</code> only for clients
+                  that must edit tasks.
+                </p>
+              </div>
+              {!canManageWorkspaceIntegrations ? (
+                <div className="rounded-md border border-border/70 bg-background/70 px-3 py-2 text-xs text-muted-foreground">
+                  Only workspace integration admins can create or revoke MCP keys.
+                </div>
+              ) : null}
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <Label htmlFor="mcp-key-name">Key Name</Label>
+                  <Input
+                    id="mcp-key-name"
+                    value={mcpKeyName}
+                    onChange={(event) => setMcpKeyName(event.target.value)}
+                    placeholder="Support assistant"
+                    disabled={!canManageWorkspaceIntegrations}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label htmlFor="mcp-key-description">Description (optional)</Label>
+                  <Input
+                    id="mcp-key-description"
+                    value={mcpKeyDescription}
+                    onChange={(event) => setMcpKeyDescription(event.target.value)}
+                    placeholder="Used by our support bot in production"
+                    disabled={!canManageWorkspaceIntegrations}
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <div className="rounded-md border bg-background/70 px-3 py-2 flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-medium">
+                      <code>mcp:read</code> scope
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      Required for listing tools and reading meetings, people, and action items.
+                    </p>
+                  </div>
+                  <Switch
+                    checked={mcpKeyAllowRead}
+                    onCheckedChange={setMcpKeyAllowRead}
+                    disabled={!canManageWorkspaceIntegrations}
+                    aria-label="Toggle mcp read scope"
+                  />
+                </div>
+                <div className="rounded-md border bg-background/70 px-3 py-2 flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-medium">
+                      <code>mcp:write</code> scope
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      Allows safe task edits: status, assignee, due date, notes, and title.
+                    </p>
+                  </div>
+                  <Switch
+                    checked={mcpKeyAllowWrite}
+                    onCheckedChange={setMcpKeyAllowWrite}
+                    disabled={!canManageWorkspaceIntegrations}
+                    aria-label="Toggle mcp write scope"
+                  />
+                </div>
+              </div>
+
+              <div className="flex justify-end">
+                <Button
+                  onClick={() => void handleCreateMcpApiKey()}
+                  disabled={!canManageWorkspaceIntegrations || isCreatingMcpApiKey}
+                >
+                  {isCreatingMcpApiKey ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <Key className="mr-2 h-4 w-4" />
+                  )}
+                  Generate Key
+                </Button>
+              </div>
+
+              {newMcpApiKeySecret ? (
+                <div className="rounded-md border border-amber-500/40 bg-amber-50/40 dark:bg-amber-950/20 p-3 space-y-2">
+                  <div className="space-y-1">
+                    <p className="text-sm font-semibold">Copy Your Secret Now</p>
+                    <p className="text-xs text-muted-foreground">
+                      This secret is shown only once. Save it in your MCP client or secret manager.
+                    </p>
+                  </div>
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                    <Input
+                      readOnly
+                      value={newMcpApiKeySecret}
+                      className="font-mono text-xs"
+                    />
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => void handleCopyMcpSecret()}
+                      className="w-full sm:w-auto"
+                    >
+                      {hasCopiedMcpSecret ? (
+                        <Check className="mr-2 h-4 w-4 text-green-500" />
+                      ) : (
+                        <Copy className="mr-2 h-4 w-4" />
+                      )}
+                      {hasCopiedMcpSecret ? "Copied!" : "Copy Secret"}
+                    </Button>
+                  </div>
+                </div>
+              ) : null}
+
+              <div className="space-y-2">
+                <div className="flex items-center justify-between gap-2">
+                  <h5 className="text-sm font-semibold">Active Keys</h5>
+                  <span className="text-xs text-muted-foreground">{mcpApiKeys.length} key(s)</span>
+                </div>
+                <div className="max-h-[260px] overflow-y-auto space-y-2">
+                  {isLoadingMcpApiKeys && mcpApiKeys.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">Loading MCP keys...</p>
+                  ) : mcpApiKeys.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">
+                      No keys yet. Generate your first key above.
+                    </p>
+                  ) : (
+                    mcpApiKeys.map((key) => {
+                      const isRevoked = key.status === "revoked";
+                      const isPending = pendingMcpApiKeyId === key.id;
+                      return (
+                        <div
+                          key={key.id}
+                          className="rounded-md border bg-background/70 p-3 space-y-2"
+                        >
+                          <div className="flex flex-wrap items-start justify-between gap-2">
+                            <div className="min-w-0">
+                              <p className="text-sm font-semibold truncate">{key.name}</p>
+                              <p className="text-xs text-muted-foreground truncate">
+                                Prefix {key.keyPrefix}
+                              </p>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <Badge variant={isRevoked ? "outline" : "secondary"}>
+                                {isRevoked ? "Revoked" : "Active"}
+                              </Badge>
+                              {!isRevoked ? (
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => void handleRevokeMcpApiKey(key)}
+                                  disabled={!canManageWorkspaceIntegrations || isPending}
+                                >
+                                  {isPending ? (
+                                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                  ) : (
+                                    <Trash2 className="mr-2 h-4 w-4 text-red-500" />
+                                  )}
+                                  Revoke
+                                </Button>
+                              ) : null}
+                            </div>
+                          </div>
+                          <div className="flex flex-wrap items-center gap-2">
+                            {key.scopes.map((scope) => (
+                              <Badge key={`${key.id}-${scope}`} variant="outline">
+                                {scope}
+                              </Badge>
+                            ))}
+                          </div>
+                          {key.description ? (
+                            <p className="text-xs text-muted-foreground">{key.description}</p>
+                          ) : null}
+                          <p className="text-xs text-muted-foreground">
+                            Created {formatDateTimeValue(key.createdAt)}
+                            {" | "}Last used {formatDateTimeValue(key.lastUsedAt)}
+                            {" | "}Expires {formatDateTimeValue(key.expiresAt, "No expiry")}
+                          </p>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
+            </div>
+
+            <div className="rounded-lg border bg-muted/20 p-4 space-y-3">
+              <h4 className="text-sm font-semibold">
+                Safe Write Tools (<code>mcp:write</code>)
+              </h4>
+              <p className="text-xs text-muted-foreground">
+                Read tools are exposed under <code>people.*</code> and <code>action_items.*</code>.
+                Write access is limited to these five task updates:
+              </p>
+              <div className="flex flex-wrap gap-2">
+                <Badge variant="outline">action_items.update_status</Badge>
+                <Badge variant="outline">action_items.update_assignee</Badge>
+                <Badge variant="outline">action_items.update_due_date</Badge>
+                <Badge variant="outline">action_items.update_notes</Badge>
+                <Badge variant="outline">action_items.update_title</Badge>
+              </div>
+            </div>
+
+            <div className="rounded-lg border bg-muted/20 p-4 space-y-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="space-y-1">
+                  <h4 className="text-sm font-semibold">Recent MCP Activity</h4>
+                  <p className="text-xs text-muted-foreground">
+                    Every key create/revoke and write tool call is logged for this workspace.
+                  </p>
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => void loadMcpAuditLogs()}
+                  disabled={isLoadingMcpAuditLogs}
+                >
+                  {isLoadingMcpAuditLogs ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <RefreshCw className="mr-2 h-4 w-4" />
+                  )}
+                  Refresh
+                </Button>
+              </div>
+              <div className="max-h-[260px] overflow-y-auto space-y-2">
+                {isLoadingMcpAuditLogs && mcpAuditLogs.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">Loading MCP activity...</p>
+                ) : mcpAuditLogs.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">
+                    No MCP audit events yet.
+                  </p>
+                ) : (
+                  mcpAuditLogs.map((log) => (
+                    <div key={log.id} className="rounded-md border bg-background/70 p-3 space-y-1">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <Badge
+                            variant={log.status === "success" ? "secondary" : "destructive"}
+                            className="uppercase text-[10px]"
+                          >
+                            {log.status}
+                          </Badge>
+                          <Badge variant="outline">{log.action}</Badge>
+                        </div>
+                        <span className="text-xs text-muted-foreground">
+                          {formatDateTimeValue(log.createdAt)}
+                        </span>
+                      </div>
+                      <p className="text-sm text-foreground">{log.message}</p>
+                      <p className="text-xs text-muted-foreground">
+                        Actor:{" "}
+                        {log.actorType === "api_key"
+                          ? log.apiKeyName || log.apiKeyId || "API key"
+                          : log.actorUserId || "Workspace user"}
+                      </p>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsMcpSettingsOpen(false)}>
+              Close
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={isWorkflowEditorOpen} onOpenChange={handleWorkflowEditorOpenChange}>
+        <DialogContent className="sm:max-w-3xl max-h-[92vh] overflow-hidden">
+          <DialogHeader>
+            <DialogTitle>
+              {workflowEditorMode === "edit" ? "Edit Workflow" : "Create Workflow"}
+            </DialogTitle>
+            <DialogDescription>
+              Configure trigger filters, payload selection, transform script, and webhook destination.
+            </DialogDescription>
+          </DialogHeader>
+          {isLoadingWorkflowEditor ? (
+            <div className="py-10 flex items-center justify-center text-sm text-muted-foreground">
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              Loading workflow details...
+            </div>
+          ) : (
+            <div className="max-h-[66vh] overflow-y-auto pr-1 space-y-5">
+              <div className="rounded-lg border bg-muted/20 p-4 space-y-3">
+                <h4 className="text-sm font-semibold">Basics</h4>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <div className="space-y-1 md:col-span-2">
+                    <Label htmlFor="workflow-name">Workflow Name</Label>
+                    <Input
+                      id="workflow-name"
+                      value={workflowForm.name}
+                      onChange={(event) =>
+                        setWorkflowForm((current) => ({
+                          ...current,
+                          name: event.target.value,
+                        }))
+                      }
+                      placeholder="Meeting follow-up webhook"
+                    />
+                  </div>
+                  <div className="space-y-1 md:col-span-2">
+                    <Label htmlFor="workflow-description">Description</Label>
+                    <Textarea
+                      id="workflow-description"
+                      rows={2}
+                      value={workflowForm.description}
+                      onChange={(event) =>
+                        setWorkflowForm((current) => ({
+                          ...current,
+                          description: event.target.value,
+                        }))
+                      }
+                      placeholder="Optional notes for workspace operators."
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label htmlFor="workflow-trigger">Trigger</Label>
+                    <Select
+                      value={workflowForm.trigger}
+                      onValueChange={(value) =>
+                        setWorkflowForm((current) => ({
+                          ...current,
+                          trigger: value as WorkflowTrigger,
+                        }))
+                      }
+                    >
+                      <SelectTrigger id="workflow-trigger">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="meeting.ingested">Meeting Ingested</SelectItem>
+                        <SelectItem value="meeting.updated">Meeting Updated</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-1">
+                    <Label htmlFor="workflow-enabled">Enabled</Label>
+                    <div className="h-10 px-3 rounded-md border bg-background/70 flex items-center justify-between">
+                      <span className="text-sm text-muted-foreground">
+                        {workflowForm.enabled ? "Active" : "Paused"}
+                      </span>
+                      <Switch
+                        id="workflow-enabled"
+                        checked={workflowForm.enabled}
+                        onCheckedChange={(checked) =>
+                          setWorkflowForm((current) => ({
+                            ...current,
+                            enabled: checked,
+                          }))
+                        }
+                      />
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="rounded-lg border bg-muted/20 p-4 space-y-3">
+                <h4 className="text-sm font-semibold">Destination</h4>
+                <div className="space-y-1">
+                  <Label htmlFor="workflow-destination-url">Webhook URL</Label>
+                  <Input
+                    id="workflow-destination-url"
+                    value={workflowForm.destinationUrl}
+                    onChange={(event) =>
+                      setWorkflowForm((current) => ({
+                        ...current,
+                        destinationUrl: event.target.value,
+                      }))
+                    }
+                    placeholder="https://example.com/webhooks/taskwise"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label htmlFor="workflow-destination-secret">Signing Secret (optional)</Label>
+                  <Input
+                    id="workflow-destination-secret"
+                    type="password"
+                    value={workflowForm.destinationSigningSecret}
+                    onChange={(event) =>
+                      setWorkflowForm((current) => ({
+                        ...current,
+                        destinationSigningSecret: event.target.value,
+                      }))
+                    }
+                    placeholder="Provide a shared secret for signature verification"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label htmlFor="workflow-destination-headers">Headers JSON</Label>
+                  <Textarea
+                    id="workflow-destination-headers"
+                    rows={4}
+                    value={workflowForm.destinationHeadersJson}
+                    onChange={(event) =>
+                      setWorkflowForm((current) => ({
+                        ...current,
+                        destinationHeadersJson: event.target.value,
+                      }))
+                    }
+                    placeholder='{"x-taskwise-env":"prod"}'
+                    className="font-mono text-xs"
+                  />
+                </div>
+              </div>
+
+              <div className="rounded-lg border bg-muted/20 p-4 space-y-3">
+                <div className="flex items-center justify-between gap-2">
+                  <h4 className="text-sm font-semibold">Filters</h4>
+                  <Button variant="outline" size="sm" onClick={handleAddWorkflowFilter}>
+                    Add Filter
+                  </Button>
+                </div>
+                {workflowForm.filters.length === 0 ? (
+                  <p className="text-xs text-muted-foreground">
+                    No filters configured. This workflow will run for every matching trigger event.
+                  </p>
+                ) : (
+                  <div className="space-y-3">
+                    {workflowForm.filters.map((filter, index) => {
+                      const requiresNoValue = WORKFLOW_FILTER_OPERATORS_WITHOUT_VALUE.has(
+                        filter.operator
+                      );
+                      return (
+                        <div
+                          key={filter.id}
+                          className="rounded-md border bg-background/70 p-3 space-y-2"
+                        >
+                          <div className="flex items-center justify-between">
+                            <span className="text-xs font-medium text-muted-foreground">
+                              Filter {index + 1}
+                            </span>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => handleRemoveWorkflowFilter(filter.id)}
+                            >
+                              Remove
+                            </Button>
+                          </div>
+                          <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+                            <div className="space-y-1">
+                              <Label>Field</Label>
+                              <Input
+                                value={filter.field}
+                                onChange={(event) =>
+                                  handleWorkflowFilterChange(filter.id, {
+                                    field: event.target.value,
+                                  })
+                                }
+                                placeholder="meeting.summary"
+                              />
+                            </div>
+                            <div className="space-y-1">
+                              <Label>Operator</Label>
+                              <Select
+                                value={filter.operator}
+                                onValueChange={(value) =>
+                                  handleWorkflowFilterChange(filter.id, {
+                                    operator: value as WorkflowFilterOperator,
+                                  })
+                                }
+                              >
+                                <SelectTrigger>
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {WORKFLOW_FILTER_OPERATOR_OPTIONS.map((option) => (
+                                    <SelectItem key={option.value} value={option.value}>
+                                      {option.label}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </div>
+                            <div className="space-y-1">
+                              <Label>Value</Label>
+                              <Input
+                                value={filter.value}
+                                onChange={(event) =>
+                                  handleWorkflowFilterChange(filter.id, {
+                                    value: event.target.value,
+                                  })
+                                }
+                                placeholder={
+                                  WORKFLOW_FILTER_OPERATORS_WITH_ARRAY_VALUE.has(filter.operator)
+                                    ? "alpha,beta or [\"alpha\",\"beta\"]"
+                                    : "Value"
+                                }
+                                disabled={requiresNoValue}
+                              />
+                            </div>
+                          </div>
+                          <div className="flex items-center justify-between rounded-md border bg-muted/20 px-3 py-2">
+                            <span className="text-xs text-muted-foreground">
+                              Case sensitive string matching
+                            </span>
+                            <Switch
+                              checked={filter.caseSensitive}
+                              onCheckedChange={(checked) =>
+                                handleWorkflowFilterChange(filter.id, {
+                                  caseSensitive: checked,
+                                })
+                              }
+                            />
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              <div className="rounded-lg border bg-muted/20 p-4 space-y-3">
+                <h4 className="text-sm font-semibold">Field Selection</h4>
+                <div className="space-y-1">
+                  <Label htmlFor="workflow-fields-mode">Payload Mode</Label>
+                  <Select
+                    value={workflowForm.fieldSelectionMode}
+                    onValueChange={(value) =>
+                      setWorkflowForm((current) => ({
+                        ...current,
+                        fieldSelectionMode: value as "all" | "subset",
+                      }))
+                    }
+                  >
+                    <SelectTrigger id="workflow-fields-mode">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All fields</SelectItem>
+                      <SelectItem value="subset">Selected fields only</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                {workflowForm.fieldSelectionMode === "subset" ? (
+                  <div className="space-y-1">
+                    <Label htmlFor="workflow-fields-list">Fields</Label>
+                    <Textarea
+                      id="workflow-fields-list"
+                      rows={4}
+                      value={workflowForm.fieldSelectionFields}
+                      onChange={(event) =>
+                        setWorkflowForm((current) => ({
+                          ...current,
+                          fieldSelectionFields: event.target.value,
+                        }))
+                      }
+                      placeholder={"meeting.title\nmeeting.summary\nactionItems"}
+                      className="font-mono text-xs"
+                    />
+                  </div>
+                ) : null}
+              </div>
+
+              <div className="rounded-lg border bg-muted/20 p-4 space-y-3">
+                <h4 className="text-sm font-semibold">Transform</h4>
+                <div className="grid grid-cols-1 md:grid-cols-[1fr_180px] gap-3">
+                  <div className="space-y-1">
+                    <Label htmlFor="workflow-transform-script">QuickJS Script (optional)</Label>
+                    <Textarea
+                      id="workflow-transform-script"
+                      rows={6}
+                      value={workflowForm.transformScript}
+                      onChange={(event) =>
+                        setWorkflowForm((current) => ({
+                          ...current,
+                          transformScript: event.target.value,
+                        }))
+                      }
+                      placeholder={"// input is the workflow payload\n// return transformed JSON"}
+                      className="font-mono text-xs"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label htmlFor="workflow-transform-timeout">Timeout (ms)</Label>
+                    <Input
+                      id="workflow-transform-timeout"
+                      type="number"
+                      min={100}
+                      max={10000}
+                      value={workflowForm.transformTimeoutMs}
+                      onChange={(event) =>
+                        setWorkflowForm((current) => {
+                          const parsed = Number.parseInt(event.target.value || "", 10);
+                          return {
+                            ...current,
+                            transformTimeoutMs: Number.isFinite(parsed) ? parsed : 1000,
+                          };
+                        })
+                      }
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Allowed range: 100 to 10000 ms.
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="rounded-lg border bg-muted/20 p-4 space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="space-y-1">
+                    <h4 className="text-sm font-semibold">Playground</h4>
+                    <p className="text-xs text-muted-foreground">
+                      Preview matched meetings, selected payload, transform output, and test delivery.
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => void handleRunWorkflowPlayground()}
+                      disabled={isRunningWorkflowPlayground || isSavingWorkflowEditor}
+                    >
+                      {isRunningWorkflowPlayground ? (
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      ) : (
+                        <RefreshCw className="mr-2 h-4 w-4" />
+                      )}
+                      Run Preview
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => void handleSendWorkflowPlaygroundTestDelivery()}
+                      disabled={
+                        isSendingWorkflowPlaygroundTest ||
+                        workflowEditorMode !== "edit" ||
+                        !editingWorkflowId
+                      }
+                    >
+                      {isSendingWorkflowPlaygroundTest ? (
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      ) : (
+                        <Send className="mr-2 h-4 w-4" />
+                      )}
+                      Send Test
+                    </Button>
+                  </div>
+                </div>
+
+                {workflowEditorMode !== "edit" ? (
+                  <p className="text-xs text-muted-foreground">
+                    Save this workflow first to run delivery tests against the configured destination.
+                  </p>
+                ) : null}
+
+                {workflowPlaygroundPreview ? (
+                  <div className="space-y-3">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Badge variant="outline">
+                        Meetings {workflowPlaygroundPreview.consideredMeetingCount}
+                      </Badge>
+                      <Badge variant="secondary">
+                        Matched {workflowPlaygroundPreview.matchedMeetingCount}
+                      </Badge>
+                    </div>
+
+                    {workflowPlaygroundPreview.meetings.length > 0 ? (
+                      <div className="space-y-1">
+                        <Label htmlFor="workflow-playground-meeting">
+                          Preview Meeting
+                        </Label>
+                        <Select
+                          value={
+                            workflowPlaygroundMeetingId ||
+                            workflowPlaygroundPreview.selectedMeeting?.id ||
+                            ""
+                          }
+                          onValueChange={(value) =>
+                            void handleWorkflowPlaygroundMeetingChange(value)
+                          }
+                          disabled={isRunningWorkflowPlayground}
+                        >
+                          <SelectTrigger id="workflow-playground-meeting">
+                            <SelectValue placeholder="Select a meeting" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {workflowPlaygroundPreview.meetings.map((meeting) => (
+                              <SelectItem key={meeting.id} value={meeting.id}>
+                                {meeting.matched ? "[Match] " : ""}{meeting.title}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    ) : null}
+
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+                      <div className="space-y-1">
+                        <Label>Selected Payload</Label>
+                        <pre className="rounded-md border bg-background px-3 py-2 text-xs max-h-[240px] overflow-auto whitespace-pre-wrap">
+                          {workflowPlaygroundPreview.selectedPayload
+                            ? JSON.stringify(workflowPlaygroundPreview.selectedPayload, null, 2)
+                            : workflowPlaygroundPreview.selectedPayloadError ||
+                              "No payload preview available."}
+                        </pre>
+                        <p className="text-[11px] text-muted-foreground">
+                          {workflowPlaygroundPreview.selectedPayloadBytes
+                            ? `${workflowPlaygroundPreview.selectedPayloadBytes} bytes`
+                            : "Size unavailable"}
+                          {workflowPlaygroundPreview.selectedPayloadTruncated
+                            ? " (truncated)"
+                            : ""}
+                        </p>
+                      </div>
+
+                      <div className="space-y-1">
+                        <Label>Transform Output</Label>
+                        <pre className="rounded-md border bg-background px-3 py-2 text-xs max-h-[240px] overflow-auto whitespace-pre-wrap">
+                          {workflowPlaygroundPreview.transformOutput
+                            ? JSON.stringify(workflowPlaygroundPreview.transformOutput, null, 2)
+                            : workflowPlaygroundPreview.transformOutputError?.message ||
+                              "No transform output preview available."}
+                        </pre>
+                        <p className="text-[11px] text-muted-foreground">
+                          {workflowPlaygroundPreview.transformOutputBytes
+                            ? `${workflowPlaygroundPreview.transformOutputBytes} bytes`
+                            : "Size unavailable"}
+                          {workflowPlaygroundPreview.transformOutputTruncated
+                            ? " (truncated)"
+                            : ""}
+                        </p>
+                      </div>
+                    </div>
+
+                    {workflowPlaygroundTestResult ? (
+                      <div className="rounded-md border bg-background/70 p-3 space-y-1">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <Badge
+                            variant={
+                              workflowPlaygroundTestResult.responseOk ? "secondary" : "outline"
+                            }
+                          >
+                            {workflowPlaygroundTestResult.responseOk ? "Success" : "Failed"}
+                          </Badge>
+                          {typeof workflowPlaygroundTestResult.responseStatusCode === "number" ? (
+                            <Badge variant="outline">
+                              HTTP {workflowPlaygroundTestResult.responseStatusCode}
+                            </Badge>
+                          ) : null}
+                          {workflowPlaygroundTestResult.deliveryStatus ? (
+                            <Badge variant="outline">
+                              Delivery {workflowPlaygroundTestResult.deliveryStatus}
+                            </Badge>
+                          ) : null}
+                        </div>
+                        <p className="text-xs text-muted-foreground">
+                          {workflowPlaygroundTestResult.message}
+                        </p>
+                        {workflowPlaygroundTestResult.deliveryId ? (
+                          <p className="text-[11px] text-muted-foreground">
+                            Delivery ID: {workflowPlaygroundTestResult.deliveryId}
+                          </p>
+                        ) : null}
+                      </div>
+                    ) : null}
+                  </div>
+                ) : (
+                  <p className="text-xs text-muted-foreground">
+                    Run preview to inspect matching meetings and payload output.
+                  </p>
+                )}
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => handleWorkflowEditorOpenChange(false)}
+              disabled={isSavingWorkflowEditor}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={() => void handleSaveWorkflowEditor()}
+              disabled={isSavingWorkflowEditor || isLoadingWorkflowEditor}
+            >
+              {isSavingWorkflowEditor ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <Save className="mr-2 h-4 w-4" />
+              )}
+              {workflowEditorMode === "edit" ? "Save Workflow" : "Create Workflow"}
             </Button>
           </DialogFooter>
         </DialogContent>
