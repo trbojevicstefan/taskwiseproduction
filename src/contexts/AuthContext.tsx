@@ -260,11 +260,13 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
     const isAuthPage = pathname === '/login' || pathname === '/signup';
     const isInvitePage = pathname?.startsWith('/invite/');
+    const isDocsPage = pathname === '/docs' || pathname?.startsWith('/docs/');
     const isPublicPage =
       pathname === '/' ||
       pathname === '/privacy' ||
       pathname === '/terms' ||
-      isInvitePage;
+      isInvitePage ||
+      isDocsPage;
 
     if (user && isAuthPage) {
       const callbackUrl = searchParams?.get('callbackUrl');
