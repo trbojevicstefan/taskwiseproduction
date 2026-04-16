@@ -2,15 +2,25 @@ import { randomUUID } from "crypto";
 import type { Db } from "mongodb";
 
 export type AutomationWorkflowTrigger = "meeting.ingested" | "meeting.updated";
+export const AUTOMATION_WORKFLOW_FILTER_OPERATORS = [
+  "equals",
+  "not_equals",
+  "contains",
+  "not_contains",
+  "in",
+  "not_in",
+  "exists",
+  "not_exists",
+  "greater_than",
+  "greater_than_or_equal",
+  "less_than",
+  "less_than_or_equal",
+  "contains_any",
+  "contains_all",
+] as const;
+
 export type AutomationWorkflowFilterOperator =
-  | "equals"
-  | "not_equals"
-  | "contains"
-  | "not_contains"
-  | "in"
-  | "not_in"
-  | "exists"
-  | "not_exists";
+  (typeof AUTOMATION_WORKFLOW_FILTER_OPERATORS)[number];
 
 export interface AutomationWorkflowFilter {
   field: string;
@@ -49,6 +59,10 @@ export interface AutomationWorkflowDoc {
   fieldSelection: AutomationWorkflowFieldSelection;
   transform: AutomationWorkflowTransform;
   destination: AutomationWorkflowDestination;
+  autoDisabledAt?: Date | null;
+  autoDisabledReason?: string | null;
+  autoDisabledFailureCount?: number | null;
+  autoDisabledWindowStartAt?: Date | null;
   createdByUserId: string;
   updatedByUserId: string;
   createdAt: Date;
@@ -121,6 +135,10 @@ export const createAutomationWorkflow = async (
       signingSecret: input.destination.signingSecret || null,
       headers: input.destination.headers || {},
     },
+    autoDisabledAt: null,
+    autoDisabledReason: null,
+    autoDisabledFailureCount: null,
+    autoDisabledWindowStartAt: null,
     createdByUserId: input.createdByUserId,
     updatedByUserId: input.updatedByUserId || input.createdByUserId,
     createdAt: now,
@@ -182,6 +200,43 @@ export const updateAutomationWorkflowById = async (
   return findAutomationWorkflowById(db, workflowId);
 };
 
+export const disableAutomationWorkflowById = async (
+  db: Db,
+  workflowId: string,
+  input: {
+    updatedByUserId: string;
+    reason: string;
+    disabledAt?: Date;
+    failureCount?: number | null;
+    windowStartAt?: Date | null;
+  }
+) => {
+  const disabledAt = input.disabledAt || new Date();
+  await db.collection<AutomationWorkflowDoc>(AUTOMATION_WORKFLOWS_COLLECTION).updateOne(
+    {
+      _id: workflowId,
+      enabled: true,
+    },
+    {
+      $set: {
+        enabled: false,
+        updatedByUserId: input.updatedByUserId,
+        updatedAt: disabledAt,
+        autoDisabledAt: disabledAt,
+        autoDisabledReason: input.reason,
+        autoDisabledFailureCount:
+          typeof input.failureCount === "number" ? input.failureCount : null,
+        autoDisabledWindowStartAt: input.windowStartAt || null,
+      },
+      $inc: {
+        version: 1,
+      },
+    }
+  );
+
+  return findAutomationWorkflowById(db, workflowId);
+};
+
 export const deleteAutomationWorkflowById = async (db: Db, workflowId: string) =>
   db
     .collection<AutomationWorkflowDoc>(AUTOMATION_WORKFLOWS_COLLECTION)
@@ -212,6 +267,13 @@ export const serializeAutomationWorkflow = (
         : {}),
       headers: workflow.destination.headers || {},
     },
+    autoDisabledAt: serializeDate(workflow.autoDisabledAt),
+    autoDisabledReason: workflow.autoDisabledReason || null,
+    autoDisabledFailureCount:
+      typeof workflow.autoDisabledFailureCount === "number"
+        ? workflow.autoDisabledFailureCount
+        : null,
+    autoDisabledWindowStartAt: serializeDate(workflow.autoDisabledWindowStartAt),
     createdByUserId: workflow.createdByUserId,
     updatedByUserId: workflow.updatedByUserId,
     createdAt: serializeDate(workflow.createdAt),

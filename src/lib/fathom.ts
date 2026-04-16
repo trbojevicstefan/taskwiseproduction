@@ -681,6 +681,80 @@ export const deleteFathomWebhook = async (
   }
 };
 
+export const pruneFathomManagedWebhooks = async (
+  accessToken: string,
+  input: {
+    webhookId?: string | null;
+    webhookUrl?: string | null;
+    managedWebhooks?: any[] | null;
+  }
+) => {
+  const managedWebhooks = Array.isArray(input.managedWebhooks)
+    ? input.managedWebhooks
+    : [];
+  if (!managedWebhooks.length) {
+    return {
+      managedWebhooks: [] as any[],
+      deletedCount: 0,
+      cleanupErrors: [] as string[],
+    };
+  }
+
+  const primaryId = input.webhookId || null;
+  const primaryUrl = input.webhookUrl || null;
+
+  const keepIndices = new Set<number>();
+  managedWebhooks.forEach((entry: any, index: number) => {
+    const entryId = entry?.id || null;
+    const entryUrl = entry?.url || null;
+    if (primaryId && entryId === primaryId) {
+      keepIndices.add(index);
+      return;
+    }
+    if (!primaryId && primaryUrl && entryUrl === primaryUrl) {
+      keepIndices.add(index);
+    }
+  });
+
+  // If primary details are missing or not present in the list, keep the first entry.
+  if (keepIndices.size === 0) {
+    keepIndices.add(0);
+  }
+
+  const staleTargets = managedWebhooks
+    .map((entry: any, index: number) => ({ entry, index }))
+    .filter(({ entry, index }) => !keepIndices.has(index) && (entry?.id || entry?.url));
+
+  const results = await Promise.allSettled(
+    staleTargets.map(({ entry }) => deleteFathomWebhook(accessToken, entry as any))
+  );
+
+  const failedStaleIndices = new Set<number>();
+  const cleanupErrors: string[] = [];
+  results.forEach((result, idx) => {
+    if (result.status === "rejected") {
+      const staleEntryIndex = staleTargets[idx]?.index;
+      if (typeof staleEntryIndex === "number") {
+        failedStaleIndices.add(staleEntryIndex);
+      }
+      cleanupErrors.push(
+        result.reason instanceof Error ? result.reason.message : String(result.reason)
+      );
+    }
+  });
+
+  const nextManagedWebhooks = managedWebhooks.filter(
+    (_entry: any, index: number) =>
+      keepIndices.has(index) || failedStaleIndices.has(index)
+  );
+
+  return {
+    managedWebhooks: nextManagedWebhooks,
+    deletedCount: staleTargets.length - failedStaleIndices.size,
+    cleanupErrors,
+  };
+};
+
 export const ensureFathomWebhook = async (
   userId: string,
   accessToken: string,

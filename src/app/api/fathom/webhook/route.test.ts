@@ -2,14 +2,12 @@ import crypto from "crypto";
 import { POST } from "@/app/api/fathom/webhook/route";
 import {
   extractFathomProviderSourceId,
-  getFathomInstallation,
   getFathomRecordingHashScope,
-  getValidFathomAccessToken,
   getValidFathomAccessTokenForConnection,
   hashFathomRecordingId,
 } from "@/lib/fathom";
 import { ingestFathomMeeting } from "@/lib/fathom-ingest";
-import { findUserByFathomWebhookToken, findUserById } from "@/lib/db/users";
+import { findUserById } from "@/lib/db/users";
 import { findFathomConnectionByWebhookToken } from "@/lib/fathom-connections";
 import { logFathomIntegration } from "@/lib/fathom-logs";
 import { getDb } from "@/lib/db";
@@ -18,9 +16,7 @@ import { kickJobWorker } from "@/lib/jobs/worker";
 
 jest.mock("@/lib/fathom", () => ({
   extractFathomProviderSourceId: jest.fn(),
-  getFathomInstallation: jest.fn(),
   getFathomRecordingHashScope: jest.fn(),
-  getValidFathomAccessToken: jest.fn(),
   getValidFathomAccessTokenForConnection: jest.fn(),
   hashFathomRecordingId: jest.fn(),
 }));
@@ -30,7 +26,6 @@ jest.mock("@/lib/fathom-ingest", () => ({
 }));
 
 jest.mock("@/lib/db/users", () => ({
-  findUserByFathomWebhookToken: jest.fn(),
   findUserById: jest.fn(),
 }));
 
@@ -56,13 +51,8 @@ jest.mock("@/lib/jobs/worker", () => ({
 
 const mockedExtractFathomProviderSourceId =
   extractFathomProviderSourceId as jest.MockedFunction<typeof extractFathomProviderSourceId>;
-const mockedGetFathomInstallation = getFathomInstallation as jest.MockedFunction<
-  typeof getFathomInstallation
->;
 const mockedGetFathomRecordingHashScope =
   getFathomRecordingHashScope as jest.MockedFunction<typeof getFathomRecordingHashScope>;
-const mockedGetValidFathomAccessToken =
-  getValidFathomAccessToken as jest.MockedFunction<typeof getValidFathomAccessToken>;
 const mockedGetValidFathomAccessTokenForConnection =
   getValidFathomAccessTokenForConnection as jest.MockedFunction<
     typeof getValidFathomAccessTokenForConnection
@@ -73,8 +63,6 @@ const mockedHashFathomRecordingId = hashFathomRecordingId as jest.MockedFunction
 const mockedIngestFathomMeeting = ingestFathomMeeting as jest.MockedFunction<
   typeof ingestFathomMeeting
 >;
-const mockedFindUserByFathomWebhookToken =
-  findUserByFathomWebhookToken as jest.MockedFunction<typeof findUserByFathomWebhookToken>;
 const mockedFindUserById = findUserById as jest.MockedFunction<typeof findUserById>;
 const mockedFindFathomConnectionByWebhookToken =
   findFathomConnectionByWebhookToken as jest.MockedFunction<
@@ -131,20 +119,13 @@ describe("POST /api/fathom/webhook", () => {
       createdByUserId: "user-1",
       webhook: { secret: webhookSecret },
     } as any);
-    mockedFindUserByFathomWebhookToken.mockResolvedValue({
-      _id: { toString: () => "user-1" },
-    } as any);
     mockedFindUserById.mockResolvedValue({
       _id: { toString: () => "user-1" },
     } as any);
     mockedExtractFathomProviderSourceId.mockReturnValue("source-1");
-    mockedGetFathomInstallation.mockResolvedValue({
-      webhookSecret,
-    } as any);
     mockedGetFathomRecordingHashScope.mockImplementation(
       ({ userId, connectionId }) => connectionId || userId
     );
-    mockedGetValidFathomAccessToken.mockResolvedValue("access-token");
     mockedGetValidFathomAccessTokenForConnection.mockResolvedValue("access-token");
     mockedHashFathomRecordingId.mockReturnValue("recording-hash");
     mockedLogFathomIntegration.mockResolvedValue(undefined as never);
@@ -178,6 +159,31 @@ describe("POST /api/fathom/webhook", () => {
       error: "Invalid webhook signature.",
     });
     expect(mockedIngestFathomMeeting).not.toHaveBeenCalled();
+  });
+
+  it("rejects unknown webhook tokens when no connection matches", async () => {
+    mockedFindFathomConnectionByWebhookToken.mockResolvedValueOnce(null as any);
+
+    const timestamp = String(Date.now());
+    const payload = {
+      event: "new-meeting-content-ready",
+      data: { recording_id: "rec-123" },
+    };
+    const { request } = buildWebhookRequest({
+      payload,
+      signature: buildSignature(JSON.stringify(payload), timestamp),
+      timestamp,
+    });
+
+    const response = await POST(request);
+
+    expect(response.status).toBe(404);
+    await expect(response.json()).resolves.toMatchObject({
+      ok: false,
+      errorCode: "request_error",
+      error: "Unknown webhook token.",
+    });
+    expect(mockedFindUserById).not.toHaveBeenCalled();
   });
 
   it("returns duplicate status for idempotent repeated meeting ingests", async () => {
@@ -238,7 +244,6 @@ describe("POST /api/fathom/webhook", () => {
       status: "accepted",
       jobId: "job-1",
     });
-    expect(mockedGetValidFathomAccessToken).not.toHaveBeenCalled();
     expect(mockedGetValidFathomAccessTokenForConnection).not.toHaveBeenCalled();
     expect(mockedIngestFathomMeeting).not.toHaveBeenCalled();
     expect(mockedGetDb).toHaveBeenCalled();

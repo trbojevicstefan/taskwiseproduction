@@ -3,13 +3,11 @@ import { NextResponse } from "next/server";
 import { apiError } from "@/lib/api-route";
 import { isQueueFirstWebhookIngestionEnabled } from "@/lib/core-first-flags";
 import { getDb } from "@/lib/db";
-import { findUserById, findUserByFathomWebhookToken } from "@/lib/db/users";
+import { findUserById } from "@/lib/db/users";
 import { findFathomConnectionByWebhookToken } from "@/lib/fathom-connections";
 import {
   extractFathomProviderSourceId,
   getFathomRecordingHashScope,
-  getFathomInstallation,
-  getValidFathomAccessToken,
   getValidFathomAccessTokenForConnection,
   hashFathomRecordingId,
 } from "@/lib/fathom";
@@ -104,10 +102,12 @@ export async function POST(request: Request) {
   const rawBody = await request.text();
   const db = await getDb();
   const connection = await findFathomConnectionByWebhookToken(db as any, token);
-  const connectionUserId = connection?.legacyUserId || connection?.createdByUserId || null;
-  const user = connectionUserId
-    ? await findUserById(connectionUserId)
-    : await findUserByFathomWebhookToken(token);
+  if (!connection) {
+    return apiError(404, "request_error", "Unknown webhook token.");
+  }
+
+  const connectionUserId = connection.legacyUserId || connection.createdByUserId;
+  const user = await findUserById(connectionUserId);
 
   if (!user) {
     return apiError(404, "request_error", "Unknown webhook token.");
@@ -116,10 +116,8 @@ export async function POST(request: Request) {
   const signatureHeader = request.headers.get("webhook-signature");
   const webhookId = request.headers.get("webhook-id");
   const webhookTimestamp = request.headers.get("webhook-timestamp");
-  const installation = await getFathomInstallation(user._id.toString());
   const secret =
     connection?.webhook.secret ||
-    installation?.webhookSecret ||
     process.env.FATHOM_WEBHOOK_SECRET ||
     null;
   if (
@@ -219,9 +217,7 @@ export async function POST(request: Request) {
     );
   }
 
-  const accessToken = connection?._id
-    ? await getValidFathomAccessTokenForConnection(connection._id)
-    : await getValidFathomAccessToken(user._id.toString());
+  const accessToken = await getValidFathomAccessTokenForConnection(connection._id);
   const result = await ingestFathomMeeting({
     user,
     recordingId: String(recordingId),

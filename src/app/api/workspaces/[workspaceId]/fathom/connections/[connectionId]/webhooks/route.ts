@@ -1,12 +1,12 @@
 import { randomBytes } from "crypto";
 import { z } from "zod";
 import { apiError, apiSuccess, mapApiError, parseJsonBody } from "@/lib/api-route";
-import { updateUserById } from "@/lib/db/users";
 import {
   deleteFathomWebhook,
   ensureFathomConnectionWebhook,
   FATHOM_WEBHOOK_EVENT,
   getFathomWebhookUrl,
+  pruneFathomManagedWebhooks,
   getValidFathomAccessTokenForConnection,
 } from "@/lib/fathom";
 import {
@@ -191,7 +191,6 @@ export async function POST(
       );
     }
 
-    const targetUserId = connection.legacyUserId || connection.createdByUserId;
     const webhookToken = randomBytes(24).toString("hex");
 
     await updateFathomConnectionById(access.db as any, connectionId, {
@@ -203,7 +202,6 @@ export async function POST(
         lastError: null,
       },
     });
-    await updateUserById(targetUserId, { fathomWebhookToken: webhookToken });
 
     try {
       const accessToken = await getValidFathomAccessTokenForConnection(connectionId);
@@ -213,6 +211,12 @@ export async function POST(
         webhookToken,
         { updatedByUserId: access.userId }
       );
+      const webhookUrl = result.webhookUrl || getFathomWebhookUrl(webhookToken);
+      const pruned = await pruneFathomManagedWebhooks(accessToken, {
+        webhookId: result.webhookId || null,
+        webhookUrl,
+        managedWebhooks: result.managedWebhooks || [],
+      });
 
       const updated = await updateFathomConnectionById(access.db as any, connectionId, {
         updatedByUserId: access.userId,
@@ -221,11 +225,15 @@ export async function POST(
           secret: result.webhookSecret || null,
           status: "active",
           webhookId: result.webhookId || null,
-          webhookUrl: result.webhookUrl || null,
+          webhookUrl: result.webhookUrl || webhookUrl,
           webhookEvent: FATHOM_WEBHOOK_EVENT,
-          managedWebhooks: result.managedWebhooks || [],
+          managedWebhooks: pruned.managedWebhooks,
           lastSyncedAt: new Date(),
-          lastError: null,
+          lastError: pruned.cleanupErrors.length
+            ? {
+                message: `Stale webhook cleanup had ${pruned.cleanupErrors.length} error(s).`,
+              }
+            : null,
         },
       });
       if (!updated) {
@@ -237,7 +245,9 @@ export async function POST(
         connectionId,
         status: result.status,
         webhookId: result.webhookId || null,
-        webhookUrl: result.webhookUrl || getConnectionWebhookUrl(updated),
+        webhookUrl,
+        staleWebhooksDeleted: pruned.deletedCount,
+        cleanupErrors: pruned.cleanupErrors,
         webhooks: buildConfiguredWebhooks(updated).map(serializeManagedWebhook),
         connection: toConnectionResponse(updated, {
           currentUserId: access.userId,

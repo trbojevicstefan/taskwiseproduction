@@ -11,6 +11,10 @@ import {
   serializeError,
   type StructuredLogger,
 } from "@/lib/observability";
+import {
+  maybeAutoDisableWorkflowForRepeatedFailures,
+  WORKFLOW_GUARDRAIL_SYSTEM_USER_ID,
+} from "@/lib/workflow-guardrails";
 
 const MAX_RETRY_DELAY_MS = 5 * 60 * 1000;
 const BASE_RETRY_DELAY_MS = 30 * 1000;
@@ -148,11 +152,31 @@ export const runWorkflowWebhookDeliverySendJob = async ({
       });
     }
 
+    let autoDisableResult: Awaited<
+      ReturnType<typeof maybeAutoDisableWorkflowForRepeatedFailures>
+    > | null = null;
+    if (!nextAttemptAt) {
+      try {
+        autoDisableResult = await maybeAutoDisableWorkflowForRepeatedFailures(db as any, {
+          workflowId: delivery.workflowId,
+          workspaceId: delivery.workspaceId,
+          reason: "workflow_delivery_repeated_failures",
+          updatedByUserId: WORKFLOW_GUARDRAIL_SYSTEM_USER_ID,
+        });
+      } catch (disableError) {
+        logger.warn("jobs.workflow-webhook-delivery-send.auto-disable-check-failed", {
+          error: serializeError(disableError),
+        });
+      }
+    }
+
     logger.warn("jobs.workflow-webhook-delivery-send.failed", {
       durationMs: Date.now() - startedAtMs,
       attemptNumber,
       statusCode: response.status,
       nextAttemptAt: nextAttemptAt?.toISOString() || null,
+      autoDisabled: autoDisableResult?.disabled || false,
+      autoDisableFailureCount: autoDisableResult?.failedCount || null,
     });
     return {
       deliveryId,
@@ -160,6 +184,7 @@ export const runWorkflowWebhookDeliverySendJob = async ({
       attemptNumber,
       responseStatusCode: response.status,
       retryScheduled: Boolean(nextAttemptAt),
+      autoDisabled: autoDisableResult?.disabled || false,
     };
   } catch (error) {
     const finishedAt = new Date();
@@ -190,11 +215,31 @@ export const runWorkflowWebhookDeliverySendJob = async ({
       });
     }
 
+    let autoDisableResult: Awaited<
+      ReturnType<typeof maybeAutoDisableWorkflowForRepeatedFailures>
+    > | null = null;
+    if (!nextAttemptAt) {
+      try {
+        autoDisableResult = await maybeAutoDisableWorkflowForRepeatedFailures(db as any, {
+          workflowId: delivery.workflowId,
+          workspaceId: delivery.workspaceId,
+          reason: "workflow_delivery_repeated_failures",
+          updatedByUserId: WORKFLOW_GUARDRAIL_SYSTEM_USER_ID,
+        });
+      } catch (disableError) {
+        logger.warn("jobs.workflow-webhook-delivery-send.auto-disable-check-failed", {
+          error: serializeError(disableError),
+        });
+      }
+    }
+
     logger.warn("jobs.workflow-webhook-delivery-send.exception", {
       durationMs: Date.now() - startedAtMs,
       attemptNumber,
       nextAttemptAt: nextAttemptAt?.toISOString() || null,
       error: serializeError(error),
+      autoDisabled: autoDisableResult?.disabled || false,
+      autoDisableFailureCount: autoDisableResult?.failedCount || null,
     });
     return {
       deliveryId,
@@ -202,7 +247,7 @@ export const runWorkflowWebhookDeliverySendJob = async ({
       attemptNumber,
       retryScheduled: Boolean(nextAttemptAt),
       error: serializeError(error),
+      autoDisabled: autoDisableResult?.disabled || false,
     };
   }
 };
-

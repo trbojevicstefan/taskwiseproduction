@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { apiError, apiSuccess, mapApiError, parseJsonBody } from "@/lib/api-route";
 import {
+  AUTOMATION_WORKFLOW_FILTER_OPERATORS,
   createAutomationWorkflow,
   listAutomationWorkflowsForWorkspace,
   serializeAutomationWorkflow,
@@ -10,16 +11,7 @@ import { requireWorkspaceRouteAccess } from "@/lib/workspace-route-access";
 
 const workflowFilterSchema = z.object({
   field: z.string().trim().min(1).max(120),
-  operator: z.enum([
-    "equals",
-    "not_equals",
-    "contains",
-    "not_contains",
-    "in",
-    "not_in",
-    "exists",
-    "not_exists",
-  ]),
+  operator: z.enum(AUTOMATION_WORKFLOW_FILTER_OPERATORS),
   value: z
     .union([
       z.string(),

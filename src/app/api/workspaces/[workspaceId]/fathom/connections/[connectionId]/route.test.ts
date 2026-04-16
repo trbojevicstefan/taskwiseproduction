@@ -2,10 +2,8 @@ import {
   DELETE,
   PATCH,
 } from "@/app/api/workspaces/[workspaceId]/fathom/connections/[connectionId]/route";
-import { updateUserById } from "@/lib/db/users";
 import { deleteFathomWebhook, getValidFathomAccessTokenForConnection } from "@/lib/fathom";
 import {
-  countFathomConnectionsForWorkspace,
   findFathomConnectionById,
   listFathomConnectionsForWorkspace,
   updateFathomConnectionById,
@@ -18,7 +16,6 @@ jest.mock("@/lib/workspace-route-access", () => ({
 }));
 
 jest.mock("@/lib/fathom-connections", () => ({
-  countFathomConnectionsForWorkspace: jest.fn(),
   findFathomConnectionById: jest.fn(),
   listFathomConnectionsForWorkspace: jest.fn(),
   serializeFathomConnection: jest.requireActual("@/lib/fathom-connections").serializeFathomConnection,
@@ -28,10 +25,6 @@ jest.mock("@/lib/fathom-connections", () => ({
 jest.mock("@/lib/fathom", () => ({
   deleteFathomWebhook: jest.fn(),
   getValidFathomAccessTokenForConnection: jest.fn(),
-}));
-
-jest.mock("@/lib/db/users", () => ({
-  updateUserById: jest.fn(),
 }));
 
 jest.mock("@/lib/workspaces", () => ({
@@ -49,17 +42,12 @@ const mockedListFathomConnectionsForWorkspace =
   >;
 const mockedUpdateFathomConnectionById =
   updateFathomConnectionById as jest.MockedFunction<typeof updateFathomConnectionById>;
-const mockedCountFathomConnectionsForWorkspace =
-  countFathomConnectionsForWorkspace as jest.MockedFunction<
-    typeof countFathomConnectionsForWorkspace
-  >;
 const mockedGetValidFathomAccessTokenForConnection =
   getValidFathomAccessTokenForConnection as jest.MockedFunction<
     typeof getValidFathomAccessTokenForConnection
   >;
 const mockedDeleteFathomWebhook =
   deleteFathomWebhook as jest.MockedFunction<typeof deleteFathomWebhook>;
-const mockedUpdateUserById = updateUserById as jest.MockedFunction<typeof updateUserById>;
 const mockedFindWorkspaceById = findWorkspaceById as jest.MockedFunction<typeof findWorkspaceById>;
 const mockedUpdateWorkspaceById =
   updateWorkspaceById as jest.MockedFunction<typeof updateWorkspaceById>;
@@ -189,7 +177,7 @@ describe("workspace fathom connection detail route", () => {
     );
   });
 
-  it("revokes a workspace connection and cleans legacy fallback user flags when last active", async () => {
+  it("revokes a workspace connection and clears managed webhook state", async () => {
     mockedGetValidFathomAccessTokenForConnection.mockResolvedValue("access-token");
     mockedDeleteFathomWebhook.mockResolvedValue(undefined as never);
     mockedUpdateFathomConnectionById.mockResolvedValue({
@@ -197,8 +185,6 @@ describe("workspace fathom connection detail route", () => {
       status: "revoked",
       revokedAt: new Date("2026-04-15T12:00:00.000Z"),
     } as any);
-    mockedCountFathomConnectionsForWorkspace.mockResolvedValue(0 as never);
-    mockedUpdateUserById.mockResolvedValue({} as any);
 
     const response = await DELETE(new Request("http://localhost"), {
       params: { workspaceId: "workspace-1", connectionId: "connection-1" },
@@ -206,10 +192,5 @@ describe("workspace fathom connection detail route", () => {
 
     expect(response.status).toBe(200);
     expect(mockedDeleteFathomWebhook).toHaveBeenCalledTimes(1);
-    expect(mockedUpdateUserById).toHaveBeenCalledWith("user-1", {
-      fathomConnected: false,
-      fathomWebhookToken: null,
-      fathomUserId: null,
-    });
   });
 });

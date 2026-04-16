@@ -6,11 +6,9 @@ import {
   getValidFathomAccessTokenForConnection,
 } from "@/lib/fathom";
 import {
-  countFathomConnectionsForWorkspace,
   findPreferredFathomConnectionForWorkspace,
   updateFathomConnectionById,
 } from "@/lib/fathom-connections";
-import { updateUserById } from "@/lib/db/users";
 import { getSessionUserId } from "@/lib/server-auth";
 import { resolveWorkspaceScopeForUser } from "@/lib/workspace-scope";
 
@@ -67,19 +65,6 @@ export async function POST() {
         lastError: null,
       },
     });
-
-    const remainingActiveConnections = await countFathomConnectionsForWorkspace(
-      db as any,
-      workspaceScope.workspaceId,
-      { status: "active" }
-    );
-    if (remainingActiveConnections === 0) {
-      await updateUserById(connection.legacyUserId || connection.createdByUserId, {
-        fathomConnected: false,
-        fathomWebhookToken: null,
-        fathomUserId: null,
-      });
-    }
 
     return NextResponse.json({
       success: true,

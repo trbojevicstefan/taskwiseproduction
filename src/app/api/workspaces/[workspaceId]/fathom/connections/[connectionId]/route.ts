@@ -1,12 +1,10 @@
 import { z } from "zod";
 import { apiError, apiSuccess, mapApiError, parseJsonBody } from "@/lib/api-route";
-import { updateUserById } from "@/lib/db/users";
 import {
   deleteFathomWebhook,
   getValidFathomAccessTokenForConnection,
 } from "@/lib/fathom";
 import {
-  countFathomConnectionsForWorkspace,
   findFathomConnectionById,
   listFathomConnectionsForWorkspace,
   serializeFathomConnection,
@@ -257,19 +255,6 @@ export async function DELETE(
     const workspace = await findWorkspaceById(access.db as any, workspaceId);
     if (workspace?.settings?.integrations?.preferredFathomConnectionId === connectionId) {
       await setWorkspacePreferredFathomConnection(access.db as any, workspaceId, null);
-    }
-
-    const remainingActiveConnections = await countFathomConnectionsForWorkspace(
-      access.db as any,
-      workspaceId,
-      { status: "active" }
-    );
-    if (remainingActiveConnections === 0) {
-      await updateUserById(connection.legacyUserId || connection.createdByUserId, {
-        fathomConnected: false,
-        fathomWebhookToken: null,
-        fathomUserId: null,
-      });
     }
 
     return apiSuccess({

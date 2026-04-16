@@ -1,7 +1,7 @@
 ﻿// src/components/auth/SignupForm.tsx
 "use client";
 
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -18,8 +18,58 @@ export default function SignupForm() {
   const [confirmPassword, setConfirmPassword] = useState('');
   const { signup, loading } = useAuth();
   const [error, setError] = useState<string | null>(null);
+  const [isGoogleProviderAvailable, setIsGoogleProviderAvailable] = useState<boolean | null>(null);
   const searchParams = useSearchParams();
   const callbackUrl = searchParams?.get("callbackUrl") || "/meetings";
+  const authErrorCode = searchParams?.get("error") || null;
+
+  useEffect(() => {
+    let active = true;
+
+    const loadProviders = async () => {
+      try {
+        const response = await fetch("/api/auth/providers", { cache: "no-store" });
+        const payload = await response.json().catch(() => ({}));
+        if (!active) return;
+        setIsGoogleProviderAvailable(Boolean(payload?.google));
+      } catch {
+        if (!active) return;
+        setIsGoogleProviderAvailable(false);
+      }
+    };
+
+    void loadProviders();
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const oauthErrorMessage = useMemo(() => {
+    if (!authErrorCode) return null;
+
+    const code = authErrorCode.trim();
+    if (!code) return null;
+
+    if (code === "google") {
+      return "Google signup is not available. Check GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET in .env.local and restart the dev server.";
+    }
+    if (code === "OAuthSignin") {
+      return "Google OAuth could not start. Verify Google OAuth app settings and local callback URL.";
+    }
+    if (code === "OAuthCallback") {
+      return "Google OAuth callback failed. Ensure Google Cloud allows http://localhost:9002/api/auth/callback/google and NEXTAUTH_URL matches your local URL.";
+    }
+    if (code === "Callback") {
+      return "Auth callback failed. Verify MongoDB connectivity and OAuth callback settings, then retry.";
+    }
+    if (code === "AccessDenied") {
+      return "Google signup was canceled or denied.";
+    }
+    if (code === "Configuration") {
+      return "Auth configuration error. Verify NEXTAUTH_URL, NEXTAUTH_SECRET, and Google OAuth credentials.";
+    }
+    return `Google signup failed (${code}).`;
+  }, [authErrorCode]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -94,10 +144,16 @@ export default function SignupForm() {
             type="button"
             variant="outline"
             className="w-full border-white/20 text-white hover:bg-white/10"
+            disabled={loading || isGoogleProviderAvailable === false}
             onClick={() => signIn("google", { callbackUrl })}
           >
-            Continue with Google
+            {isGoogleProviderAvailable === false
+              ? "Google Signup Not Configured"
+              : "Continue with Google"}
           </Button>
+          {oauthErrorMessage ? (
+            <p className="mt-2 text-xs text-red-300">{oauthErrorMessage}</p>
+          ) : null}
         </div>
       </CardContent>
       <CardFooter className="flex justify-center">

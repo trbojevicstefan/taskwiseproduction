@@ -4,15 +4,28 @@ import {
   type AutomationWorkflowDoc,
   type AutomationWorkflowFieldSelection,
   type AutomationWorkflowFilter,
+  type AutomationWorkflowTransform,
   type AutomationWorkflowTrigger,
 } from "@/lib/automation-workflows";
 import { enqueueJob } from "@/lib/jobs/store";
-import { createWebhookDelivery } from "@/lib/webhook-deliveries";
+import { serializeError } from "@/lib/observability";
+import {
+  appendWebhookDeliveryAttempt,
+  createWebhookDelivery,
+} from "@/lib/webhook-deliveries";
+import {
+  maybeAutoDisableWorkflowForRepeatedFailures,
+  WORKFLOW_GUARDRAIL_SYSTEM_USER_ID,
+  getWorkflowGuardrailConfig,
+} from "@/lib/workflow-guardrails";
+import { runWorkflowTransform, WorkflowTransformError } from "@/lib/workflow-transform";
 
-type MeetingWorkflowAutomationPayload = {
+export type MeetingWorkflowAutomationPayload = {
   meetingId: string;
   workspaceId?: string | null;
   title?: string | null;
+  transcript?: string | null;
+  tags?: unknown[];
   attendees?: Array<Record<string, unknown>>;
   extractedTasks?: Array<Record<string, unknown>>;
 };
@@ -45,6 +58,14 @@ const toIsoStringOrNull = (value: unknown) => {
 const toArray = <T = unknown>(value: unknown): T[] =>
   Array.isArray(value) ? (value as T[]) : [];
 
+const toRecordArray = (value: unknown): Array<Record<string, unknown>> =>
+  toArray(value).filter(
+    (candidate): candidate is Record<string, unknown> =>
+      Boolean(candidate) && typeof candidate === "object" && !Array.isArray(candidate)
+  );
+
+const dedupeStrings = (values: string[]) => Array.from(new Set(values));
+
 const toComparableString = (value: unknown, caseSensitive = false) => {
   if (typeof value !== "string") {
     return null;
@@ -59,6 +80,26 @@ const deepEquals = (left: unknown, right: unknown) => {
   } catch {
     return left === right;
   }
+};
+
+const toComparableNumber = (value: unknown) => {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+  if (value instanceof Date && Number.isFinite(value.getTime())) {
+    return value.getTime();
+  }
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!trimmed) return null;
+    if (/^-?\d+(\.\d+)?$/.test(trimmed)) {
+      const parsed = Number(trimmed);
+      return Number.isFinite(parsed) ? parsed : null;
+    }
+    const parsedDate = Date.parse(trimmed);
+    return Number.isFinite(parsedDate) ? parsedDate : null;
+  }
+  return null;
 };
 
 const resolvePathValue = (source: any, path: string) => {
@@ -115,6 +156,40 @@ const assignPathValue = (target: Record<string, unknown>, path: string, value: u
   }
 };
 
+const extractStringValues = (
+  records: Array<Record<string, unknown>>,
+  paths: string[]
+) => {
+  const values: string[] = [];
+  for (const record of records) {
+    for (const path of paths) {
+      const resolved = resolvePathValue(record, path);
+      const candidates = Array.isArray(resolved) ? resolved : [resolved];
+      for (const candidate of candidates) {
+        const normalized = normalizeString(candidate);
+        if (normalized) {
+          values.push(normalized);
+        }
+      }
+    }
+  }
+  return dedupeStrings(values);
+};
+
+const flattenTaskRecords = (tasks: Array<Record<string, unknown>>) => {
+  const flattened: Array<Record<string, unknown>> = [];
+  const queue = [...tasks];
+  while (queue.length) {
+    const current = queue.shift();
+    if (!current) continue;
+    flattened.push(current);
+    toRecordArray(current.subtasks).forEach((subtask) => {
+      queue.push(subtask);
+    });
+  }
+  return flattened;
+};
+
 const matchesEquals = (
   actual: unknown,
   expected: unknown,
@@ -165,6 +240,89 @@ const matchesIn = (actual: unknown, expected: unknown, caseSensitive = false): b
   return expectedValues.some((candidate) => matchesEquals(actual, candidate, caseSensitive));
 };
 
+const matchesContainsAny = (
+  actual: unknown,
+  expected: unknown,
+  caseSensitive = false
+): boolean => {
+  const expectedValues = Array.isArray(expected) ? expected : [expected];
+  const normalizedExpected = expectedValues.filter(
+    (candidate) => candidate !== undefined && candidate !== null
+  );
+  if (!normalizedExpected.length) return false;
+
+  if (Array.isArray(actual)) {
+    return actual.some((actualCandidate) =>
+      normalizedExpected.some(
+        (expectedCandidate) =>
+          matchesContains(actualCandidate, expectedCandidate, caseSensitive) ||
+          matchesEquals(actualCandidate, expectedCandidate, caseSensitive)
+      )
+    );
+  }
+
+  return normalizedExpected.some(
+    (expectedCandidate) =>
+      matchesContains(actual, expectedCandidate, caseSensitive) ||
+      matchesEquals(actual, expectedCandidate, caseSensitive)
+  );
+};
+
+const matchesContainsAll = (
+  actual: unknown,
+  expected: unknown,
+  caseSensitive = false
+): boolean => {
+  const expectedValues = Array.isArray(expected) ? expected : [expected];
+  const normalizedExpected = expectedValues.filter(
+    (candidate) => candidate !== undefined && candidate !== null
+  );
+  if (!normalizedExpected.length) return false;
+
+  if (Array.isArray(actual)) {
+    return normalizedExpected.every((expectedCandidate) =>
+      actual.some(
+        (actualCandidate) =>
+          matchesContains(actualCandidate, expectedCandidate, caseSensitive) ||
+          matchesEquals(actualCandidate, expectedCandidate, caseSensitive)
+      )
+    );
+  }
+
+  return normalizedExpected.every(
+    (expectedCandidate) =>
+      matchesContains(actual, expectedCandidate, caseSensitive) ||
+      matchesEquals(actual, expectedCandidate, caseSensitive)
+  );
+};
+
+const matchesComparison = (
+  actual: unknown,
+  expected: unknown,
+  operator: "greater_than" | "greater_than_or_equal" | "less_than" | "less_than_or_equal"
+): boolean => {
+  if (Array.isArray(actual)) {
+    return actual.some((candidate) => matchesComparison(candidate, expected, operator));
+  }
+
+  const left = toComparableNumber(actual);
+  const right = toComparableNumber(expected);
+  if (left === null || right === null) return false;
+
+  switch (operator) {
+    case "greater_than":
+      return left > right;
+    case "greater_than_or_equal":
+      return left >= right;
+    case "less_than":
+      return left < right;
+    case "less_than_or_equal":
+      return left <= right;
+    default:
+      return false;
+  }
+};
+
 const matchesFilter = (source: Record<string, unknown>, filter: AutomationWorkflowFilter) => {
   const actualValue = resolvePathValue(source, filter.field);
   const caseSensitive = Boolean(filter.caseSensitive);
@@ -186,6 +344,18 @@ const matchesFilter = (source: Record<string, unknown>, filter: AutomationWorkfl
       return matchesIn(actualValue, filter.value, caseSensitive);
     case "not_in":
       return !matchesIn(actualValue, filter.value, caseSensitive);
+    case "greater_than":
+      return matchesComparison(actualValue, filter.value, "greater_than");
+    case "greater_than_or_equal":
+      return matchesComparison(actualValue, filter.value, "greater_than_or_equal");
+    case "less_than":
+      return matchesComparison(actualValue, filter.value, "less_than");
+    case "less_than_or_equal":
+      return matchesComparison(actualValue, filter.value, "less_than_or_equal");
+    case "contains_any":
+      return matchesContainsAny(actualValue, filter.value, caseSensitive);
+    case "contains_all":
+      return matchesContainsAll(actualValue, filter.value, caseSensitive);
     default:
       return false;
   }
@@ -214,15 +384,39 @@ const selectWorkflowPayload = (
   return projected;
 };
 
-const applyWorkflowTransform = (
+const toUtf8ByteLength = (value: string) => Buffer.byteLength(value, "utf8");
+
+const toSerializableError = (error: unknown) => {
+  const serialized = serializeError(error) as Record<string, unknown>;
+  if (error instanceof WorkflowTransformError) {
+    serialized.code = error.code;
+    serialized.details = error.details || null;
+  }
+  return serialized;
+};
+
+const applyWorkflowTransform = async (
   payload: Record<string, unknown>,
   workflow: AutomationWorkflowDoc
 ) => {
-  // Transform runtime execution is implemented in a later step.
   if (!workflow.transform?.script) {
     return payload;
   }
-  return payload;
+
+  const guardrails = getWorkflowGuardrailConfig();
+  const transformed = await runWorkflowTransform({
+    workflowId: workflow._id,
+    script: workflow.transform.script,
+    timeoutMs: workflow.transform.timeoutMs,
+    payload,
+    limits: {
+      memoryLimitBytes: guardrails.transformMemoryLimitBytes,
+      stackLimitBytes: guardrails.transformStackLimitBytes,
+      inputLimitBytes: guardrails.transformInputLimitBytes,
+      outputLimitBytes: guardrails.transformOutputLimitBytes,
+    },
+  });
+  return transformed.payload;
 };
 
 const buildRetryHeaders = (
@@ -263,9 +457,11 @@ const loadMeetingForWorkflow = async (db: any, userId: string, meetingId: string
         connectionId: 1,
         providerSourceId: 1,
         title: 1,
+        originalTranscript: 1,
         summary: 1,
         attendees: 1,
         extractedTasks: 1,
+        tags: 1,
         meetingMetadata: 1,
         recordingUrl: 1,
         shareUrl: 1,
@@ -291,6 +487,29 @@ const buildCanonicalPayload = (
   const extractedTasks = toArray(payload.extractedTasks).length
     ? toArray(payload.extractedTasks)
     : toArray(meetingDoc?.extractedTasks);
+  const tags = toArray(payload.tags).length ? toArray(payload.tags) : toArray(meetingDoc?.tags);
+  const attendeeRecords = toRecordArray(attendees);
+  const flattenedTaskRecords = flattenTaskRecords(toRecordArray(extractedTasks));
+  const attendeeNames = extractStringValues(attendeeRecords, [
+    "name",
+    "displayName",
+    "fullName",
+    "label",
+  ]);
+  const attendeeEmails = extractStringValues(attendeeRecords, [
+    "email",
+    "mail",
+    "primaryEmail",
+    "address",
+  ]);
+  const taskTitles = extractStringValues(flattenedTaskRecords, ["title", "name"]);
+  const taskStatuses = extractStringValues(flattenedTaskRecords, ["status", "state"]);
+  const taskAssignees = extractStringValues(flattenedTaskRecords, [
+    "assignee",
+    "assigneeName",
+    "assigneeEmail",
+    "owner",
+  ]);
 
   return {
     event: {
@@ -303,11 +522,19 @@ const buildCanonicalPayload = (
     meeting: {
       id: normalizeString(meetingDoc?._id) || payload.meetingId,
       title: normalizeString(payload.title) || normalizeString(meetingDoc?.title),
+      transcript:
+        normalizeString(payload.transcript) || normalizeString(meetingDoc?.originalTranscript),
       summary: normalizeString(meetingDoc?.summary),
       attendees,
       attendeeCount: attendees.length,
+      attendeeNames,
+      attendeeEmails,
       extractedTasks,
       taskCount: extractedTasks.length,
+      taskTitles,
+      taskStatuses,
+      taskAssignees,
+      tags,
       metadata: meetingDoc?.meetingMetadata || null,
       recordingUrl: normalizeString(meetingDoc?.recordingUrl),
       shareUrl: normalizeString(meetingDoc?.shareUrl),
@@ -323,6 +550,98 @@ const buildCanonicalPayload = (
       lastActivityAt: toIsoStringOrNull(meetingDoc?.lastActivityAt),
     },
   };
+};
+
+export type CanonicalWorkflowPayload = ReturnType<typeof buildCanonicalPayload>;
+
+const buildWorkflowDeliveryBody = (
+  canonicalPayload: CanonicalWorkflowPayload,
+  workflow: AutomationWorkflowDoc,
+  payload: unknown
+) => ({
+  event: canonicalPayload.event,
+  workspace: canonicalPayload.workspace,
+  workflow: {
+    id: workflow._id,
+    name: workflow.name,
+    version: workflow.version,
+    trigger: workflow.trigger,
+  },
+  payload,
+});
+
+const recordWorkflowFailureDelivery = async (input: {
+  db: any;
+  workspaceId: string;
+  meetingId: string;
+  eventType: AutomationWorkflowTrigger;
+  workflow: AutomationWorkflowDoc;
+  canonicalPayload: CanonicalWorkflowPayload;
+  error: unknown;
+  reason: string;
+}) => {
+  const failedAt = new Date();
+  const failureBody = buildWorkflowDeliveryBody(
+    input.canonicalPayload,
+    input.workflow,
+    {
+      skipped: true,
+      reason: input.reason,
+      error: {
+        message:
+          input.error instanceof Error
+            ? input.error.message
+            : "Workflow delivery was skipped due to a guardrail failure.",
+      },
+    }
+  );
+  const serializedFailureBody = JSON.stringify(failureBody);
+  const deliveryId = randomUUID();
+  const requestHeaders = {
+    ...buildRetryHeaders(input.workflow, serializedFailureBody, failedAt),
+    "x-taskwise-delivery-id": deliveryId,
+    "x-taskwise-delivery-skipped": "true",
+  };
+
+  const failureDelivery = await createWebhookDelivery(input.db, {
+    id: deliveryId,
+    workspaceId: input.workspaceId,
+    workflowId: input.workflow._id,
+    workflowVersion: input.workflow.version,
+    connectionId: input.canonicalPayload.meeting.connectionId || null,
+    sourceEventId: `${input.eventType}:${input.meetingId}`,
+    deliveryKey: null,
+    eventType: input.eventType,
+    maxAttempts: 1,
+    request: {
+      url: input.workflow.destination.url,
+      method: "POST",
+      headers: requestHeaders,
+      body: failureBody,
+      bodySha256: createHash("sha256").update(serializedFailureBody).digest("hex"),
+    },
+  });
+
+  await appendWebhookDeliveryAttempt(input.db, deliveryId, {
+    attemptNumber: 1,
+    status: "failed",
+    startedAt: failedAt,
+    finishedAt: failedAt,
+    request: failureDelivery.request,
+    error: toSerializableError(input.error) as any,
+    nextAttemptAt: null,
+  });
+
+  try {
+    await maybeAutoDisableWorkflowForRepeatedFailures(input.db as any, {
+      workflowId: input.workflow._id,
+      workspaceId: input.workspaceId,
+      reason: input.reason,
+      updatedByUserId: WORKFLOW_GUARDRAIL_SYSTEM_USER_ID,
+    });
+  } catch {
+    // Guardrail checks must not break meeting side-effects.
+  }
 };
 
 export const queueMeetingWorkflowAutomation = async (
@@ -372,6 +691,7 @@ export const queueMeetingWorkflowAutomation = async (
     meetingDoc,
     emittedAt
   );
+  const guardrails = getWorkflowGuardrailConfig();
 
   let matchedWorkflows = 0;
   let queuedDeliveries = 0;
@@ -383,19 +703,70 @@ export const queueMeetingWorkflowAutomation = async (
     matchedWorkflows += 1;
 
     const selectedPayload = selectWorkflowPayload(canonicalPayload, workflow.fieldSelection);
-    const transformedPayload = applyWorkflowTransform(selectedPayload, workflow);
-    const deliveryBody = {
-      event: canonicalPayload.event,
-      workspace: canonicalPayload.workspace,
-      workflow: {
-        id: workflow._id,
-        name: workflow.name,
-        version: workflow.version,
-        trigger: workflow.trigger,
-      },
-      payload: transformedPayload,
-    };
-    const serializedBody = JSON.stringify(deliveryBody);
+    let transformedPayload: unknown;
+    try {
+      transformedPayload = await applyWorkflowTransform(selectedPayload, workflow);
+    } catch (error) {
+      await recordWorkflowFailureDelivery({
+        db: input.db,
+        workspaceId,
+        meetingId,
+        eventType: input.eventType,
+        workflow,
+        canonicalPayload,
+        error,
+        reason:
+          error instanceof WorkflowTransformError
+            ? `workflow_transform_${error.code}`
+            : "workflow_transform_runtime_error",
+      });
+      continue;
+    }
+
+    const deliveryBody = buildWorkflowDeliveryBody(
+      canonicalPayload,
+      workflow,
+      transformedPayload
+    );
+
+    let serializedBody = "";
+    try {
+      const maybeSerializedBody = JSON.stringify(deliveryBody);
+      if (typeof maybeSerializedBody !== "string") {
+        throw new Error("Workflow delivery payload is not JSON-serializable.");
+      }
+      serializedBody = maybeSerializedBody;
+    } catch (error) {
+      await recordWorkflowFailureDelivery({
+        db: input.db,
+        workspaceId,
+        meetingId,
+        eventType: input.eventType,
+        workflow,
+        canonicalPayload,
+        error,
+        reason: "workflow_payload_serialization_error",
+      });
+      continue;
+    }
+
+    const deliveryBodyBytes = toUtf8ByteLength(serializedBody);
+    if (deliveryBodyBytes > guardrails.deliveryBodyLimitBytes) {
+      await recordWorkflowFailureDelivery({
+        db: input.db,
+        workspaceId,
+        meetingId,
+        eventType: input.eventType,
+        workflow,
+        canonicalPayload,
+        error: new Error(
+          `Workflow delivery payload exceeded ${guardrails.deliveryBodyLimitBytes} bytes.`
+        ),
+        reason: "workflow_payload_too_large",
+      });
+      continue;
+    }
+
     const deliveryId = randomUUID();
     const requestHeaders = {
       ...buildRetryHeaders(workflow, serializedBody, emittedAt),
@@ -451,3 +822,55 @@ export const queueMeetingWorkflowAutomation = async (
   };
 };
 
+export const buildCanonicalWorkflowPayloadForAutomation = (input: {
+  eventType: AutomationWorkflowTrigger;
+  workspaceId: string;
+  payload: MeetingWorkflowAutomationPayload;
+  meetingDoc: any;
+  emittedAt?: Date;
+}) =>
+  buildCanonicalPayload(
+    input.eventType,
+    input.workspaceId,
+    input.payload,
+    input.meetingDoc,
+    input.emittedAt || new Date()
+  );
+
+export const evaluateAutomationWorkflowFilters = (
+  source: Record<string, unknown>,
+  filters: AutomationWorkflowFilter[]
+) => filters.every((filter) => matchesFilter(source, filter));
+
+export const selectAutomationWorkflowPayload = (
+  source: Record<string, unknown>,
+  selection: AutomationWorkflowFieldSelection
+) => selectWorkflowPayload(source, selection);
+
+export const runAutomationWorkflowTransform = async (
+  payload: Record<string, unknown>,
+  input: {
+    workflowId: string;
+    transform: AutomationWorkflowTransform;
+  }
+) => {
+  if (!input.transform?.script) {
+    return payload;
+  }
+
+  const guardrails = getWorkflowGuardrailConfig();
+  const transformed = await runWorkflowTransform({
+    workflowId: input.workflowId,
+    script: input.transform.script,
+    timeoutMs: input.transform.timeoutMs,
+    payload,
+    limits: {
+      memoryLimitBytes: guardrails.transformMemoryLimitBytes,
+      stackLimitBytes: guardrails.transformStackLimitBytes,
+      inputLimitBytes: guardrails.transformInputLimitBytes,
+      outputLimitBytes: guardrails.transformOutputLimitBytes,
+    },
+  });
+
+  return transformed.payload;
+};

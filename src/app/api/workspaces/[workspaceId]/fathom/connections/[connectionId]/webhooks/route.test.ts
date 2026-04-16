@@ -3,11 +3,11 @@ import {
   GET,
   POST,
 } from "@/app/api/workspaces/[workspaceId]/fathom/connections/[connectionId]/webhooks/route";
-import { updateUserById } from "@/lib/db/users";
 import {
   deleteFathomWebhook,
   ensureFathomConnectionWebhook,
   getFathomWebhookUrl,
+  pruneFathomManagedWebhooks,
   getValidFathomAccessTokenForConnection,
 } from "@/lib/fathom";
 import {
@@ -31,11 +31,12 @@ jest.mock("@/lib/fathom", () => ({
   deleteFathomWebhook: jest.fn(),
   ensureFathomConnectionWebhook: jest.fn(),
   getFathomWebhookUrl: jest.fn((token: string) => `https://public.example/webhook?token=${token}`),
+  pruneFathomManagedWebhooks: jest.fn(async (_accessToken: string, input: any) => ({
+    managedWebhooks: input.managedWebhooks || [],
+    deletedCount: 0,
+    cleanupErrors: [],
+  })),
   getValidFathomAccessTokenForConnection: jest.fn(),
-}));
-
-jest.mock("@/lib/db/users", () => ({
-  updateUserById: jest.fn(),
 }));
 
 const mockedRequireWorkspaceRouteAccess =
@@ -52,7 +53,8 @@ const mockedEnsureFathomConnectionWebhook =
   ensureFathomConnectionWebhook as jest.MockedFunction<typeof ensureFathomConnectionWebhook>;
 const mockedDeleteFathomWebhook =
   deleteFathomWebhook as jest.MockedFunction<typeof deleteFathomWebhook>;
-const mockedUpdateUserById = updateUserById as jest.MockedFunction<typeof updateUserById>;
+const mockedPruneFathomManagedWebhooks =
+  pruneFathomManagedWebhooks as jest.MockedFunction<typeof pruneFathomManagedWebhooks>;
 const mockedGetFathomWebhookUrl =
   getFathomWebhookUrl as jest.MockedFunction<typeof getFathomWebhookUrl>;
 
@@ -107,6 +109,11 @@ const createConnection = (overrides: Record<string, any> = {}) =>
 describe("workspace fathom connection webhook route", () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    mockedPruneFathomManagedWebhooks.mockResolvedValue({
+      managedWebhooks: [],
+      deletedCount: 0,
+      cleanupErrors: [],
+    });
     mockedRequireWorkspaceRouteAccess.mockResolvedValue({
       ok: true,
       db: {} as any,
@@ -160,7 +167,6 @@ describe("workspace fathom connection webhook route", () => {
         },
       ],
     } as any);
-    mockedUpdateUserById.mockResolvedValue({} as any);
 
     const response = await POST(new Request("http://localhost", { method: "POST" }), {
       params: { workspaceId: "workspace-1", connectionId: "connection-1" },
@@ -171,9 +177,6 @@ describe("workspace fathom connection webhook route", () => {
     expect(payload.ok).toBe(true);
     expect(payload.status).toBe("created");
     expect(payload.webhookId).toBe("webhook-1");
-    expect(mockedUpdateUserById).toHaveBeenCalledWith("user-1", {
-      fathomWebhookToken: expect.any(String),
-    });
     expect(mockedEnsureFathomConnectionWebhook).toHaveBeenCalledWith(
       "connection-1",
       "access-token",

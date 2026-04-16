@@ -2,7 +2,6 @@ import { NextResponse } from "next/server";
 import { apiError } from "@/lib/api-route";
 import { randomBytes } from "crypto";
 import { getDb } from "@/lib/db";
-import { updateUserById } from "@/lib/db/users";
 import {
   findPreferredFathomConnectionForWorkspace,
   updateFathomConnectionById,
@@ -11,6 +10,7 @@ import {
   ensureFathomConnectionWebhook,
   FATHOM_WEBHOOK_EVENT,
   getFathomWebhookUrl,
+  pruneFathomManagedWebhooks,
   getValidFathomAccessTokenForConnection,
 } from "@/lib/fathom";
 import { getSessionUserId } from "@/lib/server-auth";
@@ -43,7 +43,6 @@ export async function POST() {
     return apiError(400, "request_error", "Fathom integration not connected.");
   }
 
-  const targetUserId = connection.legacyUserId || connection.createdByUserId;
   const webhookToken = randomBytes(24).toString("hex");
   await updateFathomConnectionById(db as any, connection._id, {
     updatedByUserId: userId,
@@ -54,7 +53,6 @@ export async function POST() {
       lastError: null,
     },
   });
-  await updateUserById(targetUserId, { fathomWebhookToken: webhookToken });
 
   try {
     const accessToken = await getValidFathomAccessTokenForConnection(connection._id);
@@ -64,6 +62,12 @@ export async function POST() {
       webhookToken,
       { updatedByUserId: userId }
     );
+    const webhookUrl = result.webhookUrl || getFathomWebhookUrl(webhookToken);
+    const pruned = await pruneFathomManagedWebhooks(accessToken, {
+      webhookId: result.webhookId || null,
+      webhookUrl,
+      managedWebhooks: result.managedWebhooks || [],
+    });
 
     await updateFathomConnectionById(db as any, connection._id, {
       updatedByUserId: userId,
@@ -72,11 +76,15 @@ export async function POST() {
         secret: result.webhookSecret || null,
         status: "active",
         webhookId: result.webhookId || null,
-        webhookUrl: result.webhookUrl || null,
+        webhookUrl: result.webhookUrl || webhookUrl,
         webhookEvent: FATHOM_WEBHOOK_EVENT,
-        managedWebhooks: result.managedWebhooks || [],
+        managedWebhooks: pruned.managedWebhooks,
         lastSyncedAt: new Date(),
-        lastError: null,
+        lastError: pruned.cleanupErrors.length
+          ? {
+              message: `Stale webhook cleanup had ${pruned.cleanupErrors.length} error(s).`,
+            }
+          : null,
       },
     });
 
@@ -84,7 +92,9 @@ export async function POST() {
       status: result.status,
       connectionId: connection._id,
       webhookId: result.webhookId,
-      webhookUrl: result.webhookUrl || getFathomWebhookUrl(webhookToken),
+      webhookUrl,
+      staleWebhooksDeleted: pruned.deletedCount,
+      cleanupErrors: pruned.cleanupErrors,
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Webhook setup failed.";

@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
 import { randomBytes } from "crypto";
-import { updateUserById } from "@/lib/db/users";
 import { getDb } from "@/lib/db";
 import {
   consumeFathomConnectionOAuthState,
@@ -12,7 +11,6 @@ import {
 import {
   ensureFathomConnectionWebhook,
   getFathomRedirectUri,
-  saveFathomInstallation,
 } from "@/lib/fathom";
 import { logFathomIntegration } from "@/lib/fathom-logs";
 
@@ -274,23 +272,6 @@ export async function GET(request: Request) {
     if (!connection) {
       throw new Error("Failed to persist Fathom connection.");
     }
-
-    await saveFathomInstallation({
-      _id: userId,
-      userId,
-      accessToken: payload.access_token,
-      refreshToken: payload.refresh_token || null,
-      expiresAt: payload.expires_in ? Date.now() + payload.expires_in * 1000 : null,
-      scope: payload.scope || null,
-      fathomUserId: payload.user_id || null,
-      updatedAt: new Date(),
-    });
-
-    await updateUserById(userId, {
-      fathomWebhookToken: webhookToken,
-      fathomConnected: true,
-      fathomUserId: payload.user_id || null,
-    });
 
     let webhookStatus = "unknown";
     let webhookErrorMessage: string | null = null;

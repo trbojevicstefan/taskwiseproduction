@@ -5,6 +5,7 @@ import {
   appendWebhookDeliveryAttempt,
   findWebhookDeliveryById,
 } from "@/lib/webhook-deliveries";
+import { maybeAutoDisableWorkflowForRepeatedFailures } from "@/lib/workflow-guardrails";
 
 jest.mock("@/lib/db", () => ({
   getDb: jest.fn(),
@@ -17,6 +18,11 @@ jest.mock("@/lib/jobs/store", () => ({
 jest.mock("@/lib/webhook-deliveries", () => ({
   appendWebhookDeliveryAttempt: jest.fn(),
   findWebhookDeliveryById: jest.fn(),
+}));
+
+jest.mock("@/lib/workflow-guardrails", () => ({
+  WORKFLOW_GUARDRAIL_SYSTEM_USER_ID: "system:workflow-guardrail",
+  maybeAutoDisableWorkflowForRepeatedFailures: jest.fn(),
 }));
 
 jest.mock("@/lib/observability", () => ({
@@ -42,6 +48,10 @@ const mockedFindWebhookDeliveryById =
   findWebhookDeliveryById as jest.MockedFunction<typeof findWebhookDeliveryById>;
 const mockedAppendWebhookDeliveryAttempt =
   appendWebhookDeliveryAttempt as jest.MockedFunction<typeof appendWebhookDeliveryAttempt>;
+const mockedMaybeAutoDisableWorkflowForRepeatedFailures =
+  maybeAutoDisableWorkflowForRepeatedFailures as jest.MockedFunction<
+    typeof maybeAutoDisableWorkflowForRepeatedFailures
+  >;
 
 const createDelivery = (overrides: Record<string, any> = {}) =>
   ({
@@ -71,6 +81,13 @@ describe("runWorkflowWebhookDeliverySendJob", () => {
     jest.clearAllMocks();
     mockedGetDb.mockResolvedValue({} as any);
     mockedEnqueueJob.mockResolvedValue({ _id: "job-1" } as any);
+    mockedMaybeAutoDisableWorkflowForRepeatedFailures.mockResolvedValue({
+      checked: true,
+      threshold: 5,
+      failedCount: 1,
+      disabled: false,
+      windowStartAt: null,
+    });
     global.fetch = jest.fn() as any;
   });
 
@@ -180,6 +197,12 @@ describe("runWorkflowWebhookDeliverySendJob", () => {
       })
     );
     expect(mockedEnqueueJob).not.toHaveBeenCalled();
+    expect(mockedMaybeAutoDisableWorkflowForRepeatedFailures).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        workflowId: "workflow-1",
+        workspaceId: "workspace-1",
+      })
+    );
   });
 });
-
