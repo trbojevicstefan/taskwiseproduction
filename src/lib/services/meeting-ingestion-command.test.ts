@@ -106,4 +106,25 @@ describe("runMeetingIngestionCommand", () => {
     expect(mockedPublishDomainEvent).toHaveBeenCalled();
     expect(mockedApplyMeetingIngestionSideEffects).not.toHaveBeenCalled();
   });
+
+  it("passes through meeting.updated when explicitly requested", async () => {
+    const db = {} as any;
+
+    await runMeetingIngestionCommand(db, {
+      mode: "always-event",
+      eventType: "meeting.updated",
+      userId: "user-1",
+      payload: {
+        meetingId: "meeting-4",
+      },
+    });
+
+    expect(mockedPublishDomainEvent).toHaveBeenCalledWith(
+      db,
+      expect.objectContaining({
+        type: "meeting.updated",
+        userId: "user-1",
+      })
+    );
+  });
 });

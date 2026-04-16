@@ -5,6 +5,7 @@ import { isAsyncDomainEventProcessingEnabled } from "@/lib/core-first-flags";
 import { enqueueJob } from "@/lib/jobs/store";
 import { createLogger } from "@/lib/observability";
 import { upsertPeopleFromAttendees } from "@/lib/people-sync";
+import { queueMeetingWorkflowAutomation } from "@/lib/meeting-workflow-automation";
 import { syncBoardItemsToStatusByTaskRecord } from "@/lib/services/board-status-sync";
 import { syncTasksForSource } from "@/lib/task-sync";
 import { getWorkspaceIdForUser } from "@/lib/workspace";
@@ -54,6 +55,10 @@ jest.mock("@/lib/observability", () => ({
   })),
 }));
 
+jest.mock("@/lib/meeting-workflow-automation", () => ({
+  queueMeetingWorkflowAutomation: jest.fn(),
+}));
+
 const mockedSyncBoardItemsToStatusByTaskRecord =
   syncBoardItemsToStatusByTaskRecord as jest.MockedFunction<
     typeof syncBoardItemsToStatusByTaskRecord
@@ -78,13 +83,19 @@ const mockedIsAsyncDomainEventProcessingEnabled =
   >;
 const mockedEnqueueJob = enqueueJob as jest.MockedFunction<typeof enqueueJob>;
 const mockedCreateLogger = createLogger as jest.MockedFunction<typeof createLogger>;
+const mockedQueueMeetingWorkflowAutomation =
+  queueMeetingWorkflowAutomation as jest.MockedFunction<
+    typeof queueMeetingWorkflowAutomation
+  >;
 
 const createFakeDb = ({
   tasksFindResult = [],
   taskUpdateModifiedCount = 1,
+  meetingFindOneResult = { workspaceId: "workspace-1" },
 }: {
   tasksFindResult?: any[];
   taskUpdateModifiedCount?: number;
+  meetingFindOneResult?: any | null;
 } = {}) => {
   const domainEventsInsertOne = jest.fn().mockResolvedValue({ acknowledged: true });
   const domainEventsUpdateOne = jest.fn().mockResolvedValue({ modifiedCount: 1 });
@@ -142,6 +153,7 @@ const createFakeDb = ({
   const tasksUpdateOne = jest
     .fn()
     .mockResolvedValue({ modifiedCount: taskUpdateModifiedCount });
+  const meetingsFindOne = jest.fn().mockResolvedValue(meetingFindOneResult);
 
   const collections: Record<string, any> = {
     domainEvents: {
@@ -154,6 +166,9 @@ const createFakeDb = ({
     tasks: {
       find: tasksFind,
       updateOne: tasksUpdateOne,
+    },
+    meetings: {
+      findOne: meetingsFindOne,
     },
   };
 
@@ -176,6 +191,7 @@ const createFakeDb = ({
     domainEventsUpdateOne,
     tasksFind,
     tasksUpdateOne,
+    meetingsFindOne,
   };
 };
 
@@ -189,6 +205,12 @@ describe("publishDomainEvent", () => {
     mockedSyncTasksForSource.mockResolvedValue({ upserted: 1, deleted: 0 } as any);
     mockedEnsureDefaultBoard.mockResolvedValue({ _id: "board-1" } as any);
     mockedEnsureBoardItemsForTasks.mockResolvedValue({ created: 1 } as any);
+    mockedQueueMeetingWorkflowAutomation.mockResolvedValue({
+      workspaceId: "workspace-1",
+      checkedWorkflows: 0,
+      matchedWorkflows: 0,
+      queuedDeliveries: 0,
+    });
   });
 
   it("keeps task and board state aligned when task status changes", async () => {
@@ -270,6 +292,45 @@ describe("publishDomainEvent", () => {
       tasks: { upserted: 1, deleted: 0 },
       boardItemsCreated: 1,
     });
+    expect(mockedQueueMeetingWorkflowAutomation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: "user-1",
+        eventType: "meeting.ingested",
+        payload: expect.objectContaining({
+          meetingId: "meeting-1",
+        }),
+      })
+    );
+  });
+
+  it("handles meeting.updated events with the same side-effect pipeline", async () => {
+    const { db } = createFakeDb();
+
+    const result = await publishDomainEvent(db as any, {
+      type: "meeting.updated",
+      userId: "user-1",
+      payload: {
+        meetingId: "meeting-2",
+        title: "Updated meeting",
+        attendees: [],
+        extractedTasks: [],
+      },
+    });
+
+    expect(result).toEqual({
+      people: { created: 0, updated: 0 },
+      tasks: { upserted: 0, deleted: 0 },
+      boardItemsCreated: 0,
+    });
+    expect(mockedQueueMeetingWorkflowAutomation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: "user-1",
+        eventType: "meeting.updated",
+        payload: expect.objectContaining({
+          meetingId: "meeting-2",
+        }),
+      })
+    );
   });
 
   it("propagates board item updates back into canonical task fields", async () => {

@@ -5,12 +5,14 @@ import type {
   JobDocument,
   MeetingRescanJobPayload,
   SlackUsersSyncJobPayload,
+  WorkflowWebhookDeliverySendJobPayload,
 } from "@/lib/jobs/types";
 import { runDomainEventDispatchJob } from "@/lib/jobs/handlers/domain-event-dispatch-job";
 import { runFathomWebhookIngestJob } from "@/lib/jobs/handlers/fathom-webhook-ingest-job";
 import { runFathomSyncJob } from "@/lib/jobs/handlers/fathom-sync-job";
 import { runMeetingRescanJob } from "@/lib/jobs/handlers/meeting-rescan-job";
 import { runSlackUsersSyncJob } from "@/lib/jobs/handlers/slack-users-sync-job";
+import { runWorkflowWebhookDeliverySendJob } from "@/lib/jobs/handlers/workflow-webhook-delivery-send-job";
 import type { StructuredLogger } from "@/lib/observability";
 
 type JobExecutionContext = {
@@ -69,6 +71,15 @@ export const processJob = async (
       return runDomainEventDispatchJob({
         userId: job.userId,
         eventId: payload.eventId,
+        correlationId: context?.correlationId,
+        logger: context?.logger,
+      });
+    }
+    case "workflow-webhook-delivery-send": {
+      const payload = job.payload as WorkflowWebhookDeliverySendJobPayload;
+      return runWorkflowWebhookDeliverySendJob({
+        userId: job.userId,
+        deliveryId: payload.deliveryId,
         correlationId: context?.correlationId,
         logger: context?.logger,
       });

@@ -9,6 +9,7 @@ import {
 } from "@/lib/services/meeting-ingestion-side-effects";
 
 export type MeetingIngestionCommandMode = "always-event" | "flagged-event";
+export type MeetingIngestionCommandEventType = "meeting.ingested" | "meeting.updated";
 
 const emptyResult = (): DomainEventResultByType["meeting.ingested"] => ({
   people: { created: 0, updated: 0 },
@@ -34,9 +35,11 @@ export const runMeetingIngestionCommand = async (
     payload: MeetingIngestionPayload;
     correlationId?: string | null;
     mode?: MeetingIngestionCommandMode;
+    eventType?: MeetingIngestionCommandEventType;
   }
 ): Promise<DomainEventResultByType["meeting.ingested"]> => {
   const mode = input.mode || "always-event";
+  const eventType = input.eventType || "meeting.ingested";
   const payload = normalizePayload(input.payload);
   if (!payload.meetingId) {
     return emptyResult();
@@ -46,7 +49,7 @@ export const runMeetingIngestionCommand = async (
     mode === "always-event" || isUnifiedMeetingIngestionCommandEnabled();
   if (shouldPublishEvent) {
     return publishDomainEvent(db, {
-      type: "meeting.ingested",
+      type: eventType,
       userId: input.userId,
       correlationId: input.correlationId ?? null,
       payload: {

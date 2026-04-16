@@ -521,6 +521,7 @@ export const ingestFathomMeeting = async ({
 
       await runMeetingIngestionCommand(db, {
         mode: "flagged-event",
+        eventType: "meeting.updated",
         userId,
         payload: {
           meetingId: String(existing._id),
@@ -581,6 +582,7 @@ export const ingestFathomMeeting = async ({
     } else if (Array.isArray(existing.extractedTasks) && existing.extractedTasks.length) {
       await runMeetingIngestionCommand(db, {
         mode: "flagged-event",
+        eventType: "meeting.updated",
         userId,
         payload: {
           meetingId: String(existing._id),
@@ -870,6 +872,7 @@ export const ingestFathomMeeting = async ({
   await db.collection("planningSessions").insertOne(planningSession);
   await runMeetingIngestionCommand(db, {
     mode: "flagged-event",
+    eventType: "meeting.ingested",
     userId,
     payload: {
       meetingId,

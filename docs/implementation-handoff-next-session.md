@@ -22,6 +22,8 @@ The following route-level migration work is now in place:
 - `/api/workspaces/[workspaceId]/automation/workflows` now provides workspace-scoped workflow list/create operations, while `/api/workspaces/[workspaceId]/automation/workflows/[workflowId]` provides detail/update/delete operations.
 - `/api/workspaces/[workspaceId]/automation/workflows/[workflowId]/test` now sends a direct test delivery and records the result in `webhookDeliveries`.
 - `/api/workspaces/[workspaceId]/automation/workflows/[workflowId]/deliveries` now lists delivery history for a single workflow.
+- Domain-event dispatch now handles both `meeting.ingested` and `meeting.updated`, and both event types run workflow matching against enabled workspace workflows.
+- Workflow delivery execution is now async via jobs: matched workflows create `webhookDeliveries` and enqueue `workflow-webhook-delivery-send` jobs with retry/backoff scheduling.
 - `/api/fathom/webhook` now resolves inbound tokens from `fathomConnections` first, then falls back to legacy user tokens.
 - `/api/users/me` now derives Fathom workspace integration state from `fathomConnections`, including connection count and preferred connection metadata, and no longer exposes legacy `fathomConnected` / `fathomWebhookToken` / `fathomUserId` fields in the public auth payload.
 - `AuthContext` / `AppUser` now consume workspace-owned Fathom integration state only instead of the legacy single-install flags.
@@ -38,6 +40,9 @@ Validation completed:
 - `npm test -- --runInBand src/lib/fathom-ingest.test.ts src/app/api/fathom/webhook/route.test.ts`
 - `npx tsc --noEmit`
 - `npm test -- --runInBand --runTestsByPath src/app/api/users/me/route.test.ts src/app/api/workspaces/[workspaceId]/automation/workflows/route.test.ts src/app/api/workspaces/[workspaceId]/automation/workflows/[workflowId]/route.test.ts src/app/api/workspaces/[workspaceId]/automation/workflows/[workflowId]/test/route.test.ts src/app/api/workspaces/[workspaceId]/automation/workflows/[workflowId]/deliveries/route.test.ts`
+- `npx tsc --noEmit`
+- `npm test -- --runInBand --runTestsByPath src/lib/meeting-workflow-automation.test.ts src/lib/jobs/handlers/workflow-webhook-delivery-send-job.test.ts src/lib/domain-events.test.ts src/lib/services/meeting-ingestion-command.test.ts src/lib/realtime-events.test.ts`
+- `npm test -- --runInBand --runTestsByPath src/lib/fathom-ingest.test.ts`
 - `npx tsc --noEmit`
 
 ## Active Files
@@ -125,6 +130,12 @@ const appUser = toAppUser(user, workspaceContext.memberships, {
 ### `src/app/api/workspaces/[workspaceId]/automation/workflows/[workflowId]/deliveries/route.ts`
 - New delivery-log route that filters `webhookDeliveries` by workflow and optional status/limit query params.
 
+### `src/lib/meeting-workflow-automation.ts`
+- New meeting workflow runtime layer: resolves canonical meeting payload, evaluates workflow filters/field selection, creates signed webhook delivery records, and enqueues delivery-send jobs.
+
+### `src/lib/jobs/handlers/workflow-webhook-delivery-send-job.ts`
+- New async webhook-delivery sender: posts queued deliveries, records attempt metadata, and schedules retries with exponential backoff until `maxAttempts` is reached.
+
 ## Remaining Tasks
 
 ### Stability Baseline
@@ -149,14 +160,14 @@ const appUser = toAppUser(user, workspaceContext.memberships, {
 - [x] Update sync and ingest jobs to resolve workspace and downstream writes from the connection record, not `user.activeWorkspaceId`.
 
 ### Workflow Engine
-- [ ] Add workflow trigger support for `meeting.ingested` and `meeting.updated`.
+- [x] Add workflow trigger support for `meeting.ingested` and `meeting.updated`.
 - [ ] Define filter operators for meeting title, transcript text, summary, metadata, attendees, tags, and extracted task fields.
-- [ ] Define payload selection for `all fields` versus granular field subsets.
-- [ ] Add a worker-side workflow evaluator that loads enabled workflows for a workspace and matches events.
+- [x] Define payload selection for `all fields` versus granular field subsets.
+- [x] Add a worker-side workflow evaluator that loads enabled workflows for a workspace and matches events.
 - [ ] Implement sandboxed JS transforms with `quickjs-emscripten`, no network access, strict timeout, and output size caps.
-- [ ] Build a canonical workflow input payload with workspace, connection, meeting, attendees, tasks, and metadata.
-- [ ] Add outbound webhook signing headers, delivery ids, and replay-safe timestamps.
-- [ ] Queue outbound webhook deliveries through the job system with retries and backoff.
+- [x] Build a canonical workflow input payload with workspace, connection, meeting, attendees, tasks, and metadata.
+- [x] Add outbound webhook signing headers, delivery ids, and replay-safe timestamps.
+- [x] Queue outbound webhook deliveries through the job system with retries and backoff.
 - [ ] Persist delivery logs with request/response metadata, last error, and manual replay support.
 - [ ] Add failure guardrails for disabled workflows, transform exceptions, oversized payloads, and repeated destination failures.
 
@@ -178,7 +189,7 @@ const appUser = toAppUser(user, workspaceContext.memberships, {
 - [ ] Run end-to-end validation for multi-connection ingest, workflow delivery, MCP reads/writes, worker recovery, and rollback runbooks.
 
 ## Next Immediate Step
-Continue from the workflow foundation into execution:
-- Trigger workflow evaluation from `meeting.ingested` / `meeting.updated` side effects, loading enabled workflows for the workspace and producing the canonical workflow input payload.
-- Execute deliveries through the job system instead of the synchronous test route, with retry/backoff and persisted delivery status transitions.
+Continue from the workflow execution baseline:
+- Implement sandboxed workflow JS transforms using `quickjs-emscripten` and strict guardrails (timeout, memory/output limits, no network).
+- Expand failure controls: workflow-disable thresholds for repeated delivery failures and explicit handling for transform/runtime exceptions.
 - Decide when to remove the remaining legacy user-level Fathom shadow writes in OAuth/webhook routes once rollback confidence is high.

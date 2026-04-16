@@ -27,6 +27,15 @@ describe("deriveRealtimeTopicsForDomainEvent", () => {
     ]);
   });
 
+  it("maps meeting.updated to all affected topics", () => {
+    expect(deriveRealtimeTopicsForDomainEvent("meeting.updated", {})).toEqual([
+      "meetings",
+      "tasks",
+      "board",
+      "people",
+    ]);
+  });
+
   it("includes meetings topic for meeting task status changes", () => {
     expect(
       deriveRealtimeTopicsForDomainEvent("task.status.changed", {

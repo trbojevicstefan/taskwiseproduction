@@ -34,6 +34,7 @@ export const deriveRealtimeTopicsForDomainEvent = (
 ): RealtimeTopic[] => {
   switch (type) {
     case "meeting.ingested":
+    case "meeting.updated":
       return ["meetings", "tasks", "board", "people"];
     case "task.status.changed": {
       const topics = new Set<RealtimeTopic>(["tasks", "board"]);

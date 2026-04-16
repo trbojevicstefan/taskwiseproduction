@@ -2,6 +2,7 @@ import { randomUUID } from "crypto";
 import { isAsyncDomainEventProcessingEnabled } from "@/lib/core-first-flags";
 import { enqueueJob } from "@/lib/jobs/store";
 import { createLogger, serializeError } from "@/lib/observability";
+import { queueMeetingWorkflowAutomation } from "@/lib/meeting-workflow-automation";
 import { syncBoardItemsToStatusByTaskRecord } from "@/lib/services/board-status-sync";
 import { applyMeetingIngestionSideEffects } from "@/lib/services/meeting-ingestion-side-effects";
 import { normalizePersonNameKey } from "@/lib/transcript-utils";
@@ -12,6 +13,7 @@ type TaskStatus = "todo" | "inprogress" | "done" | "recurring";
 export type DomainEventType =
   | "task.status.changed"
   | "meeting.ingested"
+  | "meeting.updated"
   | "board.item.updated";
 
 export type TaskStatusChangedPayload = {
@@ -46,12 +48,18 @@ export type BoardItemUpdatedPayload = {
 export type DomainEventPayloadByType = {
   "task.status.changed": TaskStatusChangedPayload;
   "meeting.ingested": MeetingIngestedPayload;
+  "meeting.updated": MeetingIngestedPayload;
   "board.item.updated": BoardItemUpdatedPayload;
 };
 
 export type DomainEventResultByType = {
   "task.status.changed": { matchedTasks: number };
   "meeting.ingested": {
+    people: { created: number; updated: number };
+    tasks: { upserted: number; deleted: number };
+    boardItemsCreated: number;
+  };
+  "meeting.updated": {
     people: { created: number; updated: number };
     tasks: { upserted: number; deleted: number };
     boardItemsCreated: number;
@@ -138,12 +146,58 @@ const handleTaskStatusChanged = async (
   return { matchedTasks: tasks.length };
 };
 
+const handleMeetingLifecycleEvent = async (
+  db: any,
+  userId: string,
+  payload: MeetingIngestedPayload,
+  eventType: "meeting.ingested" | "meeting.updated",
+  correlationId: string | null | undefined
+): Promise<DomainEventResultByType["meeting.ingested"]> => {
+  const result = await applyMeetingIngestionSideEffects(db, userId, payload);
+  await queueMeetingWorkflowAutomation({
+    db,
+    userId,
+    eventType,
+    correlationId: correlationId ?? null,
+    payload: {
+      meetingId: payload.meetingId,
+      workspaceId: payload.workspaceId ?? null,
+      title: payload.title ?? null,
+      attendees: payload.attendees as Array<Record<string, unknown>> | undefined,
+      extractedTasks: payload.extractedTasks as Array<Record<string, unknown>> | undefined,
+    },
+  });
+  return result;
+};
+
 const handleMeetingIngested = async (
   db: any,
   userId: string,
-  payload: MeetingIngestedPayload
+  payload: MeetingIngestedPayload,
+  correlationId: string | null | undefined
 ): Promise<DomainEventResultByType["meeting.ingested"]> => {
-  return applyMeetingIngestionSideEffects(db, userId, payload);
+  return handleMeetingLifecycleEvent(
+    db,
+    userId,
+    payload,
+    "meeting.ingested",
+    correlationId
+  );
+};
+
+const handleMeetingUpdated = async (
+  db: any,
+  userId: string,
+  payload: MeetingIngestedPayload,
+  correlationId: string | null | undefined
+): Promise<DomainEventResultByType["meeting.updated"]> => {
+  return handleMeetingLifecycleEvent(
+    db,
+    userId,
+    payload,
+    "meeting.updated",
+    correlationId
+  );
 };
 
 const handleBoardItemUpdated = async (
@@ -222,7 +276,15 @@ const dispatchDomainEvent = async <TType extends DomainEventType>(
       return (await handleMeetingIngested(
         db,
         event.userId,
-        event.payload as MeetingIngestedPayload
+        event.payload as MeetingIngestedPayload,
+        event.correlationId
+      )) as DomainEventResultByType[TType];
+    case "meeting.updated":
+      return (await handleMeetingUpdated(
+        db,
+        event.userId,
+        event.payload as MeetingIngestedPayload,
+        event.correlationId
       )) as DomainEventResultByType[TType];
     case "board.item.updated":
       return (await handleBoardItemUpdated(
@@ -242,6 +304,7 @@ const buildEmptyResultByType = (type: DomainEventType) => {
     case "task.status.changed":
       return { matchedTasks: 0 };
     case "meeting.ingested":
+    case "meeting.updated":
       return {
         people: { created: 0, updated: 0 },
         tasks: { upserted: 0, deleted: 0 },
