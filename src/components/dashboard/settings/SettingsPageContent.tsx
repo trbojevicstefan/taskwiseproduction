@@ -4058,21 +4058,31 @@ export default function SettingsPageContent() {
                     1) Copy endpoint, 2) create a scoped key, 3) connect your MCP client.
                   </p>
                 </div>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => {
-                    void Promise.all([loadMcpApiKeys(), loadMcpAuditLogs()]);
-                  }}
-                  disabled={isLoadingMcpApiKeys || isLoadingMcpAuditLogs}
-                >
-                  {isLoadingMcpApiKeys || isLoadingMcpAuditLogs ? (
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  ) : (
-                    <RefreshCw className="mr-2 h-4 w-4" />
-                  )}
-                  Refresh
-                </Button>
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => window.open("/docs/mcp", "_blank", "noopener,noreferrer")}
+                  >
+                    <LinkIcon className="mr-2 h-4 w-4" />
+                    Full MCP Docs
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      void Promise.all([loadMcpApiKeys(), loadMcpAuditLogs()]);
+                    }}
+                    disabled={isLoadingMcpApiKeys || isLoadingMcpAuditLogs}
+                  >
+                    {isLoadingMcpApiKeys || isLoadingMcpAuditLogs ? (
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    ) : (
+                      <RefreshCw className="mr-2 h-4 w-4" />
+                    )}
+                    Refresh
+                  </Button>
+                </div>
               </div>
 
               <div className="space-y-1">
@@ -4300,6 +4310,19 @@ export default function SettingsPageContent() {
                   )}
                 </div>
               </div>
+            </div>
+
+            <div className="rounded-lg border bg-muted/20 p-4 space-y-3">
+              <h4 className="text-sm font-semibold">Key Rotation Runbook</h4>
+              <p className="text-xs text-muted-foreground">
+                Rotate keys without downtime using a short overlap window.
+              </p>
+              <ol className="list-decimal pl-4 space-y-1 text-xs text-muted-foreground">
+                <li>Create a new key with the same scopes as the current production key.</li>
+                <li>Update your MCP client secret and verify read/write calls succeed.</li>
+                <li>Monitor Recent MCP Activity for successful calls on the new key.</li>
+                <li>Revoke the old key immediately after confirmation.</li>
+              </ol>
             </div>
 
             <div className="rounded-lg border bg-muted/20 p-4 space-y-3">

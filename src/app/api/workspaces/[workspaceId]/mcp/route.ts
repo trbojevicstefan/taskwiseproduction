@@ -13,6 +13,7 @@ import {
   resolveMcpToolScopeRequirement,
 } from "@/lib/mcp-tools";
 import { logMcpAuditEvent } from "@/lib/mcp-audit-logs";
+import { enforceMcpApiKeyRateLimit, type McpRateLimitResult } from "@/lib/mcp-rate-limit";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -117,6 +118,26 @@ const buildBaseHeaders = (workspaceId: string, keyDoc: McpApiKeyDoc) => ({
   "X-Taskwise-Workspace-Id": workspaceId,
   "X-Taskwise-Mcp-Key-Id": keyDoc._id,
 });
+
+const toEpochSeconds = (date: Date) => Math.max(0, Math.floor(date.getTime() / 1000));
+
+const buildRateLimitHeaders = (rateLimitResult: McpRateLimitResult) => {
+  const headers: Record<string, string> = {
+    "X-Taskwise-Mcp-RateLimit-Limit": String(rateLimitResult.request.limit),
+    "X-Taskwise-Mcp-RateLimit-Remaining": String(rateLimitResult.request.remaining),
+    "X-Taskwise-Mcp-RateLimit-Reset": String(toEpochSeconds(rateLimitResult.request.resetAt)),
+  };
+  if (rateLimitResult.write) {
+    headers["X-Taskwise-Mcp-RateLimit-Write-Limit"] = String(rateLimitResult.write.limit);
+    headers["X-Taskwise-Mcp-RateLimit-Write-Remaining"] = String(
+      rateLimitResult.write.remaining
+    );
+    headers["X-Taskwise-Mcp-RateLimit-Write-Reset"] = String(
+      toEpochSeconds(rateLimitResult.write.resetAt)
+    );
+  }
+  return headers;
+};
 
 const formatSseMessage = (payload: unknown) =>
   `event: message\ndata: ${JSON.stringify(payload)}\n\n`;
@@ -356,8 +377,47 @@ export async function POST(
       );
     }
 
+    const isWriteRequest =
+      requestBody.method === "tools/call" && requiredScope === "mcp:write";
+    const rateLimitResult = await enforceMcpApiKeyRateLimit(db as any, {
+      workspaceId,
+      apiKeyId: keyDoc._id,
+      isWriteRequest,
+    });
+    const responseHeaders = {
+      ...buildBaseHeaders(workspaceId, keyDoc),
+      ...buildRateLimitHeaders(rateLimitResult),
+    };
+
+    if (!rateLimitResult.allowed) {
+      const blockedLimit = rateLimitResult.blocked || rateLimitResult.request;
+      const blockedHeaders = {
+        ...responseHeaders,
+        "Retry-After": String(blockedLimit.retryAfterSeconds),
+      };
+
+      // Notification payloads (without `id`) should not return JSON-RPC bodies.
+      if (requestBody.id === undefined) {
+        return new Response(null, {
+          status: 429,
+          headers: blockedHeaders,
+        });
+      }
+
+      return Response.json(
+        toJsonRpcError(requestBody.id, -32001, "MCP rate limit exceeded.", {
+          category: blockedLimit.category,
+          limit: blockedLimit.limit,
+          retryAfterSeconds: blockedLimit.retryAfterSeconds,
+        }),
+        {
+          status: 429,
+          headers: blockedHeaders,
+        }
+      );
+    }
+
     await touchMcpApiKeyUsage(db as any, keyDoc._id);
-    const responseHeaders = buildBaseHeaders(workspaceId, keyDoc);
 
     // JSON-RPC notification (no id) intentionally has no response payload.
     if (requestBody.id === undefined) {

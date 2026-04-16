@@ -29,6 +29,8 @@ The following route-level migration work is now in place:
 - `/api/workspaces/[workspaceId]/mcp/keys` and `/api/workspaces/[workspaceId]/mcp/keys/[keyId]` now provide scoped key list/create/revoke flows (owner/admin for writes, member visibility for list) with audit events.
 - `/api/workspaces/[workspaceId]/mcp/audit-logs` now exposes workspace MCP audit history for operators.
 - Settings now includes an MCP setup modal with endpoint copy, auth header guidance, scoped key generation, one-time secret copy, key revoke controls, and recent audit activity.
+- `/api/workspaces/[workspaceId]/mcp` now enforces per-key MCP rate limits for request and write traffic (HTTP 429 + JSON-RPC error payload + retry headers).
+- Settings MCP setup now includes an operator key-rotation runbook (create -> validate -> monitor -> revoke) for low-risk key rollover.
 - Domain-event dispatch now handles both `meeting.ingested` and `meeting.updated`, and both event types run workflow matching against enabled workspace workflows.
 - Workflow delivery execution is now async via jobs: matched workflows create `webhookDeliveries` and enqueue `workflow-webhook-delivery-send` jobs with retry/backoff scheduling.
 - `/api/fathom/webhook` now resolves inbound webhook token/secret ownership from `fathomConnections` only (no fallback to user-level webhook token/secret ownership).
@@ -66,6 +68,8 @@ Validation completed:
 - `npm test -- --runInBand --runTestsByPath src/app/api/workspaces/[workspaceId]/mcp/route.test.ts src/lib/mcp-read-tools.test.ts`
 - `npx tsc --noEmit`
 - `npm test -- --runInBand --runTestsByPath src/app/api/workspaces/[workspaceId]/mcp/route.test.ts src/app/api/workspaces/[workspaceId]/mcp/keys/route.test.ts src/app/api/workspaces/[workspaceId]/mcp/keys/[keyId]/route.test.ts src/app/api/workspaces/[workspaceId]/mcp/audit-logs/route.test.ts src/lib/mcp-read-tools.test.ts src/lib/mcp-write-tools.test.ts`
+- `npx tsc --noEmit`
+- `npm test -- --runInBand --runTestsByPath src/app/api/workspaces/[workspaceId]/mcp/route.test.ts src/lib/mcp-rate-limit.test.ts src/lib/mcp-read-tools.test.ts src/lib/mcp-write-tools.test.ts src/app/api/workspaces/[workspaceId]/mcp/keys/route.test.ts src/app/api/workspaces/[workspaceId]/mcp/keys/[keyId]/route.test.ts src/app/api/workspaces/[workspaceId]/mcp/audit-logs/route.test.ts`
 - `npx tsc --noEmit`
 
 ## Active Files
@@ -216,9 +220,10 @@ const appUser = toAppUser(user, workspaceContext.memberships, {
 - [x] Expose people read tools for people list and people detail (with optional assigned action items).
 - [x] Expose safe write tools for task status, assignee, due date, notes, and canonical title updates.
 - [x] Add scoped MCP authz, audit logs, and key revoke/create flows.
-- [ ] Add MCP rate limits and key-rotation runbook hardening.
+- [x] Add MCP rate limits for request/write traffic on API keys.
+- [x] Add operator key-rotation runbook hardening.
 - [ ] Run end-to-end validation for multi-connection ingest, workflow delivery, MCP reads/writes, worker recovery, and rollback runbooks.
 
 ## Next Immediate Step
 Continue from the platform-integration baseline:
-- Run end-to-end MCP validation against a real client connection (read + write flows), then add rate limits and operator key-rotation/runbook hardening.
+- Run end-to-end MCP validation against a real client connection (read + write flows), then complete rollback/recovery runbook checks.

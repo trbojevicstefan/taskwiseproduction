@@ -7,6 +7,7 @@ import {
   resolveMcpToolScopeRequirement,
 } from "@/lib/mcp-tools";
 import { logMcpAuditEvent } from "@/lib/mcp-audit-logs";
+import { enforceMcpApiKeyRateLimit } from "@/lib/mcp-rate-limit";
 
 jest.mock("@/lib/db", () => ({
   getDb: jest.fn(),
@@ -27,6 +28,10 @@ jest.mock("@/lib/mcp-audit-logs", () => ({
   logMcpAuditEvent: jest.fn(),
 }));
 
+jest.mock("@/lib/mcp-rate-limit", () => ({
+  enforceMcpApiKeyRateLimit: jest.fn(),
+}));
+
 const mockedGetDb = getDb as jest.MockedFunction<typeof getDb>;
 const mockedFindActiveMcpApiKeyByToken =
   findActiveMcpApiKeyByToken as jest.MockedFunction<typeof findActiveMcpApiKeyByToken>;
@@ -42,6 +47,8 @@ const mockedResolveMcpToolScopeRequirement =
   >;
 const mockedLogMcpAuditEvent =
   logMcpAuditEvent as jest.MockedFunction<typeof logMcpAuditEvent>;
+const mockedEnforceMcpApiKeyRateLimit =
+  enforceMcpApiKeyRateLimit as jest.MockedFunction<typeof enforceMcpApiKeyRateLimit>;
 
 const createKeyDoc = (overrides: Record<string, unknown> = {}) =>
   ({
@@ -116,6 +123,20 @@ describe("workspace mcp route", () => {
       },
     } as any);
     mockedLogMcpAuditEvent.mockResolvedValue({} as any);
+    mockedEnforceMcpApiKeyRateLimit.mockResolvedValue({
+      allowed: true,
+      request: {
+        category: "requests",
+        allowed: true,
+        limit: 120,
+        count: 1,
+        remaining: 119,
+        resetAt: new Date("2026-04-16T12:01:00.000Z"),
+        retryAfterSeconds: 60,
+      },
+      write: null,
+      blocked: null,
+    });
   });
 
   it("returns unauthorized when key is missing", async () => {
@@ -249,7 +270,58 @@ describe("workspace mcp route", () => {
     });
     expect(response.headers.get("x-taskwise-workspace-id")).toBe("workspace-1");
     expect(response.headers.get("x-taskwise-mcp-key-id")).toBe("mcp-key-1");
+    expect(response.headers.get("x-taskwise-mcp-ratelimit-limit")).toBe("120");
+    expect(response.headers.get("x-taskwise-mcp-ratelimit-remaining")).toBe("119");
     expect(mockedTouchMcpApiKeyUsage).toHaveBeenCalledWith(db, "mcp-key-1");
+  });
+
+  it("returns 429 JSON-RPC error when MCP key request rate limit is exceeded", async () => {
+    mockedEnforceMcpApiKeyRateLimit.mockResolvedValueOnce({
+      allowed: false,
+      request: {
+        category: "requests",
+        allowed: false,
+        limit: 1,
+        count: 2,
+        remaining: 0,
+        resetAt: new Date("2026-04-16T12:01:00.000Z"),
+        retryAfterSeconds: 21,
+      },
+      write: null,
+      blocked: {
+        category: "requests",
+        allowed: false,
+        limit: 1,
+        count: 2,
+        remaining: 0,
+        resetAt: new Date("2026-04-16T12:01:00.000Z"),
+        retryAfterSeconds: 21,
+      },
+    });
+
+    const response = await POST(
+      createJsonRpcRequest({
+        jsonrpc: "2.0",
+        id: "rate-1",
+        method: "tools/list",
+      }),
+      {
+        params: { workspaceId: "workspace-1" },
+      }
+    );
+    const payload = await response.json();
+
+    expect(response.status).toBe(429);
+    expect(payload.error).toMatchObject({
+      code: -32001,
+      message: "MCP rate limit exceeded.",
+      data: {
+        category: "requests",
+        limit: 1,
+      },
+    });
+    expect(response.headers.get("retry-after")).toBe("21");
+    expect(mockedTouchMcpApiKeyUsage).not.toHaveBeenCalled();
   });
 
   it("returns method-not-found JSON-RPC error payload for unknown methods", async () => {
