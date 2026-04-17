@@ -75,7 +75,9 @@ import ShareToSlackDialog from '../common/ShareToSlackDialog';
 import { useIntegrations } from '@/contexts/IntegrationsContext';
 import PushToGoogleTasksDialog from '../common/PushToGoogleTasksDialog';
 import PushToTrelloDialog from '../common/PushToTrelloDialog';
-import { generateTaskBrief } from "@/lib/task-insights-client";
+import { useMeetingHistory } from "@/contexts/MeetingHistoryContext";
+import { buildBriefContext } from "@/lib/brief-context";
+import { generateBriefsForTasks } from "@/lib/task-briefs";
 
 type DetailLevel = 'light' | 'medium' | 'detailed';
 
@@ -184,6 +186,7 @@ const truncateTitle = (title: string | undefined, maxLength: number = 30): strin
 export default function PlanningPageContent() {
   const { user, updateUserProfile } = useAuth();
   const { isSlackConnected, isGoogleTasksConnected, isTrelloConnected } = useIntegrations();
+  const { meetings } = useMeetingHistory();
   const [pastedContent, setPastedContent] = useState('');
   const [typedInput, setTypedInput] = useState('');
   const [isGeneratingInitialPlan, setIsGeneratingInitialPlan] = useState(false);
@@ -541,6 +544,17 @@ export default function PlanningPageContent() {
     toast({ title: "Task Updated", description: `Details for "${sanitizedUpdatedTask.title}" saved.` });
   };
 
+  const getBriefContext = useCallback(
+    (task: DisplayTask) => {
+      const sessionSourceMeetingId =
+        getActivePlanningSession()?.sourceMeetingId || null;
+      return buildBriefContext(task, meetings, people, {
+        primaryMeetingId: task.sourceSessionId || sessionSourceMeetingId,
+      });
+    },
+    [getActivePlanningSession, meetings, people]
+  );
+
   const handleBreakDownTask = async (taskToBreakDown: DisplayTask) => {
     setIsProcessingSubtasks(true);
     setTaskForSubtaskGenerationId(taskToBreakDown.id);
@@ -589,40 +603,37 @@ export default function PlanningPageContent() {
     toast({ title: "Generating Briefs...", description: `AI is preparing research briefs for ${selectedTaskIds.size} task(s).` });
 
     let tempExtractedTasks = JSON.parse(JSON.stringify(extractedTasks)) as DisplayTask[];
+    const { successes, failures, limitReached } = await generateBriefsForTasks({
+      taskIds: selectedTaskIds,
+      resolveTask: (taskId) => findTaskByIdRecursive(tempExtractedTasks, taskId),
+      resolveBriefContext: getBriefContext,
+    });
 
-    const results: Array<{ taskId: string; brief: string | null } | null> = [];
-    let limitReached = false;
-    for (const taskId of selectedTaskIds) {
-      const taskToUpdate = findTaskByIdRecursive(tempExtractedTasks, taskId);
-      if (!taskToUpdate) {
-        results.push(null);
-        continue;
-      }
-      try {
-        const briefResult = await generateTaskBrief({
-          taskTitle: taskToUpdate.title,
-          taskDescription: taskToUpdate.description || undefined,
+    failures.forEach((failure) => {
+      const taskToUpdate = findTaskByIdRecursive(tempExtractedTasks, failure.taskId);
+      console.error(
+        `Error generating brief for task ${taskToUpdate?.title || failure.taskId}:`,
+        failure.error
+      );
+      if (!limitReached) {
+        toast({
+          title: "Brief Generation Error",
+          description: `Could not generate brief for "${taskToUpdate?.title || "selected task"}".`,
+          variant: "destructive",
         });
-        results.push({ taskId, brief: briefResult.researchBrief });
-      } catch (error) {
-        const message = error instanceof Error ? error.message : "Could not generate brief.";
-        if (message.toLowerCase().includes("monthly ai brief limit reached")) {
-          limitReached = true;
-          toast({
-            title: "Brief limit reached",
-            description: "You have used all 10 AI Brief generations for this month.",
-            variant: "destructive",
-          });
-          break;
-        }
-        console.error(`Error generating brief for task ${taskToUpdate.title}:`, error);
-        toast({ title: "Brief Generation Error", description: `Could not generate brief for "${taskToUpdate.title}".`, variant: "destructive" });
-        results.push({ taskId, brief: null });
       }
+    });
+
+    if (limitReached) {
+      toast({
+        title: "Brief limit reached",
+        description: "You have used all 10 AI Brief generations for this month.",
+        variant: "destructive",
+      });
     }
     let updatedTasksCount = 0;
 
-    results.forEach(result => {
+    successes.forEach(result => {
       if (result && result.brief) {
         const applyBriefToTaskInArray = (nodes: DisplayTask[], idToUpdate: string, brief: string): DisplayTask[] => {
           return nodes.map(node => {
@@ -1333,6 +1344,7 @@ export default function PlanningPageContent() {
         task={taskForDetailView}
         onSave={handleSaveTaskDetails}
         people={people}
+        getBriefContext={getBriefContext}
         shareTitle={editableTitle || "Planning"}
       />
 

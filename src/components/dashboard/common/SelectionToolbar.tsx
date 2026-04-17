@@ -3,9 +3,9 @@ import React from 'react';
 import ReactDOM from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Button } from '@/components/ui/button';
-import { CheckCircle2, Copy, UserPlus, Trash2, X, Send, File, MessageCircle, Sheet, Bell, Slack, Ticket, CalendarDays, Brain, FileDown, Eye, Edit3 } from 'lucide-react';
+import { CheckCircle2, Copy, UserPlus, Trash2, X, Send, Slack, CalendarDays, Brain, FileDown, Eye, Edit3, Mail } from 'lucide-react';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
-import { SiGoogletasks, SiTrello } from '@icons-pack/react-simple-icons';
+import { SiTrello } from '@icons-pack/react-simple-icons';
 import { cn } from '@/lib/utils';
 
 const GoogleTasksIcon = () => (
@@ -30,6 +30,7 @@ interface SelectionToolbarProps {
   onEdit?: () => void;
   onGenerateBriefs?: () => void; 
   onShareToSlack?: () => void;
+  onShareToEmail?: () => void;
   isSlackConnected?: boolean;
   onPushToGoogleTasks?: () => void;
   isGoogleTasksConnected?: boolean;
@@ -52,6 +53,7 @@ const SelectionToolbar: React.FC<SelectionToolbarProps> = ({
   onEdit,
   onGenerateBriefs,
   onShareToSlack,
+  onShareToEmail,
   isSlackConnected,
   onPushToGoogleTasks,
   isGoogleTasksConnected,
@@ -160,7 +162,13 @@ const SelectionToolbar: React.FC<SelectionToolbarProps> = ({
                            </DropdownMenuItem>
                         )}
 
-                        <DropdownMenuSeparator />
+                        {onShareToEmail && (
+                           <DropdownMenuItem onSelect={onShareToEmail}>
+                               <Mail size={14} className="mr-2" /> Share via Email
+                           </DropdownMenuItem>
+                        )}
+
+                        {(onShareToSlack || onShareToEmail) && <DropdownMenuSeparator />}
                         {onCopy && <DropdownMenuItem onSelect={onCopy}><Copy size={14} className="mr-2"/> Copy as Text</DropdownMenuItem>}
                         {onSend && (
                           <>

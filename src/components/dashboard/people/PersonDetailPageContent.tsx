@@ -34,6 +34,7 @@ import { apiFetch } from '@/lib/api';
 import { useWorkspaceBoards } from "@/hooks/use-workspace-boards";
 import { moveTaskToBoard } from "@/lib/board-actions";
 import { buildBriefContext } from "@/lib/brief-context";
+import { generateBriefsForTasks } from "@/lib/task-briefs";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -126,6 +127,7 @@ export default function PersonDetailPageContent({ personId }: PersonDetailPageCo
   const [taskToDelete, setTaskToDelete] = useState<Task | null>(null);
   const [isBulkDeleteConfirmOpen, setIsBulkDeleteConfirmOpen] = useState(false);
   const [dueDateFilter, setDueDateFilter] = useState<"all" | "overdue" | "next_7" | "no_due">("all");
+  const [isGeneratingBriefs, setIsGeneratingBriefs] = useState(false);
 
   const mapTaskToExtracted = useCallback(
     (task: Task): ExtractedTaskSchema => ({
@@ -555,6 +557,123 @@ export default function PersonDetailPageContent({ personId }: PersonDetailPageCo
     [meetings, person]
   );
 
+  const handleGenerateBriefsForSelectedTasks = async () => {
+    if (isGeneratingBriefs) return;
+    if (selectedTasks.length === 0) {
+      toast({
+        title: "No tasks selected",
+        description: "Please select tasks to generate briefs for.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setIsGeneratingBriefs(true);
+    toast({
+      title: "Generating Briefs...",
+      description: `AI is preparing briefs for ${selectedTasks.length} task(s).`,
+    });
+
+    try {
+      const selectedById = new Map<string, Task>(
+        selectedTasks.map((task: any) => [task.id, task])
+      );
+      const { successes, failures, limitReached } = await generateBriefsForTasks({
+        taskIds: selectedTaskIds,
+        resolveTask: (taskId) => {
+          const task = selectedById.get(taskId);
+          return task ? mapTaskToExtracted(task) : null;
+        },
+        resolveBriefContext: getBriefContext,
+      });
+
+      failures.forEach((failure) => {
+        const task = selectedById.get(failure.taskId);
+        console.error(
+          `Error generating brief for task ${task?.title || failure.taskId}:`,
+          failure.error
+        );
+      });
+
+      if (limitReached) {
+        toast({
+          title: "Brief limit reached",
+          description: "You have used all 10 AI Brief generations for this month.",
+          variant: "destructive",
+        });
+      }
+
+      let appliedCount = 0;
+      for (const result of successes) {
+        const originalTask = selectedById.get(result.taskId);
+        if (!originalTask) continue;
+        try {
+          const persistentTaskId = getPersistentTaskId(originalTask);
+          const params = new URLSearchParams();
+          if (
+            (originalTask.sourceSessionType === "meeting" ||
+              originalTask.sourceSessionType === "chat") &&
+            originalTask.sourceSessionId
+          ) {
+            params.set("sourceSessionId", originalTask.sourceSessionId);
+            if (originalTask.sourceSessionType) {
+              params.set("sourceSessionType", originalTask.sourceSessionType);
+            }
+          }
+          if (originalTask.sourceTaskId) {
+            params.set("sourceTaskId", originalTask.sourceTaskId);
+          }
+          const patchUrl = params.toString()
+            ? `/api/tasks/${persistentTaskId}?${params.toString()}`
+            : `/api/tasks/${persistentTaskId}`;
+          await apiFetch(patchUrl, {
+            method: "PATCH",
+            body: JSON.stringify({ researchBrief: result.brief }),
+          });
+          appliedCount += 1;
+        } catch (error) {
+          console.error(
+            `Error saving brief for task ${originalTask.title}:`,
+            error
+          );
+        }
+      }
+
+      if (appliedCount > 0) {
+        const briefByTaskId = new Map(
+          successes.map((result: any) => [result.taskId, result.brief])
+        );
+        setTasks((prev) =>
+          prev.map((task: any) => {
+            const nextBrief = briefByTaskId.get(task.id);
+            if (nextBrief === undefined) return task;
+            return { ...task, researchBrief: nextBrief };
+          })
+        );
+        if (taskForDetailView) {
+          const nextBrief = briefByTaskId.get(taskForDetailView.id);
+          if (nextBrief) {
+            setTaskForDetailView((prev) =>
+              prev ? { ...prev, researchBrief: nextBrief } : prev
+            );
+          }
+        }
+        toast({
+          title: "Briefs Generated",
+          description: `Research briefs generated for ${appliedCount} task(s).`,
+        });
+      } else if (!limitReached) {
+        toast({
+          title: "No Briefs Generated",
+          description: "Could not generate briefs for the selected tasks.",
+          variant: "destructive",
+        });
+      }
+    } finally {
+      setIsGeneratingBriefs(false);
+    }
+  };
+
   const handleDeleteTask = async () => {
     if (!taskToDelete) return;
     try {
@@ -897,6 +1016,14 @@ export default function PersonDetailPageContent({ personId }: PersonDetailPageCo
                                   onClick={() => setIsBulkDeleteConfirmOpen(true)}
                                 >
                                   Delete selected
+                                </Button>
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={handleGenerateBriefsForSelectedTasks}
+                                  disabled={isGeneratingBriefs}
+                                >
+                                  {isGeneratingBriefs ? "Generating briefs..." : "Generate briefs"}
                                 </Button>
                                 {isSlackConnected && (
                                   <Button

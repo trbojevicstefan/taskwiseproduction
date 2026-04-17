@@ -19,6 +19,7 @@ const GenerateResearchBriefInputSchema = z.object({
   taskPriority: z.enum(["low", "medium", "high"]).optional().describe("Task priority, if available."),
   primaryTranscript: z.string().optional().describe('Full transcript for the primary meeting context.'),
   relatedTranscripts: z.array(z.string()).optional().describe('Additional transcripts related to the assignee.'),
+  meetingTimeline: z.array(z.string()).optional().describe('Task-related updates from previous meetings, ordered by recency.'),
 });
 export type GenerateResearchBriefInput = z.infer<typeof GenerateResearchBriefInputSchema>;
 
@@ -40,8 +41,11 @@ const MAX_TITLE_CHARS = 220;
 const MAX_DESCRIPTION_CHARS = 1200;
 const MAX_PRIMARY_TRANSCRIPT_CHARS = 3200;
 const MAX_RELATED_TRANSCRIPT_CHARS = 1400;
-const MAX_RELATED_TRANSCRIPTS = 2;
-const MAX_TOTAL_TRANSCRIPT_CHARS = 5200;
+const MAX_RELATED_TRANSCRIPTS = 6;
+const MAX_TOTAL_TRANSCRIPT_CHARS = 9600;
+const MAX_TIMELINE_ENTRIES = 8;
+const MAX_TIMELINE_ENTRY_CHARS = 420;
+const MAX_TIMELINE_TOTAL_CHARS = 2600;
 
 const unwrapMarkdown = (value: string): string => {
   const trimmed = value.trim();
@@ -141,6 +145,23 @@ const prepareBriefInput = (input: GenerateResearchBriefInput): GenerateResearchB
     totalChars += transcript.length;
   }
 
+  const meetingTimeline: string[] = [];
+  let timelineChars = 0;
+  for (const entry of (input.meetingTimeline || []).slice(0, MAX_TIMELINE_ENTRIES)) {
+    if (!entry || !entry.trim()) continue;
+    if (timelineChars >= MAX_TIMELINE_TOTAL_CHARS) break;
+    const compact = toSingleLine(entry, MAX_TIMELINE_ENTRY_CHARS);
+    const remaining = MAX_TIMELINE_TOTAL_CHARS - timelineChars;
+    if (remaining <= 0) break;
+    if (compact.length > remaining) {
+      meetingTimeline.push(`${compact.slice(0, remaining).trim()} ...`);
+      timelineChars = MAX_TIMELINE_TOTAL_CHARS;
+      break;
+    }
+    meetingTimeline.push(compact);
+    timelineChars += compact.length;
+  }
+
   return {
     ...input,
     taskTitle: toSingleLine(input.taskTitle || "", MAX_TITLE_CHARS) || "Untitled Task",
@@ -152,6 +173,7 @@ const prepareBriefInput = (input: GenerateResearchBriefInput): GenerateResearchB
       : undefined,
     primaryTranscript,
     relatedTranscripts,
+    meetingTimeline,
   };
 };
 
@@ -185,13 +207,21 @@ Additional Relevant Transcripts:
 {{/each}}
 {{/if}}
 
-Based on the provided task information, please generate a short research brief covering the following sections (use markdown for formatting):
-1.  **Problem Overview:** 1 short sentence.
-2.  **Key Considerations/Questions:** 2-3 brief bullet points.
-3.  **Potential Obstacles/Risks:** 1-2 brief bullet points.
-4.  **Possible Angles for Deeper Research:** 2 brief bullet points.
+{{#if meetingTimeline}}
+Cross-Meeting Task Timeline:
+{{#each meetingTimeline}}
+- {{this}}
+{{/each}}
+{{/if}}
 
-Use the transcripts to ground the brief in real context. If transcripts are missing, focus on the task details. Keep the brief concise and actionable: aim for 8-10 lines total, avoid long paragraphs, and keep each bullet to a single line. The brief should be formatted as a single markdown string.
+Based on the provided task information, generate a short, action-focused brief using markdown:
+1.  **Current Snapshot:** 1 short sentence.
+2.  **What Changed Across Meetings:** 2-3 bullets grounded in timeline/transcripts.
+3.  **Recommended Task Movement:** 1-2 bullets with concrete status/board suggestions (for example, move to in progress, done, blocked, or keep as is with reason).
+4.  **Risks / Unknowns:** 1-2 brief bullets.
+5.  **Next Actions:** 1-2 clear action bullets.
+
+Use transcripts and timeline evidence whenever present, and be explicit about uncertainty when context is weak. Keep the brief concise and actionable: aim for 8-12 lines total, avoid long paragraphs, and keep each bullet to a single line. The brief should be formatted as a single markdown string.
 `,
 });
 

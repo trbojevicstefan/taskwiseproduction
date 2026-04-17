@@ -36,6 +36,7 @@ import SetDueDateDialog from '../planning/SetDueDateDialog';
 import { useWorkspaceBoards } from "@/hooks/use-workspace-boards";
 import { moveTaskToBoard } from "@/lib/board-actions";
 import { buildBriefContext } from "@/lib/brief-context";
+import { generateBriefsForTasks } from "@/lib/task-briefs";
 
 
 const getTaskAndAllDescendantIds = (task: ExtractedTaskSchema): string[] => {
@@ -71,6 +72,7 @@ export default function ExplorePageContent() {
   const [isSetDueDateDialogOpen, setIsSetDueDateDialogOpen] = useState(false);
   const [calendarEvents, setCalendarEvents] = useState<CalendarEvent[]>([]);
   const [isLoadingCalendarEvents, setIsLoadingCalendarEvents] = useState(false);
+  const [isGeneratingBriefs, setIsGeneratingBriefs] = useState(false);
 
 
   const { toast } = useToast();
@@ -314,6 +316,115 @@ export default function ExplorePageContent() {
     toast({ title: "Copied tasks to clipboard!" });
   };
 
+  const handleGenerateBriefs = async () => {
+    if (isGeneratingBriefs) return;
+    if (selectedTasks.length === 0) {
+      toast({
+        title: "No tasks selected",
+        description: "Please select tasks to generate briefs for.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setIsGeneratingBriefs(true);
+    toast({
+      title: "Generating Briefs...",
+      description: `AI is preparing briefs for ${selectedTaskIds.size} task(s).`,
+    });
+
+    try {
+      const selectedTaskMap = new Map(
+        selectedTasks.map((task: any) => [task.id, task])
+      );
+      const { successes, failures, limitReached } = await generateBriefsForTasks({
+        taskIds: selectedTaskIds,
+        resolveTask: (taskId) => selectedTaskMap.get(taskId) || null,
+        resolveBriefContext: getBriefContext,
+      });
+
+      failures.forEach((failure) => {
+        const task = selectedTaskMap.get(failure.taskId);
+        console.error(
+          `Error generating brief for task ${task?.title || failure.taskId}:`,
+          failure.error
+        );
+      });
+
+      if (limitReached) {
+        toast({
+          title: "Brief limit reached",
+          description: "You have used all 10 AI Brief generations for this month.",
+          variant: "destructive",
+        });
+      }
+
+      const updatesByMeeting = new Map<string, Map<string, string>>();
+      successes.forEach((result: any) => {
+        const task = selectedTaskMap.get(result.taskId);
+        const meetingId = task?.sourceSessionId;
+        if (!meetingId) return;
+        const updates = updatesByMeeting.get(meetingId) || new Map<string, string>();
+        updates.set(result.taskId, result.brief);
+        updatesByMeeting.set(meetingId, updates);
+      });
+
+      let appliedCount = 0;
+      for (const [meetingId, updates] of updatesByMeeting.entries()) {
+        const meeting = allMeetings.find((item: any) => item.id === meetingId);
+        if (!meeting) continue;
+        const applyBriefsRecursively = (
+          tasks: ExtractedTaskSchema[]
+        ): ExtractedTaskSchema[] => {
+          return tasks.map((task: any) => {
+            const nextBrief = updates.get(task.id);
+            const nextSubtasks = task.subtasks
+              ? applyBriefsRecursively(task.subtasks)
+              : task.subtasks;
+            if (nextBrief !== undefined) {
+              appliedCount += 1;
+              return { ...task, researchBrief: nextBrief, subtasks: nextSubtasks };
+            }
+            if (nextSubtasks !== task.subtasks) {
+              return { ...task, subtasks: nextSubtasks };
+            }
+            return task;
+          });
+        };
+        const updatedTasks = applyBriefsRecursively(
+          (meeting.extractedTasks || []) as ExtractedTaskSchema[]
+        );
+        await updateMeeting(meetingId, { extractedTasks: updatedTasks });
+      }
+
+      if (taskForDetailView) {
+        const updatedBrief = successes.find(
+          (result: any) => result.taskId === taskForDetailView.id
+        )?.brief;
+        if (updatedBrief) {
+          setTaskForDetailView((prev) =>
+            prev ? { ...prev, researchBrief: updatedBrief } : prev
+          );
+        }
+      }
+
+      if (appliedCount > 0) {
+        toast({
+          title: "Briefs Generated",
+          description: `Research briefs generated for ${appliedCount} task(s).`,
+        });
+      } else if (!limitReached) {
+        toast({
+          title: "No Briefs Generated",
+          description: "Could not generate briefs for the selected tasks.",
+          variant: "destructive",
+        });
+      }
+    } finally {
+      setIsGeneratingBriefs(false);
+    }
+  };
+
   const handleConfirmAssignPerson = (person: Person) => {
     // Logic to update tasks in their respective meetings
     toast({ title: 'Assigning Tasks...', description: `Assigning ${selectedTaskIds.size} tasks to ${person.name}` });
@@ -493,6 +604,7 @@ export default function ExplorePageContent() {
         onDelete={() => toast({ title: 'Delete Clicked' })}
         onCopy={handleCopySelected}
         onSend={handleExport}
+        onGenerateBriefs={handleGenerateBriefs}
         onShareToSlack={() => setIsShareToSlackOpen(true)}
         isSlackConnected={isSlackConnected}
         onPushToGoogleTasks={() => setIsPushToGoogleOpen(true)}

@@ -15,6 +15,7 @@ const requestSchema = z.object({
   taskPriority: z.enum(["low", "medium", "high"]).optional(),
   primaryTranscript: z.string().optional(),
   relatedTranscripts: z.array(z.string()).optional(),
+  meetingTimeline: z.array(z.string()).optional(),
 });
 
 type BriefQuota = {
@@ -94,6 +95,7 @@ export async function POST(request: Request) {
         taskPriority: payload.taskPriority,
         primaryTranscript: payload.primaryTranscript,
         relatedTranscripts: payload.relatedTranscripts,
+        meetingTimeline: payload.meetingTimeline,
       });
 
       const nextUsed = quota.used + 1;

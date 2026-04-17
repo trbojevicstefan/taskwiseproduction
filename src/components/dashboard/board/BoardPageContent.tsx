@@ -99,6 +99,7 @@ import type { Board, BoardStatus, BoardStatusCategory } from "@/types/board";
 import type { Person } from "@/types/person";
 import type { ExtractedTaskSchema } from "@/types/chat";
 import { buildBriefContext } from "@/lib/brief-context";
+import { generateBriefsForTasks } from "@/lib/task-briefs";
 
 type TaskPriority = Task["priority"];
 
@@ -518,6 +519,7 @@ function AssigneeDropdown({
   });
   const [editingTask, setEditingTask] = useState<BoardTaskItem | null>(null);
   const [selectedTaskIds, setSelectedTaskIds] = useState<Set<string>>(new Set());
+  const [isGeneratingBriefs, setIsGeneratingBriefs] = useState(false);
   const [bulkStatusId, setBulkStatusId] = useState<string>("");
   const [draggedTaskId, setDraggedTaskId] = useState<string | null>(null);
   const [dragOverColumn, setDragOverColumn] = useState<string | null>(null);
@@ -1264,6 +1266,101 @@ function AssigneeDropdown({
       (task: ExtractedTaskSchema) => buildBriefContext(task, meetings, people),
       [meetings, people]
     );
+
+  const handleGenerateBriefsForSelection = useCallback(async () => {
+    if (isGeneratingBriefs) return;
+    if (!selectedTaskIds.size) {
+      toast({
+        title: "No tasks selected",
+        description: "Select one or more tasks to generate briefs.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setIsGeneratingBriefs(true);
+    toast({
+      title: "Generating Briefs...",
+      description: `AI is preparing briefs for ${selectedTaskIds.size} task(s).`,
+    });
+
+    try {
+      const { successes, failures, limitReached } = await generateBriefsForTasks({
+        taskIds: selectedTaskIds,
+        resolveTask: (taskId) => {
+          const task = tasks.find((candidate: any) => candidate.id === taskId);
+          return task ? mapTaskToExtracted(task) : null;
+        },
+        resolveBriefContext: getBriefContext,
+      });
+
+      failures.forEach((failure) => {
+        const task = tasks.find((candidate: any) => candidate.id === failure.taskId);
+        console.error(
+          `Error generating brief for task ${task?.title || failure.taskId}:`,
+          failure.error
+        );
+      });
+
+      if (limitReached) {
+        toast({
+          title: "Brief limit reached",
+          description: "You have used all 10 AI Brief generations for this month.",
+          variant: "destructive",
+        });
+      }
+
+      let appliedCount = 0;
+      for (const result of successes) {
+        try {
+          await apiFetch(`/api/tasks/${result.taskId}`, {
+            method: "PATCH",
+            body: JSON.stringify({ researchBrief: result.brief }),
+          });
+          appliedCount += 1;
+          setTasks((prev) =>
+            prev.map((task: any) =>
+              task.id === result.taskId
+                ? { ...task, researchBrief: result.brief }
+                : task
+            )
+          );
+          setTaskForDetailView((prev) =>
+            prev && prev.id === result.taskId
+              ? { ...prev, researchBrief: result.brief }
+              : prev
+          );
+        } catch (error) {
+          console.error(
+            `Error saving brief for task ${result.taskId}:`,
+            error
+          );
+        }
+      }
+
+      if (appliedCount > 0) {
+        toast({
+          title: "Briefs Generated",
+          description: `Research briefs generated for ${appliedCount} task(s).`,
+        });
+      } else if (!limitReached) {
+        toast({
+          title: "No Briefs Generated",
+          description: "Could not generate briefs for the selected tasks.",
+          variant: "destructive",
+        });
+      }
+    } finally {
+      setIsGeneratingBriefs(false);
+    }
+  }, [
+    getBriefContext,
+    isGeneratingBriefs,
+    mapTaskToExtracted,
+    selectedTaskIds,
+    tasks,
+    toast,
+  ]);
 
   const handleDeleteTask = async (task: BoardTaskItem) => {
     try {
@@ -2650,6 +2747,7 @@ function AssigneeDropdown({
           onChangeStatus={openStatusDialog}
           onSend={(format) => handleExport(format)}
           onCopy={handleCopySelected}
+          onGenerateBriefs={handleGenerateBriefsForSelection}
           onShareToSlack={handleShareToSlack}
           isSlackConnected={isSlackConnected}
           onPushToGoogleTasks={handlePushToGoogleTasks}

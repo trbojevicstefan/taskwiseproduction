@@ -92,7 +92,7 @@ import PushToTrelloDialog from '../common/PushToTrelloDialog';
 import { TASK_TYPE_LABELS, TASK_TYPE_VALUES, type TaskTypeCategory } from '@/lib/task-types';
 import type { Meeting } from '@/types/meeting';
 import { buildBriefContext } from "@/lib/brief-context";
-import { generateTaskBrief } from "@/lib/task-insights-client";
+import { generateBriefsForTasks } from "@/lib/task-briefs";
 
 
 const findTaskById = (tasks: ExtractedTaskSchema[], taskId: string): ExtractedTaskSchema | null => {
@@ -1073,30 +1073,26 @@ export default function ChatPageContent() {
     setIsGeneratingBriefs(true);
     toast({ title: "Generating Briefs...", description: `AI is preparing briefs for ${selectedTaskIds.size} task(s).` });
 
-    const results: Array<{ taskId: string; brief: string | null }> = [];
-    let limitReached = false;
-    for (const taskId of selectedTaskIds) {
-      const taskToUpdate = findTaskById(suggestedTasks, taskId);
-      if (!taskToUpdate) continue;
-      try {
-        const briefResult = await generateTaskBrief({
-          taskTitle: taskToUpdate.title,
-          taskDescription: taskToUpdate.description || undefined,
-        });
-        results.push({ taskId, brief: briefResult.researchBrief });
-      } catch (error) {
-        const message = error instanceof Error ? error.message : "Could not generate brief.";
-        if (message.toLowerCase().includes("monthly ai brief limit reached")) {
-          limitReached = true;
-          toast({
-            title: "Brief limit reached",
-            description: "You have used all 10 AI Brief generations for this month.",
-            variant: "destructive",
-          });
-          break;
-        }
-        console.error(`Error generating brief for task ${taskToUpdate.title}:`, error);
-      }
+    const { successes, failures, limitReached } = await generateBriefsForTasks({
+      taskIds: selectedTaskIds,
+      resolveTask: (taskId) => findTaskById(suggestedTasks, taskId),
+      resolveBriefContext: getBriefContext,
+    });
+
+    failures.forEach((failure) => {
+      const taskToUpdate = findTaskById(suggestedTasks, failure.taskId);
+      console.error(
+        `Error generating brief for task ${taskToUpdate?.title || failure.taskId}:`,
+        failure.error
+      );
+    });
+
+    if (limitReached) {
+      toast({
+        title: "Brief limit reached",
+        description: "You have used all 10 AI Brief generations for this month.",
+        variant: "destructive",
+      });
     }
 
     const applyBriefToTask = (nodes: ExtractedTaskSchema[], idToUpdate: string, brief: string): ExtractedTaskSchema[] => {
@@ -1113,7 +1109,7 @@ export default function ChatPageContent() {
 
     let updatedTasks = [...suggestedTasks];
     let briefsApplied = 0;
-    results.forEach((result: any) => {
+    successes.forEach((result: any) => {
       if (result?.brief) {
         updatedTasks = applyBriefToTask(updatedTasks, result.taskId, result.brief);
         briefsApplied += 1;

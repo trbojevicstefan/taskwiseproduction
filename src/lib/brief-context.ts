@@ -5,13 +5,55 @@ import type { Person } from "@/types/person";
 export type BriefContext = {
   primaryTranscript?: string | null;
   relatedTranscripts?: string[];
+  meetingTimeline?: string[];
 };
 
 const MAX_PRIMARY_TRANSCRIPT_CHARS = 7000;
 const MAX_RELATED_TRANSCRIPT_CHARS = 2800;
+const MAX_TIMELINE_ENTRY_CHARS = 460;
+const MAX_TIMELINE_TOTAL_CHARS = 2800;
+const MAX_TIMELINE_ITEMS = 8;
 
 const normalize = (value?: string | null) =>
   (value || "").trim().toLowerCase();
+
+const toTime = (value: unknown) => {
+  if (!value) return 0;
+  if (
+    typeof value === "object" &&
+    value !== null &&
+    "toMillis" in value &&
+    typeof (value as { toMillis?: unknown }).toMillis === "function"
+  ) {
+    return (value as { toMillis: () => number }).toMillis();
+  }
+  if (
+    typeof value === "object" &&
+    value !== null &&
+    "toDate" in value &&
+    typeof (value as { toDate?: unknown }).toDate === "function"
+  ) {
+    const dateFromTimestamp = (value as { toDate: () => Date }).toDate();
+    return dateFromTimestamp.getTime();
+  }
+  const date = new Date(value as string | number | Date);
+  return Number.isNaN(date.getTime()) ? 0 : date.getTime();
+};
+
+const formatMeetingDate = (meeting: Meeting) => {
+  const timestamp = toTime(
+    meeting.startTime ?? meeting.lastActivityAt ?? meeting.createdAt
+  );
+  if (!timestamp) return "unknown";
+  return new Date(timestamp).toISOString().slice(0, 10);
+};
+
+const clipText = (value: string, maxChars: number) => {
+  const compact = value.replace(/\s+/g, " ").trim();
+  if (!compact) return "";
+  if (compact.length <= maxChars) return compact;
+  return `${compact.slice(0, maxChars).trim()} ...`;
+};
 
 const getTaskKeywords = (task: ExtractedTaskSchema) => {
   const source = `${task.title || ""} ${task.description || ""} ${task.assignee?.name || ""} ${task.assigneeName || ""}`
@@ -113,6 +155,16 @@ const collectAssigneeKeys = (
   return { names, emails };
 };
 
+const meetingTaskMatchesAssignee = (
+  task: ExtractedTaskSchema,
+  keys: { names: Set<string>; emails: Set<string> }
+) => {
+  if (!keys.names.size && !keys.emails.size) return false;
+  const assigneeName = normalize(task.assignee?.name || task.assigneeName || "");
+  const assigneeEmail = normalize(task.assignee?.email || "");
+  return keys.names.has(assigneeName) || keys.emails.has(assigneeEmail);
+};
+
 const meetingMatchesAssignee = (
   meeting: Meeting,
   keys: { names: Set<string>; emails: Set<string> }
@@ -125,20 +177,93 @@ const meetingMatchesAssignee = (
   });
 };
 
-const sortMeetingsByRecency = (items: Meeting[]) => {
-  const toTime = (value: unknown) => {
-    if (!value) return 0;
-    if (
-      typeof value === "object" &&
-      value !== null &&
-      "toMillis" in value &&
-      typeof (value as { toMillis?: unknown }).toMillis === "function"
-    ) {
-      return (value as { toMillis: () => number }).toMillis();
+const getMeetingTasks = (meeting: Meeting): ExtractedTaskSchema[] => {
+  const collected: ExtractedTaskSchema[] = [];
+  const visit = (candidate: any) => {
+    if (!candidate || typeof candidate !== "object") return;
+    if (typeof candidate.id === "string" && typeof candidate.title === "string") {
+      collected.push(candidate as ExtractedTaskSchema);
     }
-    const date = new Date(value as string | number | Date);
-    return Number.isNaN(date.getTime()) ? 0 : date.getTime();
+    if (Array.isArray(candidate.subtasks)) {
+      candidate.subtasks.forEach(visit);
+    }
   };
+  (meeting.extractedTasks || []).forEach(visit);
+  return collected;
+};
+
+const meetingTaskMatchesKeywords = (
+  task: ExtractedTaskSchema,
+  keywords: string[]
+) => {
+  if (!keywords.length) return false;
+  const haystack = `${task.title || ""} ${task.description || ""} ${task.assignee?.name || ""} ${task.assigneeName || ""}`
+    .toLowerCase();
+  const keywordHits = keywords.filter((keyword: any) => haystack.includes(keyword))
+    .length;
+  if (!keywordHits) return false;
+  return keywordHits >= (keywords.length > 6 ? 2 : 1);
+};
+
+const getRelatedMeetingTasks = (
+  meeting: Meeting,
+  keywords: string[],
+  assigneeKeys: { names: Set<string>; emails: Set<string> }
+) =>
+  getMeetingTasks(meeting).filter(
+    (candidate: any) =>
+      meetingTaskMatchesAssignee(candidate, assigneeKeys) ||
+      meetingTaskMatchesKeywords(candidate, keywords)
+  );
+
+const meetingHasTaskSignals = (
+  meeting: Meeting,
+  keywords: string[],
+  assigneeKeys: { names: Set<string>; emails: Set<string> }
+) => getRelatedMeetingTasks(meeting, keywords, assigneeKeys).length > 0;
+
+const statusLabel = (status?: string | null) => {
+  if (status === "todo") return "to do";
+  if (status === "inprogress") return "in progress";
+  if (status === "done") return "done";
+  if (status === "recurring") return "recurring";
+  return "unknown";
+};
+
+const formatTimelineEntry = (
+  meeting: Meeting,
+  matchedTasks: ExtractedTaskSchema[]
+) => {
+  const dateLabel = formatMeetingDate(meeting);
+  const meetingLabel = clipText(meeting.title || "Untitled meeting", 120);
+  const summary = clipText(meeting.summary || "", 170);
+
+  if (!matchedTasks.length) {
+    const line = `[${dateLabel}] ${meetingLabel}${
+      summary ? ` - ${summary}` : ""
+    }`;
+    return clipText(line, MAX_TIMELINE_ENTRY_CHARS);
+  }
+
+  const taskSignals = matchedTasks
+    .slice(0, 3)
+    .map((task: any) => {
+      const title = clipText(task.title || "Untitled task", 70);
+      const dueAt = task.dueAt ? `, due ${clipText(String(task.dueAt), 24)}` : "";
+      return `${title} (${statusLabel(task.status)}${dueAt})`;
+    })
+    .join("; ");
+
+  const countLabel = `${matchedTasks.length} related task${
+    matchedTasks.length === 1 ? "" : "s"
+  }`;
+  const line = `[${dateLabel}] ${meetingLabel} - ${countLabel}. ${taskSignals}${
+    summary ? ` | Summary: ${summary}` : ""
+  }`;
+  return clipText(line, MAX_TIMELINE_ENTRY_CHARS);
+};
+
+const sortMeetingsByRecency = (items: Meeting[]) => {
   return [...items].sort((a: any, b: any) => {
     const aTime = toTime(a.lastActivityAt ?? a.createdAt);
     const bTime = toTime(b.lastActivityAt ?? b.createdAt);
@@ -150,10 +275,15 @@ export const buildBriefContext = (
   task: ExtractedTaskSchema,
   meetings: Meeting[],
   people: Person[] = [],
-  options: { primaryMeetingId?: string | null; maxRelated?: number } = {}
+  options: {
+    primaryMeetingId?: string | null;
+    maxRelated?: number;
+    maxTimeline?: number;
+  } = {}
 ): BriefContext => {
   const keywords = getTaskKeywords(task);
   const maxRelated = options.maxRelated ?? 5;
+  const maxTimeline = options.maxTimeline ?? MAX_TIMELINE_ITEMS;
   const primaryMeetingId = options.primaryMeetingId || task.sourceSessionId;
   const primaryMeeting =
     primaryMeetingId
@@ -167,9 +297,29 @@ export const buildBriefContext = (
   );
 
   const assigneeKeys = collectAssigneeKeys(task, people);
-  const matchedMeetings = sortMeetingsByRecency(
+  const assigneeMatchedMeetings = sortMeetingsByRecency(
     meetings.filter((meeting: any) => meetingMatchesAssignee(meeting, assigneeKeys))
   );
+  const taskSignalMeetings = sortMeetingsByRecency(
+    meetings.filter((meeting: any) =>
+      meetingHasTaskSignals(meeting, keywords, assigneeKeys)
+    )
+  );
+
+  const candidateMeetings = sortMeetingsByRecency(
+    Array.from(
+      new Map(
+        [primaryMeeting, ...taskSignalMeetings, ...assigneeMatchedMeetings]
+          .filter(Boolean)
+          .map((meeting: any) => [meeting.id, meeting])
+      ).values()
+    )
+  );
+
+  const fallbackRecentMeetings = sortMeetingsByRecency(meetings);
+  const transcriptCandidates = candidateMeetings.length
+    ? candidateMeetings
+    : fallbackRecentMeetings;
 
   const relatedTranscripts: string[] = [];
   const usedMeetingIds = new Set<string>();
@@ -179,7 +329,7 @@ export const buildBriefContext = (
   }
 
   let fallbackPrimary: string | null = null;
-  matchedMeetings.forEach((meeting: any) => {
+  transcriptCandidates.forEach((meeting: any) => {
     if (usedMeetingIds.has(meeting.id)) return;
     const transcript = clipTranscript(
       getMeetingTranscript(meeting),
@@ -198,9 +348,43 @@ export const buildBriefContext = (
     }
   });
 
+  const timelineCandidates = [
+    ...(primaryMeeting ? [primaryMeeting] : []),
+    ...candidateMeetings,
+    ...fallbackRecentMeetings,
+  ];
+  const timelineMeetingIds = new Set<string>();
+  const meetingTimeline: string[] = [];
+  let timelineChars = 0;
+
+  timelineCandidates.forEach((meeting: any) => {
+    if (!meeting || timelineMeetingIds.has(meeting.id)) return;
+    if (meetingTimeline.length >= maxTimeline) return;
+    if (timelineChars >= MAX_TIMELINE_TOTAL_CHARS) return;
+    timelineMeetingIds.add(meeting.id);
+
+    const matchedTasks = getRelatedMeetingTasks(meeting, keywords, assigneeKeys);
+    if (!matchedTasks.length && meetingTimeline.length >= Math.ceil(maxTimeline / 2)) {
+      return;
+    }
+    const timelineEntry = formatTimelineEntry(meeting, matchedTasks);
+    if (!timelineEntry) return;
+
+    const remaining = MAX_TIMELINE_TOTAL_CHARS - timelineChars;
+    if (remaining <= 0) return;
+    if (timelineEntry.length > remaining) {
+      meetingTimeline.push(`${timelineEntry.slice(0, remaining).trim()} ...`);
+      timelineChars = MAX_TIMELINE_TOTAL_CHARS;
+      return;
+    }
+    meetingTimeline.push(timelineEntry);
+    timelineChars += timelineEntry.length;
+  });
+
   return {
     primaryTranscript: primaryTranscript || fallbackPrimary,
     relatedTranscripts,
+    meetingTimeline,
   };
 };
 

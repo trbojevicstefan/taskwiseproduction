@@ -193,6 +193,189 @@ const extractMeetingAttendeeKeysFromDocument = (meeting: any) => {
   return collectAttendeeKeys(sources);
 };
 
+type MeetingPersonRole = "attendee" | "mentioned";
+type MeetingPerson = {
+  name: string;
+  email?: string;
+  title?: string;
+  role: MeetingPersonRole;
+};
+
+const normalizeEmailValue = (value: unknown) => {
+  if (typeof value !== "string") return null;
+  const email = value.trim().toLowerCase();
+  if (!email || !email.includes("@")) return null;
+  return email;
+};
+
+const normalizeTextValue = (value: unknown) => {
+  if (typeof value !== "string") return null;
+  const normalized = value.trim();
+  return normalized || null;
+};
+
+const toDisplayNameFromEmail = (email: string) => {
+  const local = email.split("@")[0] || "Guest";
+  const prettified = local
+    .split(/[._-]+/)
+    .filter(Boolean)
+    .map((part: any) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+  return prettified || email;
+};
+
+const preferPersonName = (current: string, incoming?: string | null) => {
+  if (!incoming) return current;
+  const currentHasEmail = current.includes("@");
+  const incomingHasEmail = incoming.includes("@");
+  if (currentHasEmail && !incomingHasEmail) return incoming;
+  if (!currentHasEmail && incomingHasEmail) return current;
+  return current.length >= incoming.length ? current : incoming;
+};
+
+const normalizeMeetingPerson = (value: any, role: MeetingPersonRole): MeetingPerson | null => {
+  if (!value) return null;
+
+  if (typeof value === "string" || typeof value === "number") {
+    const raw = String(value).trim();
+    if (!raw) return null;
+    const email = normalizeEmailValue(raw);
+    const name = email ? toDisplayNameFromEmail(email) : normalizeTextValue(raw);
+    if (!name) return null;
+    return {
+      name,
+      ...(email ? { email } : {}),
+      role,
+    };
+  }
+
+  if (typeof value !== "object") return null;
+
+  const email = normalizeEmailValue(
+    value.email || value.emailAddress || value.email_address || value.mail
+  );
+  const name =
+    normalizeTextValue(
+      value.name ||
+        value.fullName ||
+        value.full_name ||
+        value.displayName ||
+        value.display_name
+    ) || (email ? toDisplayNameFromEmail(email) : null);
+  const title = normalizeTextValue(value.title || value.jobTitle || value.job_title);
+
+  if (!name) return null;
+  return {
+    name,
+    ...(email ? { email } : {}),
+    ...(title ? { title } : {}),
+    role,
+  };
+};
+
+const getMeetingPersonMergeKey = (person: Partial<MeetingPerson>) => {
+  const normalizedName = normalizeAttendeeKey(person.name);
+  if (normalizedName) return `name:${normalizedName}`;
+  const normalizedEmail = normalizeEmailValue(person.email);
+  if (normalizedEmail) return `email:${normalizedEmail}`;
+  return null;
+};
+
+const mergeMeetingPeopleLists = (...lists: Array<any[] | null | undefined>): MeetingPerson[] => {
+  const merged = new Map<string, MeetingPerson>();
+
+  lists.forEach((list) => {
+    (list || []).forEach((rawPerson) => {
+      const normalized = normalizeMeetingPerson(
+        rawPerson,
+        rawPerson?.role === "mentioned" ? "mentioned" : "attendee"
+      );
+      if (!normalized) return;
+      const key = getMeetingPersonMergeKey(normalized);
+      if (!key) return;
+
+      const existing = merged.get(key);
+      if (!existing) {
+        merged.set(key, normalized);
+        return;
+      }
+
+      merged.set(key, {
+        name: preferPersonName(existing.name, normalized.name),
+        email: existing.email || normalized.email,
+        title: existing.title || normalized.title,
+        role:
+          existing.role === "attendee" || normalized.role === "attendee"
+            ? "attendee"
+            : "mentioned",
+      });
+    });
+  });
+
+  return Array.from(merged.values());
+};
+
+const extractMeetingAttendeesFromPayload = (payload: any): MeetingPerson[] => {
+  const sources = [
+    payload?.attendees,
+    payload?.participants,
+    payload?.participant_list,
+    payload?.participantList,
+    payload?.people,
+    payload?.recording?.attendees,
+    payload?.recording?.participants,
+    payload?.recording?.participant_list,
+    payload?.recording?.participantList,
+    payload?.recording?.people,
+  ];
+
+  const attendees: MeetingPerson[] = [];
+  const walk = (value: any) => {
+    if (!value) return;
+    if (Array.isArray(value)) {
+      value.forEach(walk);
+      return;
+    }
+    const normalized = normalizeMeetingPerson(value, "attendee");
+    if (normalized) attendees.push(normalized);
+  };
+
+  sources.forEach(walk);
+  return mergeMeetingPeopleLists(attendees);
+};
+
+const buildUniqueMeetingPeople = (analysisResult: any, payload: any) => {
+  const attendeesFromAnalysis = (analysisResult.attendees || []).map((person: any) => ({
+    ...person,
+    role: "attendee" as const,
+  }));
+  const payloadAttendees = extractMeetingAttendeesFromPayload(payload);
+  const mentionedFromAnalysis = (analysisResult.mentionedPeople || []).map((person: any) => ({
+    ...person,
+    role: "mentioned" as const,
+  }));
+
+  return mergeMeetingPeopleLists(
+    attendeesFromAnalysis,
+    payloadAttendees,
+    mentionedFromAnalysis
+  );
+};
+
+const extractMeetingOrganizerEmail = (payload: any) => {
+  const candidate = pickFirst(
+    payload?.organizer_email,
+    payload?.organizer?.email,
+    payload?.host?.email,
+    payload?.owner?.email,
+    payload?.recording?.organizer_email,
+    payload?.recording?.organizer?.email,
+    payload?.recording?.host?.email,
+    payload?.recording?.owner?.email
+  );
+  return normalizeEmailValue(candidate);
+};
+
 const computeAttendeeOverlapRatio = (a: string[], b: string[]) => {
   if (!a.length || !b.length) return 0;
   const aSet = new Set(a);
@@ -665,6 +848,8 @@ export const ingestFathomMeeting = async ({
   const startTimeFromPayload = extractMeetingStartTime(payload);
   const endTimeFromPayload = extractMeetingEndTime(payload);
   const durationSecondsFromPayload = extractMeetingDurationSeconds(payload);
+  const organizerEmailFromPayload = extractMeetingOrganizerEmail(payload);
+  const payloadAttendees = extractMeetingAttendeesFromPayload(payload);
   const incomingAttendeeKeys = extractMeetingAttendeeKeysFromPayload(payload);
   const dedupeFingerprintsFromPayload = buildMeetingDedupeFingerprints({
     title: meetingTitleFromPayload,
@@ -808,6 +993,15 @@ export const ingestFathomMeeting = async ({
     if (duration && !existing.duration) {
       update.duration = duration;
     }
+    if (organizerEmailFromPayload && !existing.organizerEmail) {
+      update.organizerEmail = organizerEmailFromPayload;
+    }
+    if (payloadAttendees.length) {
+      const mergedAttendees = mergeMeetingPeopleLists(existing.attendees, payloadAttendees);
+      if (mergedAttendees.length) {
+        update.attendees = mergedAttendees;
+      }
+    }
 
     const updateOps: Record<string, any> = { $set: update };
     if (existing.recordingId) {
@@ -860,20 +1054,7 @@ export const ingestFathomMeeting = async ({
       );
       let sanitizedTaskLevels = sanitizeLevels(allTaskLevels);
 
-      const attendees = (analysisResult.attendees || []).map((person: any) => ({
-        ...person,
-        role: "attendee" as const,
-      }));
-      const mentioned = (analysisResult.mentionedPeople || []).map((person: any) => ({
-        ...person,
-        role: "mentioned" as const,
-      }));
-      const combinedPeople = [...attendees, ...mentioned];
-      const uniquePeople = Array.from(
-        new Map(
-          combinedPeople.map((person: any) => [person.name.toLowerCase(), person])
-        ).values()
-      );
+      const uniquePeople = buildUniqueMeetingPeople(analysisResult, payload);
 
       const completionMatchThreshold = resolveCompletionMatchThreshold(user);
       // Completion detection is intentionally creation-only.
@@ -952,6 +1133,7 @@ export const ingestFathomMeeting = async ({
         title: meetingTitle,
         summary: meetingSummary,
         analysisAttemptedAt: now,
+        organizerEmail: existing.organizerEmail || organizerEmailFromPayload || null,
         attendees: uniquePeople,
         extractedTasks: finalizedTasks,
         allTaskLevels: sanitizedTaskLevels,
@@ -1102,6 +1284,10 @@ export const ingestFathomMeeting = async ({
         tasks: finalizedTasks,
       });
     } else if (Array.isArray(existing.extractedTasks) && existing.extractedTasks.length) {
+      const attendeesForUpdate = mergeMeetingPeopleLists(
+        existing.attendees,
+        payloadAttendees
+      );
       await runMeetingIngestionCommand(db, {
         mode: "flagged-event",
         eventType: "meeting.updated",
@@ -1110,7 +1296,7 @@ export const ingestFathomMeeting = async ({
           meetingId: String(existing._id),
           workspaceId,
           title: existing.title || "Meeting",
-          attendees: [],
+          attendees: attendeesForUpdate,
           extractedTasks: existing.extractedTasks as ExtractedTaskSchema[],
         },
       });
@@ -1153,20 +1339,7 @@ export const ingestFathomMeeting = async ({
   );
   let sanitizedTaskLevels = sanitizeLevels(allTaskLevels);
 
-  const attendees = (analysisResult.attendees || []).map((person: any) => ({
-    ...person,
-    role: "attendee" as const,
-  }));
-  const mentioned = (analysisResult.mentionedPeople || []).map((person: any) => ({
-    ...person,
-    role: "mentioned" as const,
-  }));
-  const combinedPeople = [...attendees, ...mentioned];
-  const uniquePeople = Array.from(
-    new Map(
-      combinedPeople.map((person: any) => [person.name.toLowerCase(), person])
-    ).values()
-  );
+  const uniquePeople = buildUniqueMeetingPeople(analysisResult, payload);
 
   const completionMatchThreshold = resolveCompletionMatchThreshold(user);
   const completionSummary =
@@ -1289,6 +1462,7 @@ export const ingestFathomMeeting = async ({
     recordingIdHashes: candidateRecordingHashes,
     dedupeFingerprints: dedupeFingerprintsFromPayload,
     recordingUrl: recordingUrlFromPayload,
+    organizerEmail: organizerEmailFromPayload,
     ingestSource: "fathom",
     fathomNotificationReadAt: null,
     shareUrl: shareUrlFromPayload,

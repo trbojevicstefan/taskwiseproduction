@@ -355,6 +355,7 @@ export default function TaskDetailDialog({
         taskPriority: priority,
         primaryTranscript: briefContext?.primaryTranscript || undefined,
         relatedTranscripts: briefContext?.relatedTranscripts || undefined,
+        meetingTimeline: briefContext?.meetingTimeline || undefined,
       });
       setResearchBrief(result.researchBrief);
       setBriefQuota(result.briefQuota);

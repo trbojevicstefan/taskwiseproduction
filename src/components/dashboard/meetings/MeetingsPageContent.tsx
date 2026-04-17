@@ -131,6 +131,7 @@ import { TASK_TYPE_LABELS, TASK_TYPE_VALUES, type TaskTypeCategory } from '@/lib
 import { useWorkspaceBoards } from "@/hooks/use-workspace-boards";
 import { moveTaskToBoard } from "@/lib/board-actions";
 import { buildBriefContext } from "@/lib/brief-context";
+import { generateBriefsForTasks } from "@/lib/task-briefs";
 import { usePasteAction } from '@/contexts/PasteActionContext';
 
 
@@ -152,6 +153,24 @@ const taskTypeOrder = new Map<string, number>(
 
 const toDateValue = (value: unknown) =>
   (value as { toDate?: () => Date })?.toDate ? (value as { toDate: () => Date }).toDate() : value ? new Date(value as string | number | Date) : null;
+
+const toValidDateValue = (value: unknown) => {
+  const resolved = toDateValue(value);
+  if (!resolved) return null;
+  return isValid(resolved) ? resolved : null;
+};
+
+const getMeetingStartDate = (meeting: Pick<Meeting, "startTime" | "endTime" | "lastActivityAt" | "createdAt">) =>
+  toValidDateValue(meeting.startTime) ||
+  toValidDateValue(meeting.endTime) ||
+  toValidDateValue(meeting.lastActivityAt) ||
+  toValidDateValue(meeting.createdAt) ||
+  null;
+
+const toDateMs = (date: Date | null) => (date ? date.getTime() : 0);
+
+const isValidEmailAddress = (value: unknown) =>
+  typeof value === "string" && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
 
 // Type guard: checks if item is a full ExtractedTaskSchema (not a reference)
 const isExtractedTask = (item: ExtractedTaskSchema | { taskId: string; sourceTaskId: string; title: string }): item is ExtractedTaskSchema => {
@@ -255,6 +274,7 @@ function MeetingListItem({
   const router = useRouter();
   const flavor = flavorMap[(m.tags?.[0] || 'default').toLowerCase() as keyof typeof flavorMap] || flavorMap.default;
   const { total: actionCount, completed: completedActions } = getMeetingTaskCounts(m);
+  const startDate = getMeetingStartDate(m);
 
   const handleNavigation = (e: React.MouseEvent, path: string) => {
     e.stopPropagation();
@@ -297,9 +317,7 @@ function MeetingListItem({
             <span className="text-xs text-muted-foreground/80">| {completedActions} Completed</span>
           </div>
           <div className="col-span-2 text-sm text-muted-foreground">
-            {toDateValue(m.lastActivityAt)
-              ? formatDistanceToNow(toDateValue(m.lastActivityAt) as Date, { addSuffix: true })
-              : 'Just now'}
+            {startDate ? format(startDate, "MMM d, h:mm a") : 'Start time unavailable'}
           </div>
           <div className="col-span-1 flex justify-end opacity-0 group-hover/item:opacity-100 transition-opacity">
             <TooltipProvider>
@@ -999,6 +1017,7 @@ export function MeetingDetailSheet({
   const [isShareToSlackOpen, setIsShareToSlackOpen] = useState(false);
   const [isPushToGoogleOpen, setIsPushToGoogleOpen] = useState(false);
   const [isPushToTrelloOpen, setIsPushToTrelloOpen] = useState(false);
+  const [isGeneratingBriefs, setIsGeneratingBriefs] = useState(false);
   const [isDiscoveryDialogOpen, setIsDiscoveryDialogOpen] = useState(false);
   const [isSelectionViewVisible, setIsSelectionViewVisible] = useState(false);
   const [activePerson, setActivePerson] = useState<{
@@ -1638,15 +1657,59 @@ export function MeetingDetailSheet({
     setSelectedTaskIds(new Set()); // Clear selection
   };
 
+  const isValidResetSnapshot = (value: unknown): value is ExtractedTaskSchema[] => {
+    if (!Array.isArray(value)) return false;
+    return value.every((task: any) => {
+      if (!task || typeof task !== "object") return false;
+      return typeof task.title === "string" && task.title.trim().length > 0;
+    });
+  };
+
+  const getInitialTaskSnapshot = (meetingValue: Meeting) => {
+    const oldestRevisionSnapshot =
+      [...(meetingValue.taskRevisions || [])]
+        .sort((a: any, b: any) => Number(a.createdAt || 0) - Number(b.createdAt || 0))
+        .find((revision: any) => Array.isArray(revision.tasksSnapshot))
+        ?.tasksSnapshot || null;
+
+    const candidates: unknown[] = [
+      meetingValue.originalAiTasks,
+      meetingValue.originalAllTaskLevels?.medium,
+      meetingValue.originalAllTaskLevels?.detailed,
+      meetingValue.originalAllTaskLevels?.light,
+      oldestRevisionSnapshot,
+      meetingValue.allTaskLevels?.medium,
+      meetingValue.allTaskLevels?.detailed,
+      meetingValue.allTaskLevels?.light,
+    ];
+
+    let emptySnapshot: ExtractedTaskSchema[] | null = null;
+
+    for (const candidate of candidates) {
+      if (!isValidResetSnapshot(candidate)) continue;
+      const normalizedCandidate = candidate.map((task: any) => normalizeTask(task));
+
+      if (normalizedCandidate.length > 0) {
+        return normalizedCandidate;
+      }
+
+      if (!emptySnapshot) {
+        emptySnapshot = normalizedCandidate;
+      }
+    }
+
+    return emptySnapshot;
+  };
+
   const handleResetTasks = async () => {
     if (!meeting) {
       toast({ title: "Reset Failed", description: "Meeting data unavailable.", variant: "destructive" });
       return;
     }
-    const initialTasks =
-      meeting.originalAiTasks ||
-      meeting.originalAllTaskLevels?.medium ||
-      meeting.allTaskLevels?.medium;
+
+    const freshestMeeting = await loadMeetingById(meeting.id, { silent: true });
+    const sourceMeeting = freshestMeeting || meeting;
+    const initialTasks = getInitialTaskSnapshot(sourceMeeting);
 
     if (!initialTasks) {
       toast({ title: "Reset Failed", description: "No initial task state available to reset to.", variant: "destructive" });
@@ -1656,6 +1719,7 @@ export function MeetingDetailSheet({
     await syncMeetingTasks(initialTasks);
 
     toast({ title: "Tasks Reset", description: "The task list has been reset to its initial state." });
+    setSelectedTaskIds(new Set());
     setIsResetConfirmOpen(false);
   };
 
@@ -1790,6 +1854,116 @@ export function MeetingDetailSheet({
     }
   };
 
+  const handleGenerateBriefs = async () => {
+    if (isGeneratingBriefs) return;
+    if (!meeting || selectedTaskIds.size === 0) {
+      toast({
+        title: "No tasks selected",
+        description: "Please select tasks to generate briefs for.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setIsGeneratingBriefs(true);
+    toast({
+      title: "Generating Briefs...",
+      description: `AI is preparing briefs for ${selectedTaskIds.size} task(s).`,
+    });
+
+    try {
+      const rootTasks = getExtractedTasks(meeting.extractedTasks);
+      const findTaskRecursive = (
+        tasks: ExtractedTaskSchema[],
+        idToFind: string
+      ): ExtractedTaskSchema | null => {
+        for (const task of tasks) {
+          if (task.id === idToFind) return task;
+          if (task.subtasks) {
+            const found = findTaskRecursive(task.subtasks, idToFind);
+            if (found) return found;
+          }
+        }
+        return null;
+      };
+
+      const { successes, failures, limitReached } = await generateBriefsForTasks({
+        taskIds: selectedTaskIds,
+        resolveTask: (taskId) => findTaskRecursive(rootTasks, taskId),
+        resolveBriefContext: getBriefContext,
+      });
+
+      failures.forEach((failure) => {
+        const task = findTaskRecursive(rootTasks, failure.taskId);
+        console.error(
+          `Error generating brief for task ${task?.title || failure.taskId}:`,
+          failure.error
+        );
+      });
+
+      if (limitReached) {
+        toast({
+          title: "Brief limit reached",
+          description: "You have used all 10 AI Brief generations for this month.",
+          variant: "destructive",
+        });
+      }
+
+      if (successes.length === 0) {
+        if (!limitReached) {
+          toast({
+            title: "No Briefs Generated",
+            description: "Could not generate briefs for the selected tasks.",
+            variant: "destructive",
+          });
+        }
+        return;
+      }
+
+      const briefByTaskId = new Map(
+        successes.map((result: any) => [result.taskId, result.brief])
+      );
+      let appliedCount = 0;
+      const applyBriefsRecursively = (
+        tasks: ExtractedTaskSchema[]
+      ): ExtractedTaskSchema[] => {
+        return tasks.map((task: any) => {
+          const nextBrief = briefByTaskId.get(task.id);
+          const nextSubtasks = task.subtasks
+            ? applyBriefsRecursively(task.subtasks)
+            : task.subtasks;
+          if (nextBrief !== undefined) {
+            appliedCount += 1;
+            return { ...task, researchBrief: nextBrief, subtasks: nextSubtasks };
+          }
+          if (nextSubtasks !== task.subtasks) {
+            return { ...task, subtasks: nextSubtasks };
+          }
+          return task;
+        });
+      };
+
+      const updatedTasks = applyBriefsRecursively(rootTasks);
+      await syncMeetingTasks(updatedTasks);
+
+      if (taskForDetailView) {
+        const nextBrief = briefByTaskId.get(taskForDetailView.id);
+        if (nextBrief) {
+          setTaskForDetailView((prev) =>
+            prev ? { ...prev, researchBrief: nextBrief } : prev
+          );
+        }
+      }
+
+      toast({
+        title: "Briefs Generated",
+        description: `Research briefs generated for ${appliedCount} task(s).`,
+      });
+    } finally {
+      setIsGeneratingBriefs(false);
+    }
+  };
+
 
 
   const handleShareToSlack = () => {
@@ -1798,6 +1972,80 @@ export function MeetingDetailSheet({
       return;
     }
     setIsShareToSlackOpen(true);
+  };
+
+  const handleShareToEmail = () => {
+    if (!meeting) return;
+    if (selectedTaskIds.size === 0) {
+      toast({
+        title: "No tasks selected",
+        description: "Please select one or more tasks to share by email.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const attendeeEmails = Array.from(
+      new Set(
+        (meeting.attendees || [])
+          .map((attendee: any) =>
+            typeof attendee?.email === "string" ? attendee.email.trim().toLowerCase() : ""
+          )
+          .filter((email: any) => isValidEmailAddress(email))
+      )
+    );
+
+    if (attendeeEmails.length === 0) {
+      toast({
+        title: "No attendee emails found",
+        description: "This meeting has no attendee email addresses yet.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const startDate = getMeetingStartDate(meeting);
+    const startLabel = startDate ? format(startDate, "MMM d, yyyy h:mm a") : "Unknown start";
+    const subject = `Taskwise brief: ${meeting.title || "Meeting"}`;
+    const taskDigest = formatTasksToText(selectedTasks).trim();
+
+    const buildMailto = (body: string) =>
+      `mailto:${attendeeEmails.join(",")}?subject=${encodeURIComponent(
+        subject
+      )}&body=${encodeURIComponent(body)}`;
+
+    const fullBody = [
+      `Hi everyone,`,
+      ``,
+      `Sharing task updates from Taskwise for:`,
+      `${meeting.title || "Meeting"} (${startLabel})`,
+      ``,
+      `Tasks:`,
+      taskDigest,
+      ``,
+      `Sent from Taskwise.`,
+    ].join("\n");
+
+    let mailto = buildMailto(fullBody);
+    if (mailto.length > 1800) {
+      const compactBody = [
+        `Hi everyone,`,
+        ``,
+        `Sharing Taskwise task updates for ${meeting.title || "this meeting"}.`,
+        ``,
+        `Open Taskwise for the full detailed task brief.`,
+      ].join("\n");
+      mailto = buildMailto(compactBody);
+    }
+
+    if (typeof window !== "undefined") {
+      window.location.href = mailto;
+    }
+
+    toast({
+      title: "Opening email client",
+      description: `Preparing email to ${attendeeEmails.length} attendee${attendeeEmails.length === 1 ? "" : "s"}.`,
+    });
   };
 
   const handlePushToGoogleTasks = () => {
@@ -2513,7 +2761,9 @@ export function MeetingDetailSheet({
           onDelete={() => handleDeleteSelectedTasks()}
           onSend={(format) => handleExport(format)}
           onCopy={handleCopySelected}
+          onGenerateBriefs={handleGenerateBriefs}
           onShareToSlack={handleShareToSlack}
+          onShareToEmail={handleShareToEmail}
           isSlackConnected={isSlackConnected}
           onPushToGoogleTasks={handlePushToGoogleTasks}
           isGoogleTasksConnected={isGoogleTasksConnected}
@@ -2711,6 +2961,7 @@ export default function MeetingsPageContent() {
     useState(false);
   const [isPushSelectedMeetingsToTrelloOpen, setIsPushSelectedMeetingsToTrelloOpen] =
     useState(false);
+  const [isGeneratingMeetingBriefs, setIsGeneratingMeetingBriefs] = useState(false);
 
   const clearDuplicateChatLinks = useCallback(
     async (chatSessionId: string, meetingId: string) => {
@@ -2811,6 +3062,54 @@ export default function MeetingsPageContent() {
     }
   };
 
+  const monitorFathomSyncJob = useCallback(
+    (jobId: string, range: FathomSyncRange) => {
+      const rangeLabel =
+        range === "today"
+          ? "Today"
+          : range === "this_week"
+            ? "This Week"
+            : range === "last_week"
+              ? "Last Week"
+              : range === "this_month"
+                ? "This Month"
+                : "All Time";
+      const refreshHandle = setInterval(() => {
+        void refreshMeetings();
+      }, 6000);
+
+      void (async () => {
+        try {
+          const completedJob = await pollJobUntilDone(jobId, { timeoutMs: 600_000 });
+          const typedResult = (completedJob.result || {}) as {
+            created?: number;
+            skipped?: number;
+          };
+          await refreshMeetings();
+          toast({
+            title: "Fathom Sync Complete",
+            description: `Imported ${typedResult.created || 0} meetings, skipped ${typedResult.skipped || 0}.`,
+          });
+        } catch (error) {
+          console.error("Fathom sync background monitor failed:", error);
+          toast({
+            title: "Fathom Sync Failed",
+            description: error instanceof Error ? error.message : "Could not complete Fathom sync.",
+            variant: "destructive",
+          });
+        } finally {
+          clearInterval(refreshHandle);
+        }
+      })();
+
+      toast({
+        title: "Fathom Sync Started",
+        description: `Syncing ${rangeLabel} meetings in the background.`,
+      });
+    },
+    [refreshMeetings, toast]
+  );
+
   const handleSyncFathom = async (rangeOverride?: FathomSyncRange) => {
     if (isSyncingFathom) return;
     setIsSyncingFathom(true);
@@ -2824,10 +3123,12 @@ export default function MeetingsPageContent() {
       if (!response.ok) {
         throw new Error(payload.error || "Fathom sync failed.");
       }
-      const result = payload.jobId
-        ? (await pollJobUntilDone(payload.jobId)).result
-        : payload;
-      const typedResult = (result || payload) as {
+      if (payload.jobId) {
+        monitorFathomSyncJob(String(payload.jobId), rangeToUse);
+        return;
+      }
+
+      const typedResult = payload as {
         created?: number;
         skipped?: number;
       };
@@ -2881,12 +3182,12 @@ export default function MeetingsPageContent() {
     // Apply date filter
     if (filter === "today") {
       meetingsToFilter = meetingsToFilter.filter(m => {
-        const date = toDateValue(m.lastActivityAt);
+        const date = getMeetingStartDate(m);
         return date ? isToday(date) : false;
       });
     } else if (filter === "this_week") {
       meetingsToFilter = meetingsToFilter.filter(m => {
-        const date = toDateValue(m.lastActivityAt);
+        const date = getMeetingStartDate(m);
         return date ? isSameWeek(date, new Date(), { weekStartsOn: 1 }) : false;
       });
     }
@@ -2901,7 +3202,9 @@ export default function MeetingsPageContent() {
       );
     }
 
-    return meetingsToFilter;
+    return meetingsToFilter.sort(
+      (a, b) => toDateMs(getMeetingStartDate(b)) - toDateMs(getMeetingStartDate(a))
+    );
 
   }, [meetings, searchQuery, filter]);
 
@@ -2911,7 +3214,14 @@ export default function MeetingsPageContent() {
   );
 
   const selectedMeetingTasks = useMemo(
-    () => selectedMeetings.flatMap((meeting: any) => getExtractedTasks(meeting.extractedTasks)),
+    () =>
+      selectedMeetings.flatMap((meeting: any) =>
+        getExtractedTasks(meeting.extractedTasks).map((task: any) => ({
+          ...task,
+          sourceSessionId: meeting.id,
+          sourceSessionName: meeting.title,
+        }))
+      ),
     [selectedMeetings]
   );
 
@@ -3022,6 +3332,118 @@ export default function MeetingsPageContent() {
     });
   }, [selectedMeetingTasks, toast]);
 
+  const handleGenerateBriefsForSelectedMeetings = useCallback(async () => {
+    if (isGeneratingMeetingBriefs) return;
+    if (selectedMeetingTasks.length === 0) {
+      toast({
+        title: "No tasks selected",
+        description: "Selected meetings do not contain any extracted tasks to brief.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setIsGeneratingMeetingBriefs(true);
+    toast({
+      title: "Generating Briefs...",
+      description: `AI is preparing briefs for ${selectedMeetingTasks.length} task(s).`,
+    });
+
+    try {
+      const taskKeyToTask = new Map<string, ExtractedTaskSchema>();
+      const taskKeys: string[] = [];
+      selectedMeetingTasks.forEach((task: any) => {
+        const key = `${task.sourceSessionId || "unknown"}:${task.id}`;
+        taskKeyToTask.set(key, task as ExtractedTaskSchema);
+        taskKeys.push(key);
+      });
+
+      const { successes, failures, limitReached } = await generateBriefsForTasks({
+        taskIds: taskKeys,
+        resolveTask: (taskKey) => taskKeyToTask.get(taskKey) || null,
+        resolveBriefContext: (task) =>
+          buildBriefContext(task, meetings, [], {
+            primaryMeetingId: task.sourceSessionId || undefined,
+          }),
+      });
+
+      failures.forEach((failure) => {
+        const task = taskKeyToTask.get(failure.taskId);
+        console.error(
+          `Error generating brief for task ${task?.title || failure.taskId}:`,
+          failure.error
+        );
+      });
+
+      if (limitReached) {
+        toast({
+          title: "Brief limit reached",
+          description: "You have used all 10 AI Brief generations for this month.",
+          variant: "destructive",
+        });
+      }
+
+      const updatesByMeeting = new Map<string, Map<string, string>>();
+      successes.forEach((result: any) => {
+        const task = taskKeyToTask.get(result.taskId);
+        const meetingId = task?.sourceSessionId;
+        if (!meetingId) return;
+        const updates = updatesByMeeting.get(meetingId) || new Map<string, string>();
+        updates.set(task.id, result.brief);
+        updatesByMeeting.set(meetingId, updates);
+      });
+
+      let appliedCount = 0;
+      for (const [meetingId, updates] of updatesByMeeting.entries()) {
+        const meeting = meetings.find((item: any) => item.id === meetingId);
+        if (!meeting) continue;
+        const applyBriefsRecursively = (
+          tasks: ExtractedTaskSchema[]
+        ): ExtractedTaskSchema[] => {
+          return tasks.map((task: any) => {
+            const nextBrief = updates.get(task.id);
+            const nextSubtasks = task.subtasks
+              ? applyBriefsRecursively(task.subtasks)
+              : task.subtasks;
+            if (nextBrief !== undefined) {
+              appliedCount += 1;
+              return { ...task, researchBrief: nextBrief, subtasks: nextSubtasks };
+            }
+            if (nextSubtasks !== task.subtasks) {
+              return { ...task, subtasks: nextSubtasks };
+            }
+            return task;
+          });
+        };
+        const updatedTasks = applyBriefsRecursively(
+          getExtractedTasks(meeting.extractedTasks)
+        );
+        await updateMeeting(meetingId, { extractedTasks: updatedTasks });
+      }
+
+      if (appliedCount > 0) {
+        toast({
+          title: "Briefs Generated",
+          description: `Research briefs generated for ${appliedCount} task(s).`,
+        });
+      } else if (!limitReached) {
+        toast({
+          title: "No Briefs Generated",
+          description: "Could not generate briefs for the selected meeting tasks.",
+          variant: "destructive",
+        });
+      }
+    } finally {
+      setIsGeneratingMeetingBriefs(false);
+    }
+  }, [
+    isGeneratingMeetingBriefs,
+    meetings,
+    selectedMeetingTasks,
+    toast,
+    updateMeeting,
+  ]);
+
   const handleShareSelectedMeetingsToSlack = useCallback(() => {
     if (selectedMeetingTasks.length === 0) {
       toast({
@@ -3033,6 +3455,97 @@ export default function MeetingsPageContent() {
     }
     setIsShareSelectedMeetingsToSlackOpen(true);
   }, [selectedMeetingTasks, toast]);
+
+  const handleShareSelectedMeetingsToEmail = useCallback(() => {
+    if (selectedMeetings.length === 0) {
+      toast({
+        title: "No meetings selected",
+        description: "Select at least one meeting first.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (selectedMeetingTasks.length === 0) {
+      toast({
+        title: "No tasks selected",
+        description: "Selected meetings do not contain any extracted tasks to share.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const attendees = selectedMeetings
+      .flatMap((meeting: any) => meeting.attendees || [])
+      .map((attendee: any) =>
+        typeof attendee?.email === "string" ? attendee.email.trim().toLowerCase() : ""
+      )
+      .filter((email: any) => isValidEmailAddress(email));
+
+    const uniqueEmails = Array.from(new Set(attendees));
+    if (uniqueEmails.length === 0) {
+      toast({
+        title: "No attendee emails found",
+        description:
+          "The selected meetings do not have attendee emails yet. Re-sync Fathom to enrich attendees.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const subject = `Taskwise brief: ${selectedMeetingsLabel}`;
+    const meetingLines = selectedMeetings
+      .map((meeting: any) => {
+        const startDate = getMeetingStartDate(meeting);
+        const startLabel = startDate ? format(startDate, "MMM d, yyyy h:mm a") : "Unknown start";
+        return `- ${meeting.title || "Meeting"} (${startLabel})`;
+      })
+      .join("\n");
+    const taskDigest = formatTasksToText(selectedMeetingTasks).trim();
+
+    const buildMailto = (body: string) =>
+      `mailto:${uniqueEmails.join(",")}?subject=${encodeURIComponent(
+        subject
+      )}&body=${encodeURIComponent(body)}`;
+
+    const fullBody = [
+      `Hi everyone,`,
+      ``,
+      `Sharing the latest Taskwise action items and briefs for ${selectedMeetingsLabel}.`,
+      ``,
+      `Meetings:`,
+      meetingLines,
+      ``,
+      `Tasks:`,
+      taskDigest,
+      ``,
+      `Sent from Taskwise.`,
+    ].join("\n");
+
+    let mailto = buildMailto(fullBody);
+    if (mailto.length > 1800) {
+      const compactBody = [
+        `Hi everyone,`,
+        ``,
+        `Sharing Taskwise updates for ${selectedMeetingsLabel}.`,
+        ``,
+        `Meetings:`,
+        meetingLines,
+        ``,
+        `Tasks have been prepared in Taskwise.`,
+      ].join("\n");
+      mailto = buildMailto(compactBody);
+    }
+
+    if (typeof window !== "undefined") {
+      window.location.href = mailto;
+    }
+
+    toast({
+      title: "Opening email client",
+      description: `Preparing email to ${uniqueEmails.length} attendee${uniqueEmails.length === 1 ? "" : "s"}.`,
+    });
+  }, [selectedMeetingTasks, selectedMeetings, selectedMeetingsLabel, toast]);
 
   const handlePushSelectedMeetingsToGoogleTasks = useCallback(() => {
     if (selectedMeetingTasks.length === 0) {
@@ -3066,7 +3579,7 @@ export default function MeetingsPageContent() {
       const groups: { [key: string]: Meeting[] } = {};
 
       meetingsToSort.forEach(meeting => {
-        const date = toDateValue(meeting.lastActivityAt);
+        const date = getMeetingStartDate(meeting);
         if (!date) return;
 
         if (isToday(date)) {
@@ -3091,13 +3604,23 @@ export default function MeetingsPageContent() {
       const groupOrder = ['Today', 'Yesterday', 'This Week', 'Last Week'];
       const sortedGroupedMeetings = groupOrder
         .filter(key => groups[key])
-        .map(key => ({ label: key, meetings: groups[key] }));
+        .map(key => ({
+          label: key,
+          meetings: [...groups[key]].sort(
+            (a, b) => toDateMs(getMeetingStartDate(b)) - toDateMs(getMeetingStartDate(a))
+          ),
+        }));
 
       Object.keys(groups)
         .filter(key => !groupOrder.includes(key))
         .sort((a: any, b: any) => new Date(b).getTime() - new Date(a).getTime())
         .forEach(key => {
-          sortedGroupedMeetings.push({ label: key, meetings: groups[key] });
+          sortedGroupedMeetings.push({
+            label: key,
+            meetings: [...groups[key]].sort(
+              (a, b) => toDateMs(getMeetingStartDate(b)) - toDateMs(getMeetingStartDate(a))
+            ),
+          });
         });
 
       return sortedGroupedMeetings;
@@ -3307,7 +3830,9 @@ export default function MeetingsPageContent() {
         selectedCount={selectedMeetingIds.size}
         onSend={handleExportSelectedMeetings}
         onCopy={handleCopySelectedMeetings}
+        onGenerateBriefs={handleGenerateBriefsForSelectedMeetings}
         onShareToSlack={handleShareSelectedMeetingsToSlack}
+        onShareToEmail={handleShareSelectedMeetingsToEmail}
         isSlackConnected={isSlackConnected}
         onPushToGoogleTasks={handlePushSelectedMeetingsToGoogleTasks}
         isGoogleTasksConnected={isGoogleTasksConnected}

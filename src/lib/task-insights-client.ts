@@ -14,6 +14,7 @@ export type GenerateTaskBriefPayload = {
   taskPriority?: "low" | "medium" | "high";
   primaryTranscript?: string;
   relatedTranscripts?: string[];
+  meetingTimeline?: string[];
 };
 
 export type GenerateTaskAssistancePayload = {
