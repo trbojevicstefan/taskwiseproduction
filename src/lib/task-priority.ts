@@ -84,8 +84,9 @@ const COMPLETED_OR_EXPIRED_REASON = "Completed or expired";
 const NO_SIGNALS_REASON = "No urgency signals";
 
 // Start-of-word matches only; 'unblock' intentionally matches 'unblocked'
-// and 'unblocking' too.
-const BLOCKER_SIGNALS_RE =
+// and 'unblocking' too. Exported so other surfaces (e.g. the planning
+// overview endpoint) share the exact same blocker-signal definition.
+export const BLOCKER_SIGNAL_REGEX =
   /\b(blocked|blocking|waiting on|unblock|depends on)/i;
 
 const toDate = (value: string | Date | null | undefined): Date | null => {
@@ -203,7 +204,7 @@ export const computeTaskPriority = (
   }
 
   const blockerText = `${task.title || ""} ${task.description || ""}`;
-  if (BLOCKER_SIGNALS_RE.test(blockerText)) {
+  if (BLOCKER_SIGNAL_REGEX.test(blockerText)) {
     factors.push({ label: "Blocker/dependency signal", weight: 10 });
   }
 

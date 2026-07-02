@@ -381,37 +381,69 @@ const LoadingBubble: React.FC = () => (
 const HeroState: React.FC<{
   onPickPrompt: (prompt: string) => void;
   disabled: boolean;
-}> = ({ onPickPrompt, disabled }) => (
-  <div className="flex flex-col items-center gap-4 py-8 text-center">
-    <div className="flex h-12 w-12 items-center justify-center rounded-full border border-border/60 bg-background/80 shadow-sm">
-      <Sparkles className="h-5 w-5 text-primary" />
+  title: string;
+  prompts: string[];
+  showDescription: boolean;
+  showTip: boolean;
+  compact: boolean;
+}> = ({
+  onPickPrompt,
+  disabled,
+  title,
+  prompts,
+  showDescription,
+  showTip,
+  compact,
+}) => (
+  <div
+    className={cn(
+      'flex flex-col items-center gap-4 text-center',
+      compact ? 'py-4' : 'py-8'
+    )}
+  >
+    <div
+      className={cn(
+        'flex items-center justify-center rounded-full border border-border/60 bg-background/80 shadow-sm',
+        compact ? 'h-10 w-10' : 'h-12 w-12'
+      )}
+    >
+      <Sparkles className={cn('text-primary', compact ? 'h-4 w-4' : 'h-5 w-5')} />
     </div>
-    <h2 className="font-headline text-xl font-semibold text-foreground">
-      Ask anything about your meetings.
+    <h2
+      className={cn(
+        'font-headline font-semibold text-foreground',
+        compact ? 'text-lg' : 'text-xl'
+      )}
+    >
+      {title}
     </h2>
-    <p className="max-w-md text-sm text-muted-foreground">
-      Answers are grounded in your meetings, transcripts, tasks, people, and
-      clients — every claim comes with its sources.
-    </p>
+    {showDescription && (
+      <p className="max-w-md text-sm text-muted-foreground">
+        Answers are grounded in your meetings, transcripts, tasks, people, and
+        clients — every claim comes with its sources.
+      </p>
+    )}
     <div className="flex max-w-xl flex-wrap justify-center gap-2">
-      {GENERAL_CHAT_SUGGESTED_PROMPTS.map((item) => (
+      {prompts.map((prompt) => (
         <Button
-          key={item.prompt}
+          key={prompt}
           type="button"
           variant="outline"
           size="sm"
           className="h-8 rounded-full bg-background"
-          onClick={() => onPickPrompt(item.prompt)}
+          onClick={() => onPickPrompt(prompt)}
           disabled={disabled}
         >
-          {item.prompt}
+          {prompt}
         </Button>
       ))}
     </div>
-    <p className="text-xs text-muted-foreground">
-      Tip: edit placeholders like &ldquo;Client X&rdquo; or &ldquo;Stefan&rdquo;
-      before sending.
-    </p>
+    {showTip && (
+      <p className="text-xs text-muted-foreground">
+        Tip: edit placeholders like &ldquo;Client X&rdquo; or &ldquo;Stefan&rdquo;
+        before sending.
+      </p>
+    )}
   </div>
 );
 
@@ -427,11 +459,22 @@ const nextMessageId = () => {
 
 const MAX_QUESTION_LENGTH = 2000;
 
+export interface GeneralChatPanelProps {
+  className?: string;
+  /** Override the hero heading (defaults to the Chat page copy). */
+  heroTitle?: string;
+  /** Override the suggested prompts shown in the hero state. */
+  suggestedPrompts?: string[];
+  /** Tighter spacing for side-column embeds. Defaults to false. */
+  compact?: boolean;
+}
+
 export default function GeneralChatPanel({
   className,
-}: {
-  className?: string;
-}) {
+  heroTitle,
+  suggestedPrompts,
+  compact = false,
+}: GeneralChatPanelProps) {
   const [messages, setMessages] = useState<PanelMessage[]>([]);
   const [inputValue, setInputValue] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -497,11 +540,23 @@ export default function GeneralChatPanel({
     inputRef.current?.focus();
   }, []);
 
+  const heroPrompts =
+    suggestedPrompts ??
+    GENERAL_CHAT_SUGGESTED_PROMPTS.map((item) => item.prompt);
+
   return (
     <TooltipProvider delayDuration={150}>
-      <div className={cn('flex flex-col gap-5', className)}>
+      <div className={cn('flex flex-col', compact ? 'gap-4' : 'gap-5', className)}>
         {messages.length === 0 && (
-          <HeroState onPickPrompt={handlePickPrompt} disabled={isLoading} />
+          <HeroState
+            onPickPrompt={handlePickPrompt}
+            disabled={isLoading}
+            title={heroTitle ?? 'Ask anything about your meetings.'}
+            prompts={heroPrompts}
+            showDescription={!compact}
+            showTip={!compact && suggestedPrompts === undefined}
+            compact={compact}
+          />
         )}
         {messages.length > 0 && (
           <div className="flex flex-col gap-5">
