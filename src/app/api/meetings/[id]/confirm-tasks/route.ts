@@ -41,7 +41,7 @@ const resolveMeetingAccess = async (db: any, userId: string, id: string) => {
     try {
       await assertWorkspaceAccess(db as any, userId, workspaceId, "member");
     } catch {
-      return null;
+      return { accessDenied: true as const };
     }
   } else if (meeting.userId !== userId) {
     return null;
@@ -57,6 +57,7 @@ const resolveMeetingAccess = async (db: any, userId: string, id: string) => {
     workspaceId,
     ownerUserId,
     filter: meeting?._id ? { _id: meeting._id } : lookupFilter,
+    accessDenied: false as const,
   };
 };
 
@@ -160,7 +161,13 @@ export async function POST(
 
   const db = await getDb();
   const access = await resolveMeetingAccess(db, userId, id);
-  if (!access || access.meeting.isHidden) {
+  if (!access) {
+    return apiError(404, "request_error", "Meeting not found.");
+  }
+  if (access.accessDenied) {
+    return apiError(403, "forbidden", "Forbidden");
+  }
+  if (access.meeting.isHidden) {
     return apiError(404, "request_error", "Meeting not found.");
   }
 

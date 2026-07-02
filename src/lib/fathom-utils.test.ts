@@ -3,6 +3,7 @@ import {
   FATHOM_WEBHOOK_TRIGGERED_FOR,
   extractFathomProviderSourceId,
   formatFathomTranscript,
+  formatTimestamp,
   getFathomRedirectUri,
   getFathomRecordingHashScope,
   getFathomWebhookUrl,
@@ -78,5 +79,11 @@ describe("fathom-utils", () => {
         { timestamp: "00:20", name: "Jon", content: "World" },
       ])
     ).toBe("0:12 - Maya: Hello\n00:20 - Jon: World");
+  });
+
+  it("formats timestamps as mm:ss", () => {
+    expect(formatTimestamp(12)).toBe("0:12");
+    expect(formatTimestamp("00:20")).toBe("00:20");
+    expect(formatTimestamp(null)).toBe("");
   });
 });

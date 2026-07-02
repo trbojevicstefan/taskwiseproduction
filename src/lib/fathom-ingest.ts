@@ -17,14 +17,6 @@ import {
   mergeCompletionSuggestions,
 } from "@/lib/task-completion";
 import { findFathomConnectionById } from "@/lib/fathom-connections";
-import {
-  pickFirst,
-  normalizeMeetingTitleKey,
-  normalizeMeetingUrlKey,
-  normalizeDurationBucket,
-  toFiveMinuteBucket,
-  toNumberOrNull,
-} from "@/lib/fathom-ingest-helpers";
 import * as ingestHelpers from "@/lib/fathom-ingest-helpers";
 import * as analysisHelpers from "@/lib/fathom-ingest-analysis";
 import * as ingestDuplicates from "@/lib/fathom-ingest-duplicates";
@@ -37,252 +29,8 @@ type FathomIngestResult =
   | { status: "duplicate"; meetingId: string }
   | { status: "no_transcript" };
 
-const escapeRegex = (value: string) =>
-  value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-
-const normalizeAttendeeKey = (value: unknown) => {
-  if (typeof value === "number" && Number.isFinite(value)) {
-    return String(value);
-  }
-  if (typeof value !== "string") return null;
-  const raw = value.trim();
-  if (!raw) return null;
-  if (raw.includes("@")) {
-    return raw.toLowerCase();
-  }
-  const normalized = raw
-    .toLowerCase()
-    .replace(/[^a-z0-9\s]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-  return normalized || null;
-};
-
-const collectAttendeeKeys = (values: any[]) => {
-  const keys = new Set<string>();
-  for (const value of values) {
-    if (!value) continue;
-    if (Array.isArray(value)) {
-      collectAttendeeKeys(value).forEach((key) => keys.add(key));
-      continue;
-    }
-    if (typeof value === "string" || typeof value === "number") {
-      const key = normalizeAttendeeKey(value);
-      if (key) keys.add(key);
-      continue;
-    }
-    if (typeof value === "object") {
-      const candidates = [
-        value.name,
-        value.fullName,
-        value.full_name,
-        value.displayName,
-        value.display_name,
-        value.email,
-      ];
-      candidates.forEach((candidate) => {
-        const key = normalizeAttendeeKey(candidate);
-        if (key) keys.add(key);
-      });
-    }
-  }
-  return Array.from(keys);
-};
-
-const extractMeetingAttendeeKeysFromPayload = (payload: any) => {
-  const sources = [
-    payload?.attendees,
-    payload?.participants,
-    payload?.participant_list,
-    payload?.participantList,
-    payload?.people,
-    payload?.speakers,
-    payload?.recording?.attendees,
-    payload?.recording?.participants,
-    payload?.recording?.participant_list,
-    payload?.recording?.participantList,
-    payload?.recording?.people,
-    payload?.recording?.speakers,
-  ];
-  return collectAttendeeKeys(sources);
-};
-
-const extractMeetingAttendeeKeysFromDocument = (meeting: any) => {
-  const sources = [meeting?.attendees, meeting?.people, meeting?.meetingParticipants];
-  return collectAttendeeKeys(sources);
-};
-
-type MeetingPersonRole = "attendee" | "mentioned";
-type MeetingPerson = {
-  name: string;
-  email?: string;
-  title?: string;
-  role: MeetingPersonRole;
-};
-
-const normalizeEmailValue = (value: unknown) => {
-  if (typeof value !== "string") return null;
-  const email = value.trim().toLowerCase();
-  if (!email || !email.includes("@")) return null;
-  return email;
-};
-
-const normalizeTextValue = (value: unknown) => {
-  if (typeof value !== "string") return null;
-  const normalized = value.trim();
-  return normalized || null;
-};
-
-const toDisplayNameFromEmail = (email: string) => {
-  const local = email.split("@")[0] || "Guest";
-  const prettified = local
-    .split(/[._-]+/)
-    .filter(Boolean)
-    .map((part: any) => part.charAt(0).toUpperCase() + part.slice(1))
-    .join(" ");
-  return prettified || email;
-};
-
-const preferPersonName = (current: string, incoming?: string | null) => {
-  if (!incoming) return current;
-  const currentHasEmail = current.includes("@");
-  const incomingHasEmail = incoming.includes("@");
-  if (currentHasEmail && !incomingHasEmail) return incoming;
-  if (!currentHasEmail && incomingHasEmail) return current;
-  return current.length >= incoming.length ? current : incoming;
-};
-
-const normalizeMeetingPerson = (value: any, role: MeetingPersonRole): MeetingPerson | null => {
-  if (!value) return null;
-
-  if (typeof value === "string" || typeof value === "number") {
-    const raw = String(value).trim();
-    if (!raw) return null;
-    const email = normalizeEmailValue(raw);
-    const name = email ? toDisplayNameFromEmail(email) : normalizeTextValue(raw);
-    if (!name) return null;
-    return {
-      name,
-      ...(email ? { email } : {}),
-      role,
-    };
-  }
-
-  if (typeof value !== "object") return null;
-
-  const email = normalizeEmailValue(
-    value.email || value.emailAddress || value.email_address || value.mail
-  );
-  const name =
-    normalizeTextValue(
-      value.name ||
-        value.fullName ||
-        value.full_name ||
-        value.displayName ||
-        value.display_name
-    ) || (email ? toDisplayNameFromEmail(email) : null);
-  const title = normalizeTextValue(value.title || value.jobTitle || value.job_title);
-
-  if (!name) return null;
-  return {
-    name,
-    ...(email ? { email } : {}),
-    ...(title ? { title } : {}),
-    role,
-  };
-};
-
-const getMeetingPersonMergeKey = (person: Partial<MeetingPerson>) => {
-  const normalizedName = normalizeAttendeeKey(person.name);
-  if (normalizedName) return `name:${normalizedName}`;
-  const normalizedEmail = normalizeEmailValue(person.email);
-  if (normalizedEmail) return `email:${normalizedEmail}`;
-  return null;
-};
-
-const mergeMeetingPeopleLists = (...lists: Array<any[] | null | undefined>): MeetingPerson[] => {
-  const merged = new Map<string, MeetingPerson>();
-
-  lists.forEach((list) => {
-    (list || []).forEach((rawPerson) => {
-      const normalized = normalizeMeetingPerson(
-        rawPerson,
-        rawPerson?.role === "mentioned" ? "mentioned" : "attendee"
-      );
-      if (!normalized) return;
-      const key = getMeetingPersonMergeKey(normalized);
-      if (!key) return;
-
-      const existing = merged.get(key);
-      if (!existing) {
-        merged.set(key, normalized);
-        return;
-      }
-
-      merged.set(key, {
-        name: preferPersonName(existing.name, normalized.name),
-        email: existing.email || normalized.email,
-        title: existing.title || normalized.title,
-        role:
-          existing.role === "attendee" || normalized.role === "attendee"
-            ? "attendee"
-            : "mentioned",
-      });
-    });
-  });
-
-  return Array.from(merged.values());
-};
-
-const extractMeetingAttendeesFromPayload = (payload: any): MeetingPerson[] => {
-  const sources = [
-    payload?.attendees,
-    payload?.participants,
-    payload?.participant_list,
-    payload?.participantList,
-    payload?.people,
-    payload?.recording?.attendees,
-    payload?.recording?.participants,
-    payload?.recording?.participant_list,
-    payload?.recording?.participantList,
-    payload?.recording?.people,
-  ];
-
-  const attendees: MeetingPerson[] = [];
-  const walk = (value: any) => {
-    if (!value) return;
-    if (Array.isArray(value)) {
-      value.forEach(walk);
-      return;
-    }
-    const normalized = normalizeMeetingPerson(value, "attendee");
-    if (normalized) attendees.push(normalized);
-  };
-
-  sources.forEach(walk);
-  return mergeMeetingPeopleLists(attendees);
-};
-
-const buildUniqueMeetingPeople = (analysisResult: any, payload: any) => {
-  const attendeesFromAnalysis = (analysisResult.attendees || []).map((person: any) => ({
-    ...person,
-    role: "attendee" as const,
-  }));
-  const payloadAttendees = ingestHelpers.extractMeetingAttendeesFromPayload(payload);
-  const mentionedFromAnalysis = (analysisResult.mentionedPeople || []).map((person: any) => ({
-    ...person,
-    role: "mentioned" as const,
-  }));
-
-  return mergeMeetingPeopleLists(
-    attendeesFromAnalysis,
-    payloadAttendees,
-    mentionedFromAnalysis
-  );
-};
-
 const extractMeetingOrganizerEmail = (payload: any) => {
-  const candidate = pickFirst(
+  const candidate = ingestHelpers.pickFirst(
     payload?.organizer_email,
     payload?.organizer?.email,
     payload?.host?.email,
@@ -292,241 +40,9 @@ const extractMeetingOrganizerEmail = (payload: any) => {
     payload?.recording?.host?.email,
     payload?.recording?.owner?.email
   );
-  return normalizeEmailValue(candidate);
-};
-
-const computeAttendeeOverlapRatio = (a: string[], b: string[]) => {
-  if (!a.length || !b.length) return 0;
-  const aSet = new Set(a);
-  const bSet = new Set(b);
-  let intersection = 0;
-  aSet.forEach((key) => {
-    if (bSet.has(key)) intersection += 1;
-  });
-  return intersection / Math.min(aSet.size, bSet.size);
-};
-
-const selectBestAttendeeOverlapCandidate = (candidates: any[], incomingAttendeeKeys: string[]) => {
-  let bestCandidate: any = null;
-  let bestRatio = 0;
-  for (const candidate of candidates) {
-    const candidateAttendeeKeys = ingestHelpers.extractMeetingAttendeeKeysFromDocument(candidate);
-    if (!candidateAttendeeKeys.length) continue;
-    const ratio = ingestHelpers.computeAttendeeOverlapRatio(
-      incomingAttendeeKeys,
-      candidateAttendeeKeys
-    );
-    if (ratio > bestRatio) {
-      bestRatio = ratio;
-      bestCandidate = candidate;
-    }
-  }
-  return { candidate: bestCandidate, ratio: bestRatio };
-};
-
-const hasStrongFingerprint = (fingerprint: string) =>
-  fingerprint.startsWith("recording_url:") || fingerprint.startsWith("share_url:");
-
-type MeetingDedupeFingerprintInput = {
-  title?: string | null;
-  recordingUrl?: string | null;
-  shareUrl?: string | null;
-  startTime?: Date | null;
-  endTime?: Date | null;
-  durationSeconds?: number | null;
-};
-
-const buildMeetingDedupeFingerprints = ({
-  title,
-  recordingUrl,
-  shareUrl,
-  startTime,
-  endTime,
-  durationSeconds,
-}: MeetingDedupeFingerprintInput) => {
-  const keys = new Set<string>();
-  const titleKey = normalizeMeetingTitleKey(title);
-  const recordingUrlKey = normalizeMeetingUrlKey(recordingUrl);
-  const shareUrlKey = normalizeMeetingUrlKey(shareUrl);
-  const durationBucket = normalizeDurationBucket(durationSeconds ?? null);
-  const anchors = Array.from(
-    new Set([toFiveMinuteBucket(startTime || null), toFiveMinuteBucket(endTime || null)].filter(Boolean))
-  ) as string[];
-
-  anchors.forEach((anchor) => {
-    if (titleKey) {
-      keys.add(`title:${titleKey}|t:${anchor}`);
-      if (durationBucket) {
-        keys.add(`title:${titleKey}|t:${anchor}|d:${durationBucket}`);
-      }
-    }
-    if (recordingUrlKey) {
-      keys.add(`recording_url:${recordingUrlKey}|t:${anchor}`);
-    }
-    if (shareUrlKey) {
-      keys.add(`share_url:${shareUrlKey}|t:${anchor}`);
-    }
-  });
-
-  return Array.from(keys);
-};
-
-const CROSS_NOTETAKER_DEDUPE_WINDOW_MS = Math.max(
-  5 * 60 * 1000,
-  Number(process.env.FATHOM_CROSS_NOTETAKER_DEDUPE_WINDOW_MS || 20 * 60 * 1000)
-);
-
-const CROSS_NOTETAKER_DEDUPE_DURATION_TOLERANCE_SECONDS = Math.max(
-  0,
-  Number(process.env.FATHOM_CROSS_NOTETAKER_DEDUPE_DURATION_TOLERANCE_SECONDS || 180)
-);
-
-const CROSS_NOTETAKER_ATTENDEE_OVERLAP_MIN = Math.min(
-  1,
-  Math.max(
-    0,
-    Number(process.env.FATHOM_CROSS_NOTETAKER_ATTENDEE_OVERLAP_MIN || 0.5)
-  )
-);
-
-const findCanonicalFathomDuplicate = async ({
-  db,
-  userId,
-  workspaceId,
-  dedupeFingerprints,
-  incomingAttendeeKeys,
-  title,
-  startTime,
-  durationSeconds,
-}: {
-  db: any;
-  userId: string;
-  workspaceId: string | null;
-  dedupeFingerprints: string[];
-  incomingAttendeeKeys: string[];
-  title: string | null;
-  startTime: Date | null;
-  durationSeconds: number | null;
-}) => {
-  const meetings = db.collection("meetings");
-  const scopeFilter = ingestHelpers.buildMeetingScopeFilter({ userId, workspaceId });
-
-  if (dedupeFingerprints.length) {
-    const incomingFingerprintSet = new Set(dedupeFingerprints);
-    const fingerprintCandidates = await meetings
-      .find({
-      $and: [
-        scopeFilter,
-        { ingestSource: "fathom" },
-        { dedupeFingerprints: { $in: dedupeFingerprints } },
-      ],
-      })
-      .sort({ lastActivityAt: -1, _id: -1 })
-      .limit(12)
-      .toArray();
-    if (fingerprintCandidates.length) {
-      const strongMatches: any[] = [];
-      const weakMatches: any[] = [];
-      for (const candidate of fingerprintCandidates) {
-        const candidateFingerprints = Array.isArray(candidate?.dedupeFingerprints)
-          ? candidate.dedupeFingerprints.filter((value: any) => typeof value === "string")
-          : [];
-        const matchedFingerprints = candidateFingerprints.filter((fingerprint: string) =>
-          incomingFingerprintSet.has(fingerprint)
-        );
-        if (!matchedFingerprints.length) continue;
-        if (
-          matchedFingerprints.some((fingerprint: string) =>
-            ingestHelpers.hasStrongFingerprint(fingerprint)
-          )
-        ) {
-          strongMatches.push(candidate);
-        } else {
-          weakMatches.push(candidate);
-        }
-      }
-
-      if (strongMatches.length > 0) {
-        if (strongMatches.length === 1) {
-          return strongMatches[0];
-        }
-        if (incomingAttendeeKeys.length) {
-          const bestStrong = ingestHelpers.selectBestAttendeeOverlapCandidate(
-            strongMatches,
-            incomingAttendeeKeys
-          );
-          if (
-            bestStrong.candidate &&
-            bestStrong.ratio >= CROSS_NOTETAKER_ATTENDEE_OVERLAP_MIN
-          ) {
-            return bestStrong.candidate;
-          }
-        }
-        return strongMatches[0];
-      }
-
-      if (weakMatches.length > 0 && incomingAttendeeKeys.length) {
-        const bestWeak = ingestHelpers.selectBestAttendeeOverlapCandidate(
-          weakMatches,
-          incomingAttendeeKeys
-        );
-        if (
-          bestWeak.candidate &&
-          bestWeak.ratio >= CROSS_NOTETAKER_ATTENDEE_OVERLAP_MIN
-        ) {
-          return bestWeak.candidate;
-        }
-      }
-    }
-  }
-
-  if (!startTime || !title) {
-    return null;
-  }
-
-  const rangeStart = new Date(startTime.getTime() - CROSS_NOTETAKER_DEDUPE_WINDOW_MS);
-  const rangeEnd = new Date(startTime.getTime() + CROSS_NOTETAKER_DEDUPE_WINDOW_MS);
-  const titleRegex = new RegExp(`^${escapeRegex(title.trim())}$`, "i");
-
-  const titleTimeMatches = await meetings
-    .find({
-    $and: [
-      scopeFilter,
-      { ingestSource: "fathom" },
-      { title: titleRegex },
-      { startTime: { $gte: rangeStart, $lte: rangeEnd } },
-      ...(durationSeconds === null
-        ? []
-        : [
-            {
-              duration: {
-                $gte: durationSeconds - CROSS_NOTETAKER_DEDUPE_DURATION_TOLERANCE_SECONDS,
-                $lte: durationSeconds + CROSS_NOTETAKER_DEDUPE_DURATION_TOLERANCE_SECONDS,
-              },
-            },
-          ]),
-    ],
-    })
-    .sort({ lastActivityAt: -1, _id: -1 })
-    .limit(12)
-    .toArray();
-
-  if (!titleTimeMatches.length || !incomingAttendeeKeys.length) {
-    return null;
-  }
-
-  const bestTitleTimeMatch = ingestHelpers.selectBestAttendeeOverlapCandidate(
-    titleTimeMatches,
-    incomingAttendeeKeys
-  );
-  if (
-    bestTitleTimeMatch.candidate &&
-    bestTitleTimeMatch.ratio >= CROSS_NOTETAKER_ATTENDEE_OVERLAP_MIN
-  ) {
-    return bestTitleTimeMatch.candidate;
-  }
-
-  return null;
+  if (typeof candidate !== "string") return null;
+  const email = candidate.trim().toLowerCase();
+  return email.includes("@") ? email : null;
 };
 
 const DUPLICATE_REANALYZE_MAX_AGE_MS = Math.max(
@@ -795,7 +311,10 @@ export const ingestFathomMeeting = async ({
       update.organizerEmail = organizerEmailFromPayload;
     }
     if (payloadAttendees.length) {
-      const mergedAttendees = mergeMeetingPeopleLists(existing.attendees, payloadAttendees);
+      const mergedAttendees = ingestHelpers.mergeMeetingPeopleLists(
+        existing.attendees,
+        payloadAttendees
+      );
       if (mergedAttendees.length) {
         update.attendees = mergedAttendees;
       }
@@ -910,7 +429,7 @@ export const ingestFathomMeeting = async ({
         }
       }
 
-      const meetingTitle = pickFirst(
+      const meetingTitle = ingestHelpers.pickFirst(
         existing.title,
         meetingTitleFromPayload,
         analysisResult.sessionTitle,
@@ -918,7 +437,7 @@ export const ingestFathomMeeting = async ({
       );
 
       const meetingSummary =
-        pickFirst(
+        ingestHelpers.pickFirst(
           existingSummary,
           analysisResult.meetingSummary,
           analysisResult.chatResponseText,
@@ -951,7 +470,7 @@ export const ingestFathomMeeting = async ({
         endTime: endTime || existing.endTime || null,
         durationSeconds:
           (typeof duration === "number" ? duration : null) ??
-          toNumberOrNull(existing.duration) ??
+          ingestHelpers.toNumberOrNull(existing.duration) ??
           null,
       });
       if (refreshedDedupeFingerprints.length) {
@@ -1082,7 +601,7 @@ export const ingestFathomMeeting = async ({
         tasks: finalizedTasks,
       });
     } else if (Array.isArray(existing.extractedTasks) && existing.extractedTasks.length) {
-      const attendeesForUpdate = mergeMeetingPeopleLists(
+      const attendeesForUpdate = ingestHelpers.mergeMeetingPeopleLists(
         existing.attendees,
         payloadAttendees
       );
@@ -1141,7 +660,7 @@ export const ingestFathomMeeting = async ({
 
   const completionMatchThreshold = analysisHelpers.resolveCompletionMatchThreshold(user);
   const completionSummary =
-    pickFirst(
+    ingestHelpers.pickFirst(
       analysisResult.meetingSummary,
       analysisResult.chatResponseText,
       summaryText
@@ -1207,14 +726,14 @@ export const ingestFathomMeeting = async ({
     }
   }
 
-  const meetingTitle = pickFirst(
+  const meetingTitle = ingestHelpers.pickFirst(
     meetingTitleFromPayload,
     analysisResult.sessionTitle,
     "Fathom Meeting"
   );
 
   const meetingSummary =
-    pickFirst(
+    ingestHelpers.pickFirst(
       analysisResult.meetingSummary,
       analysisResult.chatResponseText,
       summaryText

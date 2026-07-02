@@ -116,7 +116,7 @@ export const extractFathomProviderSourceId = (payload: any): string | null => {
   return null;
 };
 
-const formatTimestamp = (value: string | number | null | undefined) => {
+export const formatTimestamp = (value: string | number | null | undefined) => {
   if (value === null || value === undefined) return "";
   if (typeof value === "string") return value;
   if (!Number.isFinite(value)) return "";

@@ -1,5 +1,3 @@
-import type { ExtractedTaskSchema } from "@/types/chat";
-
 export type MeetingPersonRole = "attendee" | "mentioned";
 export type MeetingPerson = {
   name: string;
@@ -100,9 +98,6 @@ export const extractMeetingEndTime = (payload: any) =>
 
 export const extractMeetingDurationSeconds = (payload: any) =>
   toNumberOrNull(payload?.duration || payload?.duration_seconds || payload?.recording?.duration);
-
-const escapeRegex = (value: string) =>
-  value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 const normalizeAttendeeKey = (value: unknown) => {
   if (typeof value === "number" && Number.isFinite(value)) {
