@@ -10,8 +10,8 @@ import {
   ensureFathomConnectionWebhook,
   FATHOM_WEBHOOK_EVENT,
   getFathomWebhookUrl,
-  pruneFathomManagedWebhooks,
 } from "@/lib/fathom";
+import { pruneFathomManagedWebhooks } from "@/lib/fathom-webhooks";
 import { getValidFathomAccessTokenForConnection } from "@/lib/fathom-auth";
 import { getSessionUserId } from "@/lib/server-auth";
 import { logFathomIntegration } from "@/lib/fathom-logs";

@@ -1,9 +1,7 @@
 import { NextResponse } from "next/server";
 import { apiError } from "@/lib/api-route";
 import { getDb } from "@/lib/db";
-import {
-  deleteFathomWebhook,
-} from "@/lib/fathom";
+import { deleteFathomWebhook } from "@/lib/fathom-webhooks";
 import { getValidFathomAccessTokenForConnection } from "@/lib/fathom-auth";
 import {
   findPreferredFathomConnectionForWorkspace,

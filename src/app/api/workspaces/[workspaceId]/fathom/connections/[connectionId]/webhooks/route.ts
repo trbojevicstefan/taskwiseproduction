@@ -2,13 +2,12 @@ import { randomBytes } from "crypto";
 import { z } from "zod";
 import { apiError, apiSuccess, mapApiError, parseJsonBody } from "@/lib/api-route";
 import {
-  deleteFathomWebhook,
   ensureFathomConnectionWebhook,
   FATHOM_WEBHOOK_EVENT,
   getFathomWebhookUrl,
-  pruneFathomManagedWebhooks,
 } from "@/lib/fathom";
 import { getValidFathomAccessTokenForConnection } from "@/lib/fathom-auth";
+import { deleteFathomWebhook, pruneFathomManagedWebhooks } from "@/lib/fathom-webhooks";
 import {
   findFathomConnectionById,
   serializeFathomConnection,
