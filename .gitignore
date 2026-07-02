@@ -50,3 +50,6 @@ yarn-error.log*
 *.njsproj
 *.sln
 *.sw?
+/env.development.local
+/env.example
+/env.local
