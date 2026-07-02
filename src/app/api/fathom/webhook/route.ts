@@ -8,9 +8,9 @@ import { findFathomConnectionByWebhookToken } from "@/lib/fathom-connections";
 import {
   extractFathomProviderSourceId,
   getFathomRecordingHashScope,
-  getValidFathomAccessTokenForConnection,
   hashFathomRecordingId,
 } from "@/lib/fathom";
+import { getValidFathomAccessTokenForConnection } from "@/lib/fathom-auth";
 import { ingestFathomMeeting } from "@/lib/fathom-ingest";
 import { logFathomIntegration } from "@/lib/fathom-logs";
 import { enqueueJob } from "@/lib/jobs/store";

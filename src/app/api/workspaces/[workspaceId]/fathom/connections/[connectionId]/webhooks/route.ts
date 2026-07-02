@@ -7,8 +7,8 @@ import {
   FATHOM_WEBHOOK_EVENT,
   getFathomWebhookUrl,
   pruneFathomManagedWebhooks,
-  getValidFathomAccessTokenForConnection,
 } from "@/lib/fathom";
+import { getValidFathomAccessTokenForConnection } from "@/lib/fathom-auth";
 import {
   findFathomConnectionById,
   serializeFathomConnection,

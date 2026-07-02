@@ -2,7 +2,8 @@ import {
   DELETE,
   PATCH,
 } from "@/app/api/workspaces/[workspaceId]/fathom/connections/[connectionId]/route";
-import { deleteFathomWebhook, getValidFathomAccessTokenForConnection } from "@/lib/fathom";
+import { deleteFathomWebhook } from "@/lib/fathom";
+import { getValidFathomAccessTokenForConnection } from "@/lib/fathom-auth";
 import {
   findFathomConnectionById,
   listFathomConnectionsForWorkspace,
@@ -24,6 +25,9 @@ jest.mock("@/lib/fathom-connections", () => ({
 
 jest.mock("@/lib/fathom", () => ({
   deleteFathomWebhook: jest.fn(),
+}));
+
+jest.mock("@/lib/fathom-auth", () => ({
   getValidFathomAccessTokenForConnection: jest.fn(),
 }));
 

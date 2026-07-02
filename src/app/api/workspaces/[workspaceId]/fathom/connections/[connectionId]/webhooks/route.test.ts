@@ -8,8 +8,8 @@ import {
   ensureFathomConnectionWebhook,
   getFathomWebhookUrl,
   pruneFathomManagedWebhooks,
-  getValidFathomAccessTokenForConnection,
 } from "@/lib/fathom";
+import { getValidFathomAccessTokenForConnection } from "@/lib/fathom-auth";
 import {
   findFathomConnectionById,
   updateFathomConnectionById,
@@ -36,6 +36,9 @@ jest.mock("@/lib/fathom", () => ({
     deletedCount: 0,
     cleanupErrors: [],
   })),
+}));
+
+jest.mock("@/lib/fathom-auth", () => ({
   getValidFathomAccessTokenForConnection: jest.fn(),
 }));
 

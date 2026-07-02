@@ -11,8 +11,8 @@ import {
   FATHOM_WEBHOOK_EVENT,
   getFathomWebhookUrl,
   pruneFathomManagedWebhooks,
-  getValidFathomAccessTokenForConnection,
 } from "@/lib/fathom";
+import { getValidFathomAccessTokenForConnection } from "@/lib/fathom-auth";
 import { getSessionUserId } from "@/lib/server-auth";
 import { logFathomIntegration } from "@/lib/fathom-logs";
 import { resolveWorkspaceScopeForUser } from "@/lib/workspace-scope";

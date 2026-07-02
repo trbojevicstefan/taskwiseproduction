@@ -3,9 +3,9 @@ import { POST } from "@/app/api/fathom/webhook/route";
 import {
   extractFathomProviderSourceId,
   getFathomRecordingHashScope,
-  getValidFathomAccessTokenForConnection,
   hashFathomRecordingId,
 } from "@/lib/fathom";
+import { getValidFathomAccessTokenForConnection } from "@/lib/fathom-auth";
 import { ingestFathomMeeting } from "@/lib/fathom-ingest";
 import { findUserById } from "@/lib/db/users";
 import { findFathomConnectionByWebhookToken } from "@/lib/fathom-connections";
@@ -17,8 +17,11 @@ import { kickJobWorker } from "@/lib/jobs/worker";
 jest.mock("@/lib/fathom", () => ({
   extractFathomProviderSourceId: jest.fn(),
   getFathomRecordingHashScope: jest.fn(),
-  getValidFathomAccessTokenForConnection: jest.fn(),
   hashFathomRecordingId: jest.fn(),
+}));
+
+jest.mock("@/lib/fathom-auth", () => ({
+  getValidFathomAccessTokenForConnection: jest.fn(),
 }));
 
 jest.mock("@/lib/fathom-ingest", () => ({
