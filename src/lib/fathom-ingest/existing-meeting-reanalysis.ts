@@ -2,6 +2,7 @@ import { randomUUID } from "crypto";
 import { mergeCompletionSuggestions } from "@/lib/task-completion";
 import * as analysisHelpers from "@/lib/fathom-ingest-analysis";
 import * as ingestHelpers from "@/lib/fathom-ingest-helpers";
+import { syncFathomMeetingChatSession } from "@/lib/fathom-ingest/session-linking";
 import { runMeetingIngestionCommand } from "@/lib/services/meeting-ingestion-command";
 import { postMeetingAutomationToSlack } from "@/lib/slack-automation";
 
@@ -186,43 +187,18 @@ export const finalizeExistingFathomMeetingReanalysis = async (input: {
     },
   });
 
-  if (chatSessionId) {
-    try {
-      const sourceIds = finalizedTasks.map((task: any) => task.id).filter(Boolean);
-      if (sourceIds.length) {
-        const tasks = await input.db
-          .collection("tasks")
-          .find({ userId: input.userId, sourceTaskId: { $in: sourceIds } })
-          .project({ _id: 1, sourceTaskId: 1 })
-          .toArray();
-        const map = new Map(tasks.map((row: any) => [String(row.sourceTaskId), String(row._id)]));
-        const augmented = finalizedTasks.map((task: any) => ({
-          ...task,
-          taskCanonicalId: map.get(task.id) || undefined,
-        }));
-        await input.db.collection("chatSessions").updateMany(
-          {
-            userId: input.userId,
-            $or: [{ _id: chatSessionId }, { id: chatSessionId }],
-          },
-          {
-            $set: {
-              title: `Chat about "${meetingTitle}"`,
-              suggestedTasks: augmented,
-              originalAiTasks: input.sanitizedTasks,
-              originalAllTaskLevels: sanitizedTaskLevels,
-              people: input.uniquePeople,
-              allTaskLevels: sanitizedTaskLevels,
-              meetingMetadata: input.analysisResult.meetingMetadata || undefined,
-              lastActivityAt: now,
-            },
-          }
-        );
-      }
-    } catch (error) {
-      console.error("Failed to attach canonical ids to chat sessions:", error);
-    }
-  }
+  await syncFathomMeetingChatSession({
+    db: input.db,
+    userId: input.userId,
+    chatSessionId,
+    meetingTitle: meetingTitle || "Meeting",
+    uniquePeople: input.uniquePeople,
+    finalizedTasks,
+    sanitizedTasks: input.sanitizedTasks,
+    sanitizedTaskLevels,
+    meetingMetadata: input.analysisResult.meetingMetadata,
+    now,
+  });
 
   await postMeetingAutomationToSlack({
     user: input.user,
