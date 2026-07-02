@@ -11,7 +11,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Button } from '@/components/ui/button';
 import { useAuth } from '@/contexts/AuthContext';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import { Loader2, Power, PowerOff, RefreshCw, Copy, Check, Save, Video, Users, Building, Send, Image as ImageIcon, Link as LinkIcon, Settings as SettingsIcon, Settings2, ZoomIn, Bot, Slack, FileText, MessageSquare, User, Info as InfoIcon, ToyBrick, Webhook, ClipboardCheck, Trash2, Download, Key } from 'lucide-react';
+import { Loader2, Power, PowerOff, RefreshCw, Copy, Check, Save, Video, Users, Building, Send, Image as ImageIcon, Link as LinkIcon, Settings as SettingsIcon, Settings2, ZoomIn, Bot, Slack, FileText, User, ToyBrick, Webhook, ClipboardCheck, Trash2, Download, Key } from 'lucide-react';
 import { useIntegrations } from '@/contexts/IntegrationsContext';
 import { useToast } from '@/hooks/use-toast';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogClose } from '@/components/ui/dialog';
@@ -19,10 +19,10 @@ import { useUIState, type UIScale } from '@/contexts/UIStateContext';
 import { Slider } from '@/components/ui/slider';
 import { Switch } from '@/components/ui/switch';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { cn } from '@/lib/utils';
-import { Logo } from '@/components/ui/logo';
-import Image from 'next/image';
 import DashboardHeader from '../DashboardHeader';
+import { isAdvancedSettingsEnabled } from '@/lib/simplification-flags';
 
 const AVATAR_STYLES = [
   'adventurer', 'adventurer-neutral', 'avataaars', 'big-ears', 'big-smile', 
@@ -389,6 +389,27 @@ const DEFAULT_WORKSPACE_ADMIN_ACCESS: WorkspaceAdminAccess = {
   integrations: true,
 };
 
+type SettingsSection = "profile" | "workspace" | "integrations" | "preferences" | "advanced";
+
+const SETTINGS_SECTIONS: Array<{ value: SettingsSection; label: string }> = [
+  { value: "profile", label: "Profile" },
+  { value: "workspace", label: "Workspace" },
+  { value: "integrations", label: "Integrations" },
+  { value: "preferences", label: "Preferences" },
+  { value: "advanced", label: "Advanced" },
+];
+
+const normalizeSettingsSection = (
+  value: string | null,
+  canAccessAdvanced: boolean
+): SettingsSection => {
+  const section = SETTINGS_SECTIONS.find((item) => item.value === value)?.value || "profile";
+  if (section === "advanced" && !canAccessAdvanced) {
+    return "profile";
+  }
+  return section;
+};
+
 const IntegrationCard: React.FC<{
   icon: React.ElementType;
   title: string;
@@ -427,11 +448,19 @@ const IntegrationCard: React.FC<{
             <Icon className="h-8 w-8" />
         </div>
         <div>
-          <h4 className="font-semibold text-foreground">{title}</h4>
+          <div className="flex flex-wrap items-center gap-2">
+            <h4 className="font-semibold text-foreground">{title}</h4>
+            <Badge variant={isConnected ? "secondary" : "outline"} className="text-[11px]">
+              {isConnected ? "Connected" : "Not connected"}
+            </Badge>
+          </div>
           <p className="text-sm text-muted-foreground">{description}</p>
           {statusNote ? (
             <p className="mt-1 text-xs text-muted-foreground">{statusNote}</p>
           ) : null}
+          <p className="mt-1 text-xs text-muted-foreground">
+            Next action: {isConnected ? "View details or disconnect" : "Connect this integration"}
+          </p>
         </div>
       </div>
       {isLoading ? (
@@ -605,6 +634,28 @@ export default function SettingsPageContent() {
     user?.activeWorkspaceRole === "owner" ||
     (user?.activeWorkspaceRole === "admin" &&
       Boolean(user?.activeWorkspaceAdminAccess?.integrations));
+  const activeWorkspaceRole =
+    user?.activeWorkspaceRole || activeWorkspaceMembership?.role || null;
+  const canAccessAdvancedSettings =
+    isAdvancedSettingsEnabled() &&
+    (activeWorkspaceRole === "owner" || activeWorkspaceRole === "admin");
+  const integrationCallbackSection =
+    searchParams.get("slack_success") ||
+    searchParams.get("trello_success") ||
+    searchParams.get("google_success") ||
+    searchParams.get("fathom_success") ||
+    searchParams.get("fathom_webhook") ||
+    searchParams.get("error")
+      ? "integrations"
+      : null;
+  const activeSettingsSection = normalizeSettingsSection(
+    searchParams.get("section") || integrationCallbackSection,
+    canAccessAdvancedSettings
+  );
+  const handleSettingsSectionChange = (section: string) => {
+    const normalized = normalizeSettingsSection(section, canAccessAdvancedSettings);
+    router.replace(`/settings?section=${normalized}`, { scroll: false });
+  };
   const canManageFathomConnection = (connection: FathomConnectionSummary) =>
     connection.canManage ?? canManageWorkspaceIntegrations;
   const isWorkspaceFathomConnected = Boolean(workspaceFathom?.connected);
@@ -1347,7 +1398,7 @@ export default function SettingsPageContent() {
           setTimeout(() => setHasCopied(false), 2500);
           toast({ title: "Selected!", description: "URL selected. Press Ctrl+C to copy." });
         });
-      } catch (err) {
+      } catch {
         document.execCommand('copy');
         setHasCopied(true);
         setTimeout(() => setHasCopied(false), 2500);
@@ -2840,7 +2891,19 @@ export default function SettingsPageContent() {
         />
         <div className="flex-grow p-4 sm:p-6 lg:p-8 space-y-8 overflow-auto">
             <div className="max-w-5xl mx-auto">
-                <Card className="shadow-lg rounded-xl">
+                <Tabs value={activeSettingsSection} onValueChange={handleSettingsSectionChange}>
+                  <TabsList className="grid h-auto w-full grid-cols-2 gap-1 md:grid-cols-5">
+                    {SETTINGS_SECTIONS.filter(
+                      (section) => section.value !== "advanced" || canAccessAdvancedSettings
+                    ).map((section) => (
+                      <TabsTrigger key={section.value} value={section.value}>
+                        {section.label}
+                      </TabsTrigger>
+                    ))}
+                  </TabsList>
+                </Tabs>
+
+                <Card className={cn("shadow-lg rounded-xl mt-6", activeSettingsSection !== "profile" && "hidden")}>
                     <CardHeader>
                         <CardTitle className="flex items-center gap-3 font-headline text-xl">
                             <User className="text-blue-400 drop-shadow-[0_2px_4px_rgba(59,130,246,0.5)]" />
@@ -2878,7 +2941,7 @@ export default function SettingsPageContent() {
                     </CardFooter>
                 </Card>
 
-                <Card className="shadow-lg rounded-xl mt-8">
+                <Card className={cn("shadow-lg rounded-xl mt-8", activeSettingsSection !== "workspace" && "hidden")}>
                   <CardHeader>
                     <CardTitle className="flex items-center gap-3 font-headline text-xl">
                       <Building className="text-emerald-400 drop-shadow-[0_2px_4px_rgba(16,185,129,0.5)]" />
@@ -3177,7 +3240,7 @@ export default function SettingsPageContent() {
                   </CardFooter>
                 </Card>
 
-                <Card className="shadow-lg rounded-xl mt-8">
+                <Card className={cn("shadow-lg rounded-xl mt-8", activeSettingsSection !== "preferences" && "hidden")}>
                   <CardHeader>
                     <CardTitle className="flex items-center gap-3 font-headline text-xl">
                       <ClipboardCheck className="text-sky-400 drop-shadow-[0_2px_4px_rgba(56,189,248,0.5)]" />
@@ -3336,7 +3399,7 @@ export default function SettingsPageContent() {
                 </Card>
 
                  {/* Integrations Settings */}
-                <Card className="shadow-lg rounded-xl mt-8">
+                <Card className={cn("shadow-lg rounded-xl mt-8", activeSettingsSection !== "integrations" && "hidden")}>
                   <CardHeader>
                     <CardTitle className="flex items-center gap-3 font-headline text-xl">
                         <LinkIcon className="text-purple-400 drop-shadow-[0_2px_4px_rgba(168,85,247,0.5)]" />
@@ -3420,72 +3483,105 @@ export default function SettingsPageContent() {
                               </Button>
                             ) : null}
                         />
-                        <div className="rounded-lg border border-border/50 bg-background/60 p-4">
-                          <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-                            <div className="space-y-1">
-                              <p className="text-sm font-semibold flex items-center gap-2">
-                                <Webhook className="h-4 w-4 text-primary" />
-                                Workflow Builder
-                              </p>
-                              <p className="text-xs text-muted-foreground">
-                                Build outbound automation workflows for meeting events.
-                              </p>
-                              <p className="text-[11px] text-muted-foreground">
-                                Add filters, transform payloads, send test deliveries, and replay failures.
-                              </p>
-                              {!isWorkspaceFathomConnected ? (
-                                <p className="text-[11px] text-muted-foreground">
-                                  Connect Fathom to start receiving live workflow trigger events.
-                                </p>
-                              ) : null}
-                            </div>
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => void handleOpenFathomSettings()}
-                              disabled={!activeWorkspaceId || isLoadingWorkflows || isLoadingFathomWebhooks}
-                            >
-                              {isLoadingWorkflows || isLoadingFathomWebhooks ? (
-                                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                              ) : (
-                                <Settings2 className="mr-2 h-4 w-4" />
-                              )}
-                              Open Workflow Builder
-                            </Button>
-                          </div>
-                        </div>
-                        <div className="rounded-lg border border-border/50 bg-background/60 p-4">
-                          <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-                            <div className="space-y-1">
-                              <p className="text-sm font-semibold flex items-center gap-2">
-                                <Key className="h-4 w-4 text-primary" />
-                                MCP API
-                              </p>
-                              <p className="text-xs text-muted-foreground">
-                                Connect external AI clients to TaskWise using secure MCP keys.
-                              </p>
-                              <p className="text-[11px] text-muted-foreground">
-                                Manage read/write scopes, generate keys, and review recent MCP activity.
-                              </p>
-                            </div>
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => void handleOpenMcpSettings()}
-                              disabled={!activeWorkspaceId}
-                            >
-                              <Settings2 className="mr-2 h-4 w-4" />
-                              Open MCP Setup
-                            </Button>
-                          </div>
-                        </div>
                           </>
                         )}
                   </CardContent>
                 </Card>
 
+                <Card className={cn("shadow-lg rounded-xl mt-8", activeSettingsSection !== "advanced" && "hidden")}>
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-3 font-headline text-xl">
+                      <Settings2 className="text-slate-400 drop-shadow-[0_2px_4px_rgba(148,163,184,0.5)]" />
+                      Advanced
+                    </CardTitle>
+                    <CardDescription>
+                      Operator controls for automations, API access, delivery replay, and troubleshooting.
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-4 text-sm text-amber-800 dark:text-amber-200">
+                      Advanced settings can affect external delivery behavior, scoped API access, and automation output.
+                    </div>
+                    <div className="rounded-lg border border-border/50 bg-background/60 p-4">
+                      <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                        <div className="space-y-1">
+                          <p className="text-sm font-semibold flex items-center gap-2">
+                            <Webhook className="h-4 w-4 text-primary" />
+                            Workflow Builder
+                          </p>
+                          <p className="text-xs text-muted-foreground">
+                            Build outbound automation workflows for meeting events.
+                          </p>
+                          <p className="text-[11px] text-muted-foreground">
+                            Add filters, transform payloads, send test deliveries, and replay failures.
+                          </p>
+                          {!isWorkspaceFathomConnected ? (
+                            <p className="text-[11px] text-muted-foreground">
+                              Connect Fathom to start receiving live workflow trigger events.
+                            </p>
+                          ) : null}
+                        </div>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => void handleOpenFathomSettings()}
+                          disabled={!activeWorkspaceId || isLoadingWorkflows || isLoadingFathomWebhooks}
+                        >
+                          {isLoadingWorkflows || isLoadingFathomWebhooks ? (
+                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          ) : (
+                            <Settings2 className="mr-2 h-4 w-4" />
+                          )}
+                          Open Workflow Builder
+                        </Button>
+                      </div>
+                    </div>
+                    <div className="rounded-lg border border-border/50 bg-background/60 p-4">
+                      <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                        <div className="space-y-1">
+                          <p className="text-sm font-semibold flex items-center gap-2">
+                            <Key className="h-4 w-4 text-primary" />
+                            MCP API
+                          </p>
+                          <p className="text-xs text-muted-foreground">
+                            Connect external AI clients to TaskWise using secure MCP keys.
+                          </p>
+                          <p className="text-[11px] text-muted-foreground">
+                            Manage read/write scopes, generate keys, and review recent MCP activity.
+                          </p>
+                        </div>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => void handleOpenMcpSettings()}
+                          disabled={!activeWorkspaceId}
+                        >
+                          <Settings2 className="mr-2 h-4 w-4" />
+                          Open MCP Setup
+                        </Button>
+                      </div>
+                    </div>
+                    <div className="rounded-lg border border-border/50 bg-background/60 p-4">
+                      <div className="space-y-1">
+                        <p className="text-sm font-semibold">Runbooks</p>
+                        <p className="text-xs text-muted-foreground">
+                          Use the advanced docs for key rotation, rollback, replay, and worker recovery procedures.
+                        </p>
+                      </div>
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        <Button variant="outline" size="sm" asChild>
+                          <a href="/docs/mcp">MCP Docs</a>
+                        </Button>
+                        <Button variant="outline" size="sm" asChild>
+                          <a href="/docs">Docs Home</a>
+                        </Button>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+
                 {/* Appearance Settings */}
-                <Card className="shadow-lg rounded-xl mt-8">
+                <Card className={cn("shadow-lg rounded-xl mt-8", activeSettingsSection !== "preferences" && "hidden")}>
                   <CardHeader>
                     <CardTitle className="flex items-center gap-3 font-headline text-xl">
                       <ImageIcon className="text-orange-400 drop-shadow-[0_2px_4px_rgba(251,146,60,0.5)]" />
@@ -3513,7 +3609,7 @@ export default function SettingsPageContent() {
                 </Card>
 
                 {/* Account Settings */}
-                <Card className="shadow-lg rounded-xl border-destructive/50 mt-8">
+                <Card className={cn("shadow-lg rounded-xl border-destructive/50 mt-8", activeSettingsSection !== "profile" && "hidden")}>
                   <CardHeader>
                     <CardTitle className="font-headline text-xl text-destructive flex items-center gap-3">
                       <Building className="drop-shadow-[0_2px_4px_rgba(239,68,68,0.5)]" />

@@ -279,18 +279,12 @@ describe("publishDomainEvent", () => {
     expect(syncedTasks).toHaveLength(1);
     expect(syncedTasks[0]).toMatchObject({ id: "keep-task", title: "Send recap" });
 
-    expect(mockedEnsureBoardItemsForTasks).toHaveBeenCalledWith(
-      db,
-      expect.objectContaining({
-        boardId: "board-1",
-        tasks: syncedTasks,
-      })
-    );
+    expect(mockedEnsureBoardItemsForTasks).not.toHaveBeenCalled();
 
     expect(result).toEqual({
       people: { created: 1, updated: 0 },
       tasks: { upserted: 1, deleted: 0 },
-      boardItemsCreated: 1,
+      boardItemsCreated: 0,
     });
     expect(mockedQueueMeetingWorkflowAutomation).toHaveBeenCalledWith(
       expect.objectContaining({

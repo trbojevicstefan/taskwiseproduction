@@ -156,7 +156,7 @@ export default function TaskwiseAIPage() {
             <a href="#workflow" className="hover:text-white">Workflow</a>
             <a href="#demo" className="hover:text-white">Live Demo</a>
             <a href="#integrations" className="hover:text-white">Integrations</a>
-            <a href="#pricing" className="hover:text-white">Pricing</a>
+            <a href="#pricing" className="hover:text-white">Beta</a>
           </nav>
           <div className="flex items-center gap-3">
             <Button variant="secondary" className="hidden sm:inline-flex bg-white/10 text-white hover:bg-white/20" asChild>
@@ -180,10 +180,10 @@ export default function TaskwiseAIPage() {
               transition={{ duration: 0.5 }}
               className="mb-4 text-4xl font-semibold leading-tight text-white sm:text-5xl"
             >
-              Turn meetings into <GradientText>actionable plans</GradientText> in seconds
+              Turn meetings into <GradientText>reviewed task lists</GradientText>
             </motion.h1>
             <p className="mb-6 max-w-xl mx-auto lg:mx-0 text-base text-white/70 sm:text-lg">
-              TaskwiseAI breaks down transcripts, notes, or loose ideas into prioritized tasks, timelines, and action plans. Explore your work, plan visually, or chat with AI to extract what matters.
+              TaskwiseAI turns pasted notes, transcripts, and Fathom meetings into suggested tasks your team can review, assign, and track on a board.
             </p>
             <div className="flex flex-wrap items-center justify-center lg:justify-start gap-3">
               <Button size="lg" className="gem-button bg-gradient-to-r from-[#FF4D4D] via-[#FF9900] to-[#FF2E97] text-white" asChild>
@@ -221,17 +221,17 @@ export default function TaskwiseAIPage() {
             {
               icon: Upload,
               title: "Ingest anything",
-              text: "Audio, video, docs. Zoom, Meet, Teams imports and public links.",
+              text: "Paste transcripts or notes, try sample data, or sync Fathom meetings.",
             },
             {
               icon: Brain,
               title: "Breakdown with AI",
-              text: "From themes to tasks to timelines with context and owners.",
+              text: "Create suggested tasks with summaries, owners, due dates, and review signals.",
             },
             {
               icon: GitBranch,
               title: "Plan & prioritize",
-              text: "Explore views and AI chat help align on what ships first.",
+              text: "Review tasks, assign responsibility, then track completion on the board.",
             },
           ].map(({ icon: Icon, title, text }) => (
             <div
@@ -256,11 +256,11 @@ export default function TaskwiseAIPage() {
 
       <Section
         id="integrations"
-        title={<><GradientText>Works with your stack</GradientText></>}
-        subtitle="Sync tasks to Asana, Jira, Trello, Notion, Linear, and calendars. Import from Zoom, Google Meet, Teams; attach CRM context from HubSpot or Salesforce."
+        title={<><GradientText>Supported integrations</GradientText></>}
+        subtitle="Taskwise currently supports Fathom meeting sync, Google Workspace flows, Slack sharing, Trello export, and advanced MCP access for operator use."
       >
-        <div className="grid grid-cols-2 gap-4 sm:grid-cols-4 lg:grid-cols-6">
-          {["Zoom","Meet","Teams","Slack","Notion","Asana","Trello","Jira","Linear","Google Calendar","HubSpot","Salesforce"].map((name: any) => (
+        <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+          {["Fathom","Google Workspace","Slack","Trello","MCP API","Manual paste","Sample meetings","Board sync"].map((name: any) => (
             <div key={name} className="flex items-center justify-center rounded-xl border border-white/10 bg-white/5 px-3 py-4 text-sm text-white/70 backdrop-blur">
               {name}
             </div>
@@ -268,23 +268,25 @@ export default function TaskwiseAIPage() {
         </div>
       </Section>
 
-      <Section id="pricing" title="Simple, fair pricing">
+      <Section id="pricing" title="Beta access">
         <div className="grid gap-6 md:grid-cols-3">
           {[
-            { tier: "Starter", price: "$0", blurb: "100 min / mo, basic export" },
-            { tier: "Pro", price: "$19", blurb: "1,000 min / mo, integrations" },
-            { tier: "Team", price: "$49", blurb: "Unlimited internal users, SSO" },
+            { tier: "Core loop", price: "Included", blurb: "Paste notes, review tasks, and track work on the board" },
+            { tier: "Team setup", price: "Included", blurb: "Workspace members, Fathom, Slack, Google, and Trello" },
+            { tier: "Advanced", price: "Operator", blurb: "Workflow delivery, MCP keys, audit logs, and replay tools" },
           ].map((p: any) => (
             <div key={p.tier} className="rounded-2xl border border-white/10 bg-white/5 p-6 text-white backdrop-blur flex flex-col">
               <div className="mb-2 text-sm text-white/60">{p.tier}</div>
-              <div className="mb-1 text-3xl font-semibold">{p.price}<span className="text-base font-normal text-white/60">/mo</span></div>
+              <div className="mb-1 text-3xl font-semibold">{p.price}</div>
               <p className="mb-4 text-sm text-white/70">{p.blurb}</p>
               <ul className="mb-5 space-y-2 text-sm text-white/80">
                 <li className="flex items-center gap-2"><CheckCircle2 className="h-4 w-4"/> AI task extraction</li>
-                <li className="flex items-center gap-2"><CheckCircle2 className="h-4 w-4"/> Explore & Chat views</li>
-                <li className="flex items-center gap-2"><CheckCircle2 className="h-4 w-4"/> Exports & integrations</li>
+                <li className="flex items-center gap-2"><CheckCircle2 className="h-4 w-4"/> Review Tasks queue</li>
+                <li className="flex items-center gap-2"><CheckCircle2 className="h-4 w-4"/> Board and people tracking</li>
               </ul>
-              <Button className="w-full mt-auto bg-gradient-to-r from-[#FF4D4D] via-[#FF9900] to-[#FF2E97] text-white">Choose {p.tier}</Button>
+              <Button className="w-full mt-auto bg-gradient-to-r from-[#FF4D4D] via-[#FF9900] to-[#FF2E97] text-white" asChild>
+                <Link href="/signup" prefetch={false}>Get started</Link>
+              </Button>
             </div>
           ))}
         </div>

@@ -23,6 +23,8 @@ export const TASK_LIST_PROJECTION = {
   sourceSessionType: 1,
   sourceTaskId: 1,
   comments: 1,
+  reviewStatus: 1,
+  reviewedAt: 1,
   taskState: 1,
   researchBrief: 1,
   aiAssistanceText: 1,

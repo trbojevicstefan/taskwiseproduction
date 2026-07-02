@@ -40,7 +40,7 @@ export async function POST() {
       sourceSessionType: "meeting",
       sourceSessionName: meeting.title,
       origin: "meeting",
-      taskState: "active",
+      taskState: "suggested",
     });
     meetingsSynced += 1;
     upserted += result.upserted;

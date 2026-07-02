@@ -304,11 +304,11 @@ export default function HeaderNav() {
                 </DropdownMenuItem>
             )}
             <DropdownMenuSeparator />
-            <DropdownMenuItem onClick={() => router.push('/settings')}>
+            <DropdownMenuItem onClick={() => router.push('/settings?section=workspace')}>
                 <UserPlus className="mr-2 h-4 w-4" />
                 <span>Add teammates</span>
             </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => router.push('/settings')}>
+            <DropdownMenuItem onClick={() => router.push('/settings?section=workspace')}>
                 <Building className="mr-2 h-4 w-4" />
                 <span>Workspace settings</span>
             </DropdownMenuItem>
@@ -333,7 +333,7 @@ export default function HeaderNav() {
                 <Settings className="mr-2 h-4 w-4" />
                 <span>Settings</span>
             </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => router.push('/settings')}>
+            <DropdownMenuItem onClick={() => router.push('/settings?section=profile')}>
                 <UserCircle className="mr-2 h-4 w-4" />
                 <span>Profile</span>
             </DropdownMenuItem>

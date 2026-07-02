@@ -218,6 +218,34 @@ interface TaskDraft {
   assigneeId: string;
   dueDate: string;
 }
+
+function BoardUnavailableState() {
+  const router = useRouter();
+
+  return (
+    <div className="flex h-full flex-col bg-background">
+      <DashboardHeader
+        pageIcon={LayoutGrid}
+        pageTitle={<h1 className="text-2xl font-bold font-headline">Board</h1>}
+      />
+      <div className="flex flex-1 items-center justify-center p-8">
+        <div className="max-w-md rounded-lg border bg-card p-6 text-center shadow-sm">
+          <AlertCircle className="mx-auto mb-4 h-10 w-10 text-muted-foreground" />
+          <h2 className="text-lg font-semibold">Workspace not loaded</h2>
+          <p className="mt-2 text-sm text-muted-foreground">
+            The board needs an active workspace before it can load tasks and columns.
+          </p>
+          <div className="mt-5 flex flex-wrap justify-center gap-2">
+            <Button variant="outline" onClick={() => router.refresh()}>
+              Reload workspace
+            </Button>
+            <Button onClick={() => router.push("/meetings")}>Go to Home</Button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
 function PriorityBadge({ priority }: { priority: TaskPriority }) {
   return (
     <span
@@ -456,7 +484,7 @@ function AssigneeDropdown({
     </div>
   );
 }
-  export default function BoardPageContent({
+function BoardWorkspaceContent({
     workspaceId: _workspaceId,
   }: BoardPageContentProps) {
   const { toast } = useToast();
@@ -3182,6 +3210,14 @@ function AssigneeDropdown({
       </Dialog>
     </div>
   );
+}
+
+export default function BoardPageContent({ workspaceId }: BoardPageContentProps) {
+  if (!workspaceId || workspaceId === "unknown") {
+    return <BoardUnavailableState />;
+  }
+
+  return <BoardWorkspaceContent workspaceId={workspaceId} />;
 }
 
 

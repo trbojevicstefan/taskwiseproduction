@@ -210,6 +210,20 @@ export function normalizeTask(task: any): ExtractedTaskSchema {
   const sanitizedSubtasks = task.subtasks
     ? (task.subtasks || []).map(normalizeTask)
     : null;
+  const taskState =
+    task.taskState === "active" ||
+    task.taskState === "suggested" ||
+    task.taskState === "archived"
+      ? task.taskState
+      : null;
+  const reviewStatus =
+    task.reviewStatus === "confirmed" || task.reviewStatus === "suggested"
+      ? task.reviewStatus
+      : taskState === "active"
+        ? "confirmed"
+        : taskState === "suggested"
+          ? "suggested"
+          : null;
 
   return {
     id: resolvedId,
@@ -231,6 +245,9 @@ export function normalizeTask(task: any): ExtractedTaskSchema {
     addedToProjectName: task.addedToProjectName === undefined ? null : task.addedToProjectName,
     addedToBoardId: task.addedToBoardId === undefined ? null : task.addedToBoardId,
     addedToBoardName: task.addedToBoardName === undefined ? null : task.addedToBoardName,
+    reviewStatus,
+    reviewedAt: task.reviewedAt === undefined ? null : task.reviewedAt,
+    taskState,
     completionSuggested:
       task.completionSuggested === undefined ? null : task.completionSuggested,
     completionConfidence:

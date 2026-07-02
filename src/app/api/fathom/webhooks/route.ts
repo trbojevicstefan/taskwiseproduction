@@ -97,7 +97,7 @@ export async function DELETE(request: Request) {
             ]
           : [];
     const targets = Array.isArray(ids) ? ids : [];
-    const webhookIds: any[] = Boolean(deleteAll) ? configuredWebhooks : targets;
+    const webhookIds: any[] = deleteAll ? configuredWebhooks : targets;
 
     if (!webhookIds.length) {
       return apiError(400, "request_error", "No webhook IDs provided.");

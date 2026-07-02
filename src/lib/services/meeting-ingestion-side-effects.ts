@@ -1,5 +1,3 @@
-import { ensureBoardItemsForTasks } from "@/lib/board-items";
-import { ensureDefaultBoard } from "@/lib/boards";
 import { upsertPeopleFromAttendees } from "@/lib/people-sync";
 import { syncTasksForSource } from "@/lib/task-sync";
 import { getWorkspaceIdForUser } from "@/lib/workspace";
@@ -120,7 +118,7 @@ export const applyMeetingIngestionSideEffects = async (
   }
 
   let tasksResult = { upserted: 0, deleted: 0 };
-  let boardItemsCreated = 0;
+  const boardItemsCreated = 0;
   if (extractedTasks.length) {
     const syncTasks = filterTasksForSessionSync(
       extractedTasks,
@@ -134,23 +132,12 @@ export const applyMeetingIngestionSideEffects = async (
       sourceSessionType: "meeting",
       sourceSessionName: payload.title || "Meeting",
       origin: "meeting",
-      taskState: "active",
+      taskState: "suggested",
     });
     tasksResult = {
       upserted: synced.upserted,
       deleted: synced.deleted,
     };
-
-    if (workspaceId) {
-      const defaultBoard = await ensureDefaultBoard(db, userId, workspaceId);
-      const boardResult = await ensureBoardItemsForTasks(db, {
-        userId,
-        workspaceId,
-        boardId: String(defaultBoard._id),
-        tasks: syncTasks,
-      });
-      boardItemsCreated = boardResult.created || 0;
-    }
   }
 
   return {

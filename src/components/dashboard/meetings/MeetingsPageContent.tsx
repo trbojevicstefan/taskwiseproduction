@@ -10,7 +10,6 @@ import {
   CardContent,
   CardHeader,
   CardTitle,
-  CardDescription,
 } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -70,8 +69,6 @@ import {
   Mic,
   Loader2,
   ChevronLeft,
-  Webhook,
-  ClipboardPaste,
   Video,
   UserPlus,
   Trash2,
@@ -132,7 +129,7 @@ import { useWorkspaceBoards } from "@/hooks/use-workspace-boards";
 import { moveTaskToBoard } from "@/lib/board-actions";
 import { buildBriefContext } from "@/lib/brief-context";
 import { generateBriefsForTasks } from "@/lib/task-briefs";
-import { usePasteAction } from '@/contexts/PasteActionContext';
+import CoreLoopStartPanel from '../home/CoreLoopStartPanel';
 
 
 const flavorMap: Record<string, { name: string; color: string; icon: React.ReactNode }> = {
@@ -437,6 +434,14 @@ const getStatusVariant = (status?: ExtractedTaskSchema["status"] | null) => {
   return "secondary";
 };
 
+const isTaskReviewConfirmed = (task: ExtractedTaskSchema) =>
+  task.reviewStatus === "confirmed" ||
+  task.taskState === "active" ||
+  Boolean(task.addedToBoardId);
+
+const isTaskReviewPending = (task: ExtractedTaskSchema) =>
+  !isTaskReviewConfirmed(task);
+
 const TaskRow: React.FC<{
   task: ExtractedTaskSchema;
   onAssign: () => void;
@@ -457,6 +462,7 @@ const TaskRow: React.FC<{
   const assigneeName = task.assignee?.name || task.assigneeName || 'Unassigned';
   const isCompletionSuggested = Boolean(task.completionSuggested);
   const completionEvidence = task.completionEvidence?.[0]?.snippet;
+  const isPendingReview = !isCompletionSuggested && isTaskReviewPending(task);
 
   return (
     <div className={cn("flex flex-col", level > 0 && "pl-5 mt-2 border-l-2 border-border/30")}>
@@ -500,6 +506,16 @@ const TaskRow: React.FC<{
           {isCompletionSuggested && (
             <Badge variant="outline" className="rounded-full text-[11px]">
               Needs Review
+            </Badge>
+          )}
+          {isPendingReview && (
+            <Badge variant="outline" className="rounded-full border-amber-500/40 bg-amber-500/10 text-[11px] text-amber-700">
+              Review before board
+            </Badge>
+          )}
+          {!isCompletionSuggested && isTaskReviewConfirmed(task) && (
+            <Badge variant="outline" className="rounded-full border-emerald-500/40 bg-emerald-500/10 text-[11px] text-emerald-700">
+              Approved
             </Badge>
           )}
           {completionEvidence && (
@@ -1018,6 +1034,7 @@ export function MeetingDetailSheet({
   const [isPushToGoogleOpen, setIsPushToGoogleOpen] = useState(false);
   const [isPushToTrelloOpen, setIsPushToTrelloOpen] = useState(false);
   const [isGeneratingBriefs, setIsGeneratingBriefs] = useState(false);
+  const [isConfirmingTasks, setIsConfirmingTasks] = useState(false);
   const [isDiscoveryDialogOpen, setIsDiscoveryDialogOpen] = useState(false);
   const [isSelectionViewVisible, setIsSelectionViewVisible] = useState(false);
   const [activePerson, setActivePerson] = useState<{
@@ -1359,12 +1376,51 @@ export function MeetingDetailSheet({
 
   const handleMoveTaskToBoard = useCallback(
     async (boardId: string) => {
-      if (!workspaceId || !taskForDetailView) {
+      if (!workspaceId || !taskForDetailView || !meeting) {
         throw new Error("Workspace not ready.");
       }
       await moveTaskToBoard(workspaceId, taskForDetailView.id, boardId);
+      const boardName =
+        boards.find((board: any) => board.id === boardId)?.name || "Board";
+      const reviewedAt = new Date().toISOString();
+      const markTaskConfirmed = (
+        tasks: ExtractedTaskSchema[]
+      ): ExtractedTaskSchema[] =>
+        tasks.map((task) => {
+          const nextSubtasks = task.subtasks
+            ? markTaskConfirmed(task.subtasks)
+            : task.subtasks;
+          if (task.id !== taskForDetailView.id) {
+            return { ...task, subtasks: nextSubtasks };
+          }
+          return {
+            ...task,
+            reviewStatus: "confirmed",
+            reviewedAt,
+            taskState: "active",
+            addedToBoardId: boardId,
+            addedToBoardName: boardName,
+            subtasks: nextSubtasks,
+          };
+        });
+      const updatedTasks = markTaskConfirmed(
+        getExtractedTasks(meeting.extractedTasks)
+      );
+      await syncMeetingTasks(updatedTasks);
+      setTaskForDetailView((prev) =>
+        prev
+          ? {
+              ...prev,
+              reviewStatus: "confirmed",
+              reviewedAt,
+              taskState: "active",
+              addedToBoardId: boardId,
+              addedToBoardName: boardName,
+            }
+          : prev
+      );
     },
-    [taskForDetailView, workspaceId]
+    [boards, meeting, syncMeetingTasks, taskForDetailView, workspaceId]
   );
 
   const getBriefContext = useCallback(
@@ -1821,6 +1877,49 @@ export function MeetingDetailSheet({
       }
       return acc;
     }, [] as ExtractedTaskSchema[]);
+  };
+
+  const handleConfirmSelectedToBoard = async () => {
+    if (!meeting || selectedTaskIds.size === 0) {
+      toast({
+        title: "No tasks selected",
+        description: "Select one or more tasks to approve for the board.",
+        variant: "destructive",
+      });
+      return;
+    }
+    if (isConfirmingTasks) return;
+
+    setIsConfirmingTasks(true);
+    try {
+      const result = await apiFetch<{
+        confirmed: number;
+        boardItemsCreated: number;
+        boardId: string;
+        meeting?: Meeting;
+      }>(`/api/meetings/${meeting.id}/confirm-tasks`, {
+        method: "POST",
+        body: JSON.stringify({ taskIds: Array.from(selectedTaskIds) }),
+      });
+
+      await loadMeetingById(meeting.id, { silent: true });
+      setSelectedTaskIds(new Set());
+      toast({
+        title: "Tasks approved",
+        description: `${result.confirmed} task${result.confirmed === 1 ? "" : "s"} approved and ${result.boardItemsCreated} added to the board.`,
+      });
+    } catch (error) {
+      toast({
+        title: "Approval failed",
+        description:
+          error instanceof Error
+            ? error.message
+            : "Could not approve the selected tasks.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsConfirmingTasks(false);
+    }
   };
 
   const handleExport = (format: 'csv' | 'md' | 'pdf') => {
@@ -2756,6 +2855,8 @@ export function MeetingDetailSheet({
           selectedCount={selectedTaskIds.size}
           onClear={() => setSelectedTaskIds(new Set())}
           onView={() => setIsSelectionViewVisible(true)}
+          onConfirmToBoard={handleConfirmSelectedToBoard}
+          isConfirmingToBoard={isConfirmingTasks}
           onAssign={() => handleOpenAssignDialog()}
           onSetDueDate={() => setIsSetDueDateDialogOpen(true)}
           onDelete={() => handleDeleteSelectedTasks()}
@@ -2937,7 +3038,6 @@ export default function MeetingsPageContent() {
     refreshMeetings,
   } = useMeetingHistory();
   const { sessions, createNewSession, setActiveSessionId } = useChatHistory();
-  const { openPasteDialog } = usePasteAction();
   const {
     isFathomConnected,
     isSlackConnected,
@@ -3636,74 +3736,9 @@ export default function MeetingsPageContent() {
   if (meetings.length === 0 && !isLoadingMeetingHistory) {
     return (
       <>
-        <DashboardHeader pageIcon={Video} pageTitle={<h1 className="text-2xl font-bold font-headline">Meetings</h1>} />
+        <DashboardHeader pageIcon={Video} pageTitle={<h1 className="text-2xl font-bold font-headline">Home</h1>} />
         <div className="flex-grow flex items-center justify-center p-8">
-          <Card className="max-w-lg text-center p-8 border-dashed shadow-none bg-card/50 backdrop-blur-sm">
-            <CardHeader>
-              <div className="mx-auto w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center mb-4">
-                <Video className="h-8 w-8 text-primary" />
-              </div>
-              <CardTitle className="text-2xl font-headline">Log Your First Meeting</CardTitle>
-              <CardDescription className="text-base">
-                Transform your conversations into actionable insights.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <p className="text-muted-foreground">
-                Simply paste a meeting transcript anywhere in the app (<kbd className="px-2 py-1.5 text-xs font-mono text-foreground bg-muted border rounded-md">Ctrl+V</kbd>) to get started. Or, head over to the chat to begin a new conversation.
-              </p>
-              <div className="flex flex-wrap justify-center gap-4">
-                <Button asChild>
-                  <Link href="/chat">
-                    <MessageSquareText className="mr-2 h-4 w-4" />
-                    Go to Chat
-                  </Link>
-                </Button>
-                <Button variant="secondary" onClick={() => openPasteDialog('')}>
-                  <ClipboardPaste className="mr-2 h-4 w-4" />
-                  Quick Paste
-                </Button>
-                {isFathomConnected ? (
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <Button variant="outline" disabled={isSyncingFathom || isRestoringFathom}>
-                        {isSyncingFathom ? (
-                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                        ) : (
-                          <RefreshCw className="mr-2 h-4 w-4" />
-                        )}
-                        Sync Fathom
-                        <span className="ml-2 text-xs text-muted-foreground">
-                          ({getFathomRangeLabel(fathomSyncRange)})
-                        </span>
-                      </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="start">
-                      <DropdownMenuItem onSelect={() => handleSyncFathom("today")}>Sync Today</DropdownMenuItem>
-                      <DropdownMenuItem onSelect={() => handleSyncFathom("this_week")}>Sync This Week</DropdownMenuItem>
-                      <DropdownMenuItem onSelect={() => handleSyncFathom("last_week")}>Sync Last Week</DropdownMenuItem>
-                      <DropdownMenuItem onSelect={() => handleSyncFathom("this_month")}>Sync This Month</DropdownMenuItem>
-                      <DropdownMenuItem onSelect={() => handleSyncFathom("all")}>Sync All Time</DropdownMenuItem>
-                      <DropdownMenuSeparator />
-                      <DropdownMenuItem
-                        onSelect={handleRestoreFathomMeetings}
-                        disabled={isRestoringFathom || isSyncingFathom}
-                      >
-                        Restore deleted meetings
-                      </DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                ) : (
-                  <Button variant="outline" asChild>
-                    <Link href="/settings">
-                      <Webhook className="mr-2 h-4 w-4" />
-                      Connect Fathom
-                    </Link>
-                  </Button>
-                )}
-              </div>
-            </CardContent>
-          </Card>
+          <CoreLoopStartPanel className="w-full max-w-3xl" />
         </div>
       </>
     );
@@ -3711,7 +3746,7 @@ export default function MeetingsPageContent() {
 
   return (
     <div className="flex flex-col h-full bg-background">
-      <DashboardHeader pageIcon={Video} pageTitle={<h1 className="text-2xl font-bold font-headline">Meetings</h1>}>
+      <DashboardHeader pageIcon={Video} pageTitle={<h1 className="text-2xl font-bold font-headline">Home</h1>}>
         <div className="flex items-center gap-2">
           <div className="relative w-64">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
@@ -3775,6 +3810,8 @@ export default function MeetingsPageContent() {
 
       <ScrollArea className="flex-grow">
         <div className="p-4 sm:p-6 lg:p-8 space-y-6">
+          <CoreLoopStartPanel compact />
+
           <MeetingStatsBar meetings={filteredMeetings} />
 
           <div className="mt-6">

@@ -3,7 +3,7 @@
 
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { MessageSquare, CheckSquare, BarChart3, PlusCircle, Trash2, Edit3, Archive, Waypoints, Search, FolderOpen, MessageCircle as MessageCircleIcon, ListChecks as ListChecksIcon, LayoutTemplate, SquareKanban, Star, MoreVertical, Folder as FolderIcon, FolderPlus, X, Check, Users, Video, Calendar, PanelLeft } from 'lucide-react';
+import { MessageSquare, CheckSquare, BarChart3, Trash2, Edit3, Search, FolderOpen, MessageCircle as MessageCircleIcon, SquareKanban, MoreVertical, Folder as FolderIcon, FolderPlus, X, Check, Users, Video, Calendar, PanelLeft, Home, Settings } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useAuth } from '@/contexts/AuthContext';
 import { useChatHistory } from '@/contexts/ChatHistoryContext';
@@ -48,6 +48,7 @@ import {
 import { Input } from '@/components/ui/input';
 import React, { useState, useMemo, useCallback } from 'react';
 import WorkspaceSwitcher from './WorkspaceSwitcher';
+import { isSimpleNavEnabled } from '@/lib/simplification-flags';
 
 
 const baseNavItems = [
@@ -91,22 +92,48 @@ export default function SidebarNav() {
   const [creatingFolderWithParent, setCreatingFolderWithParent] = useState<string | null | 'root'>(null);
   const [newFolderName, setNewFolderName] = useState("");
   const workspaceId = user?.workspace?.id;
+  const activeWorkspaceId = user?.activeWorkspaceId || workspaceId || null;
+  const activeWorkspaceMembership = user?.workspaceMemberships?.find(
+    (membership) =>
+      membership.workspaceId === activeWorkspaceId && membership.status === "active"
+  );
+  const activeWorkspaceRole =
+    user?.activeWorkspaceRole || activeWorkspaceMembership?.role || null;
+  const canAccessSettings =
+    activeWorkspaceRole === "owner" || activeWorkspaceRole === "admin";
+  const simpleNavEnabled = isSimpleNavEnabled();
 
   const mainNavItems = useMemo(() => {
-    const boardHref = workspaceId
-      ? `/workspaces/${workspaceId}/board`
-      : "/workspaces/unknown/board";
+    const boardItem = workspaceId
+      ? { href: `/workspaces/${workspaceId}/board`, label: 'Board', icon: SquareKanban }
+      : {
+          href: "",
+          label: 'Board',
+          icon: SquareKanban,
+          disabled: true,
+          disabledTooltip: "Board is available after your workspace loads.",
+        };
+
+    if (simpleNavEnabled) {
+      return [
+        { href: '/meetings', label: 'Home', icon: Home },
+        { href: '/review', label: 'Review Tasks', icon: CheckSquare },
+        boardItem,
+        { href: '/people', label: 'People', icon: Users },
+        ...(canAccessSettings ? [{ href: '/settings', label: 'Settings', icon: Settings }] : []),
+      ];
+    }
 
     return [
       baseNavItems[0],
       baseNavItems[1],
       baseNavItems[2],
-      { href: boardHref, label: 'Board', icon: SquareKanban },
+      boardItem,
       baseNavItems[3],
       baseNavItems[4],
       baseNavItems[5],
     ];
-  }, [workspaceId]);
+  }, [canAccessSettings, simpleNavEnabled, workspaceId]);
 
   const handleEdit = (type: 'session' | 'folder', item: {id: string, title?: string, name?: string}) => {
     setEditingId(`${type}-${item.id}`);
@@ -478,27 +505,47 @@ export default function SidebarNav() {
       <div className="p-2 space-y-1">
         <SidebarMenu>
             {mainNavItems.map((item: any) => {
-              const isActive = pathname.startsWith(item.href);
+              const isActive =
+                !item.disabled &&
+                (item.href === "/meetings"
+                  ? pathname === "/meetings" || pathname.startsWith("/meetings/")
+                  : pathname.startsWith(item.href));
               return (
-              <SidebarMenuItem key={item.href}>
-                <SidebarMenuButton
-                  asChild
-                  isActive={isActive}
-                  tooltip={item.label}
-                  size={isCollapsed ? "sm" : "default"}
-                  className={cn(
-                    "w-full",
-                    isCollapsed ? "justify-center" : "justify-start",
-                    isActive
-                    ? "bg-sidebar-primary text-sidebar-primary-foreground hover:bg-sidebar-primary/90"
-                    : "hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
-                  )}
-                >
-                  <Link href={item.href} prefetch={false}>
+              <SidebarMenuItem key={item.href || item.label}>
+                {item.disabled ? (
+                  <SidebarMenuButton
+                    disabled
+                    aria-disabled="true"
+                    tooltip={item.disabledTooltip || item.label}
+                    size={isCollapsed ? "sm" : "default"}
+                    className={cn(
+                      "w-full opacity-50",
+                      isCollapsed ? "justify-center" : "justify-start"
+                    )}
+                  >
                     <item.icon className={cn(!isCollapsed && "mr-3")} />
                     {!isCollapsed && <span>{item.label}</span>}
-                  </Link>
-                </SidebarMenuButton>
+                  </SidebarMenuButton>
+                ) : (
+                  <SidebarMenuButton
+                    asChild
+                    isActive={isActive}
+                    tooltip={item.label}
+                    size={isCollapsed ? "sm" : "default"}
+                    className={cn(
+                      "w-full",
+                      isCollapsed ? "justify-center" : "justify-start",
+                      isActive
+                      ? "bg-sidebar-primary text-sidebar-primary-foreground hover:bg-sidebar-primary/90"
+                      : "hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+                    )}
+                  >
+                    <Link href={item.href} prefetch={false}>
+                      <item.icon className={cn(!isCollapsed && "mr-3")} />
+                      {!isCollapsed && <span>{item.label}</span>}
+                    </Link>
+                  </SidebarMenuButton>
+                )}
               </SidebarMenuItem>
               )
             })}

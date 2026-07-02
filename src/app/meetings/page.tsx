@@ -5,8 +5,8 @@ import MeetingsPageContent from '@/components/dashboard/meetings/MeetingsPageCon
 import type { Metadata } from 'next';
 
 export const metadata: Metadata = {
-  title: 'Meetings | TaskWiseAI',
-  description: 'Review and process your meeting transcripts.',
+  title: 'Home | TaskWiseAI',
+  description: 'Create task lists from meetings and review recent work.',
 };
 
 export default function MeetingsPage() {

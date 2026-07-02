@@ -213,7 +213,7 @@ export default function McpDocsPage() {
           <Link href="/">
             <Logo size="md" />
           </Link>
-          <Link href="/settings" className="text-sm text-muted-foreground hover:text-foreground">
+          <Link href="/settings?section=advanced" className="text-sm text-muted-foreground hover:text-foreground">
             Back to Settings
           </Link>
         </div>
@@ -236,7 +236,7 @@ export default function McpDocsPage() {
           <h2 className="text-lg font-semibold">Quick Start</h2>
           <ol className="list-decimal space-y-1 pl-5 text-sm text-muted-foreground">
             <li>
-              Open <code>Settings {'->'} Integrations {'->'} MCP API</code> and generate a key.
+              Open <code>Settings {'->'} Advanced {'->'} MCP API</code> and generate a key.
             </li>
             <li>Copy your workspace endpoint and one-time secret key.</li>
             <li>

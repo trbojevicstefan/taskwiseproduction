@@ -16,6 +16,7 @@ export interface TaskReferenceSchema {
   taskId: string;
   sourceTaskId: string;
   title: string;
+  subtasks?: TaskReferenceSchema[] | null;
   // Dynamic status/properties fetched from canonical task
 }
 
@@ -63,6 +64,9 @@ export interface ExtractedTaskSchema {
   addedToProjectName?: string | null;
   addedToBoardId?: string | null;
   addedToBoardName?: string | null;
+  reviewStatus?: 'suggested' | 'confirmed' | null;
+  reviewedAt?: string | Date | null;
+  taskState?: 'active' | 'suggested' | 'archived' | null;
 
   // AI-generated content
   researchBrief?: string | null;

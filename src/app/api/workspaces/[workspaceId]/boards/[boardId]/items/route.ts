@@ -198,6 +198,8 @@ export async function POST(
       sourceSessionType: body.sourceSessionType ?? "task",
       sourceTaskId: body.sourceTaskId ?? null,
       taskState: "active",
+      reviewStatus: "confirmed",
+      reviewedAt: now,
       createdAt: now,
       lastUpdated: now,
     };
@@ -217,6 +219,8 @@ export async function POST(
         $set: {
           status: status.category || task.status || "todo",
           taskState: "active",
+          reviewStatus: "confirmed",
+          reviewedAt: now,
           workspaceId,
           lastUpdated: now,
         },

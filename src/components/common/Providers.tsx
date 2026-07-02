@@ -19,6 +19,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const dashboardPrefixes = [
     "/meetings",
+    "/review",
     "/chat",
     "/planning",
     "/explore",

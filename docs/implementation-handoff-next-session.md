@@ -1,5 +1,23 @@
 # Session Handoff
 
+## 2026-06-10 Simplification Pass
+
+Implemented the first BMAD simplification slice:
+
+- Added spec-aligned feature flags in `src/lib/simplification-flags.ts`.
+- Added Home/Review first-run entry points for Paste notes, Connect Fathom, and Try sample.
+- Added `/review` as the Review Tasks queue and wired paste/sample meeting creation to land there.
+- Simplified standard sidebar navigation to Home, Review Tasks, Board, People.
+- Kept Settings visible for workspace admins/owners.
+- Removed the `/workspaces/unknown/board` sidebar fallback and added a board recovery screen for direct invalid workspace routes.
+- Changed meeting ingestion, meeting updates, and rescans to sync extracted meeting tasks as suggested canonical tasks without creating board cards.
+- Added `POST /api/meetings/[id]/confirm-tasks` plus a Review Tasks bulk action so selected tasks are explicitly approved before board projection.
+- Split Settings into Profile, Workspace, Integrations, Preferences, and Advanced sections.
+- Moved Workflow Builder, MCP API, runbook links, and replay-oriented operator controls under Advanced.
+- Updated `docs/blueprint.md` and added simple end-user docs for meeting import, task review, Fathom, and board usage.
+
+Important implementation note: extracted meeting tasks now enter canonical task storage as `suggested`; board cards are created only when the user approves selected tasks from Review Tasks or moves a task to a board from task details. This is the current draft-before-board lifecycle.
+
 ## Project Overview
 We are upgrading Taskwise from a single-user Fathom integration into a workspace-owned multi-connection model. On top of that, we are adding workflow-driven outbound webhooks with granular filtering/transforms and an authenticated MCP surface for meetings and action items.
 

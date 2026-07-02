@@ -36,7 +36,7 @@ const PasteActionDialog = () => {
     const { isDialogOpen, closePasteDialog, pastedText } = usePasteAction();
     const { createNewSession: createNewChatSession } = useChatHistory();
     const { createNewPlanningSession } = usePlanningHistory();
-    const { createNewMeeting, updateMeeting, setActiveMeetingId } = useMeetingHistory();
+    const { createNewMeeting, updateMeeting } = useMeetingHistory();
 
     const [isProcessing, setIsProcessing] = useState(false);
 
@@ -95,10 +95,10 @@ const PasteActionDialog = () => {
                         });
                     }
 
-                    toast({ title: 'Meeting Processed!', description: `Created a meeting, chat, and plan.` });
+                    toast({ title: 'Meeting Processed!', description: `Created a meeting and task list for review.` });
                     
-                    // Navigate to meetings page and trigger opening the new meeting
-                    router.push(`/meetings?open=${newMeeting.id}`);
+                    // First-run and paste flows should land where users review tasks.
+                    router.push(`/review?meeting=${newMeeting.id}`);
 
                  } else {
                     throw new Error("Failed to create the meeting record.");
