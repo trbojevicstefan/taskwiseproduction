@@ -26,6 +26,7 @@ import {
   toNumberOrNull,
 } from "@/lib/fathom-ingest-helpers";
 import * as ingestHelpers from "@/lib/fathom-ingest-helpers";
+import * as analysisHelpers from "@/lib/fathom-ingest-analysis";
 import { runMeetingIngestionCommand } from "@/lib/services/meeting-ingestion-command";
 import { postMeetingAutomationToSlack } from "@/lib/slack-automation";
 
@@ -942,7 +943,7 @@ export const ingestFathomMeeting = async ({
         payload?.recording?.summary ||
         (await fetchFathomSummary(recordingId, accessToken).catch(() => null));
       const summaryText = resolveSummaryText(payload, summaryPayload);
-      const detailLevel = resolveDetailLevel(user);
+      const detailLevel = analysisHelpers.resolveDetailLevel(user);
 
       const analysisResult = await analyzeMeeting({
         transcript: transcriptText,
@@ -950,16 +951,16 @@ export const ingestFathomMeeting = async ({
       });
 
       const allTaskLevels = analysisResult.allTaskLevels || null;
-      const selectedTasks = selectTasksForLevel(allTaskLevels, detailLevel);
+      const selectedTasks = analysisHelpers.selectTasksForLevel(allTaskLevels, detailLevel);
 
       const sanitizedTasks = selectedTasks.map((task: any) =>
         normalizeTask(task as ExtractedTaskSchema)
       );
-      let sanitizedTaskLevels = sanitizeLevels(allTaskLevels);
+      let sanitizedTaskLevels = analysisHelpers.sanitizeLevels(allTaskLevels);
 
       const uniquePeople = ingestHelpers.buildUniqueMeetingPeople(analysisResult, payload);
 
-      const completionMatchThreshold = resolveCompletionMatchThreshold(user);
+      const completionMatchThreshold = analysisHelpers.resolveCompletionMatchThreshold(user);
       // Completion detection is intentionally creation-only.
       // Reanalysis of an existing (duplicate) meeting should not trigger it.
       const completionSuggestions: ExtractedTaskSchema[] = [];
@@ -967,7 +968,7 @@ export const ingestFathomMeeting = async ({
       const shouldAutoApprove = Boolean(user.autoApproveCompletedTasks);
       if (shouldAutoApprove && completionSuggestions.length) {
         const autoApproveSuggestions = completionSuggestions.filter((task: any) =>
-          shouldAutoApproveSuggestion(task, completionMatchThreshold)
+          analysisHelpers.shouldAutoApproveSuggestion(task, completionMatchThreshold)
         );
         if (autoApproveSuggestions.length) {
           await applyCompletionTargets(db, userId, autoApproveSuggestions);
@@ -979,7 +980,7 @@ export const ingestFathomMeeting = async ({
         completionSuggestions
       );
       const finalizedTasks = shouldAutoApprove
-        ? applyAutoApprovalFlags(mergedTasks, completionMatchThreshold)
+        ? analysisHelpers.applyAutoApprovalFlags(mergedTasks, completionMatchThreshold)
         : mergedTasks;
 
       if (sanitizedTaskLevels) {
@@ -999,15 +1000,15 @@ export const ingestFathomMeeting = async ({
         };
         if (shouldAutoApprove) {
           sanitizedTaskLevels = {
-            light: applyAutoApprovalFlags(
+            light: analysisHelpers.applyAutoApprovalFlags(
               sanitizedTaskLevels.light || [],
               completionMatchThreshold
             ),
-            medium: applyAutoApprovalFlags(
+            medium: analysisHelpers.applyAutoApprovalFlags(
               sanitizedTaskLevels.medium || [],
               completionMatchThreshold
             ),
-            detailed: applyAutoApprovalFlags(
+            detailed: analysisHelpers.applyAutoApprovalFlags(
               sanitizedTaskLevels.detailed || [],
               completionMatchThreshold
             ),
@@ -1227,7 +1228,7 @@ export const ingestFathomMeeting = async ({
     (await fetchFathomSummary(recordingId, accessToken).catch(() => null));
   const summaryText = resolveSummaryText(payload, summaryPayload);
 
-  const detailLevel = resolveDetailLevel(user);
+  const detailLevel = analysisHelpers.resolveDetailLevel(user);
   const workspaceId = ingestWorkspaceId;
   const analysisResult = await analyzeMeeting({
     transcript: transcriptText,
@@ -1235,16 +1236,16 @@ export const ingestFathomMeeting = async ({
   });
 
   const allTaskLevels = analysisResult.allTaskLevels || null;
-  const selectedTasks = selectTasksForLevel(allTaskLevels, detailLevel);
+  const selectedTasks = analysisHelpers.selectTasksForLevel(allTaskLevels, detailLevel);
 
   const sanitizedTasks = selectedTasks.map((task: any) =>
     normalizeTask(task as ExtractedTaskSchema)
   );
-  let sanitizedTaskLevels = sanitizeLevels(allTaskLevels);
+  let sanitizedTaskLevels = analysisHelpers.sanitizeLevels(allTaskLevels);
 
   const uniquePeople = ingestHelpers.buildUniqueMeetingPeople(analysisResult, payload);
 
-  const completionMatchThreshold = resolveCompletionMatchThreshold(user);
+  const completionMatchThreshold = analysisHelpers.resolveCompletionMatchThreshold(user);
   const completionSummary =
     pickFirst(
       analysisResult.meetingSummary,
@@ -1264,7 +1265,7 @@ export const ingestFathomMeeting = async ({
   const shouldAutoApprove = Boolean(user.autoApproveCompletedTasks);
   if (shouldAutoApprove && completionSuggestions.length) {
     const autoApproveSuggestions = completionSuggestions.filter((task: any) =>
-      shouldAutoApproveSuggestion(task, completionMatchThreshold)
+      analysisHelpers.shouldAutoApproveSuggestion(task, completionMatchThreshold)
     );
     if (autoApproveSuggestions.length) {
       await applyCompletionTargets(db, userId, autoApproveSuggestions);
@@ -1276,7 +1277,7 @@ export const ingestFathomMeeting = async ({
     completionSuggestions
   );
   const finalizedTasks = shouldAutoApprove
-    ? applyAutoApprovalFlags(mergedTasks, completionMatchThreshold)
+    ? analysisHelpers.applyAutoApprovalFlags(mergedTasks, completionMatchThreshold)
     : mergedTasks;
 
   if (sanitizedTaskLevels) {
@@ -1296,15 +1297,15 @@ export const ingestFathomMeeting = async ({
     };
     if (shouldAutoApprove) {
       sanitizedTaskLevels = {
-        light: applyAutoApprovalFlags(
+        light: analysisHelpers.applyAutoApprovalFlags(
           sanitizedTaskLevels.light || [],
           completionMatchThreshold
         ),
-        medium: applyAutoApprovalFlags(
+        medium: analysisHelpers.applyAutoApprovalFlags(
           sanitizedTaskLevels.medium || [],
           completionMatchThreshold
         ),
-        detailed: applyAutoApprovalFlags(
+        detailed: analysisHelpers.applyAutoApprovalFlags(
           sanitizedTaskLevels.detailed || [],
           completionMatchThreshold
         ),
@@ -1375,7 +1376,7 @@ export const ingestFathomMeeting = async ({
     state: "tasks_ready",
     analysisAttemptedAt: now,
     completionAuditAttemptedAt: now,
-    completionAuditModel: resolveCompletionAuditModel(),
+    completionAuditModel: analysisHelpers.resolveCompletionAuditModel(),
     completionAuditSuggestionCount: completionSuggestions.length,
     createdAt: now,
     lastActivityAt: now,
