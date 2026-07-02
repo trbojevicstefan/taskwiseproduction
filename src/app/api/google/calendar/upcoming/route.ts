@@ -26,6 +26,11 @@ export async function GET(request: Request) {
   const url = new URL(request.url);
   const startParam = url.searchParams.get("start");
   const endParam = url.searchParams.get("end");
+  // Opt-in escape hatch for the Calendar page: skip the hangoutLink-only
+  // filter below. Default behavior (video meetings only) is unchanged —
+  // Meeting Planner depends on it.
+  const allEventsParam = url.searchParams.get("allEvents");
+  const includeAllEvents = allEventsParam === "1" || allEventsParam === "true";
   const now = new Date();
   const startTime = startParam ? new Date(startParam) : now;
   const endTime = endParam ? new Date(endParam) : new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
@@ -95,7 +100,11 @@ export async function GET(request: Request) {
             : [],
         };
       })
-      .filter((event: any) => Boolean(event.startTime) && Boolean(event.hangoutLink));
+      .filter(
+        (event: any) =>
+          Boolean(event.startTime) &&
+          (includeAllEvents || Boolean(event.hangoutLink))
+      );
 
     return NextResponse.json({ events });
   } catch (error: any) {

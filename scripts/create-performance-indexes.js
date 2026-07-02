@@ -38,6 +38,10 @@ const indexPlan = [
         key: { userId: 1, assigneeNameKey: 1, status: 1 },
         options: { name: "tasks_user_assignee_status" },
       },
+      {
+        key: { userId: 1, dueAt: 1 },
+        options: { name: "tasks_user_due_at" },
+      },
     ],
   },
   {
@@ -50,6 +54,10 @@ const indexPlan = [
       {
         key: { userId: 1, chatSessionId: 1 },
         options: { name: "meetings_user_chat_session" },
+      },
+      {
+        key: { userId: 1, startTime: 1 },
+        options: { name: "meetings_user_start_time" },
       },
     ],
   },
