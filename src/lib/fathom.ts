@@ -1,28 +1,21 @@
-import { randomBytes } from "crypto";
 import { getDb } from "@/lib/db";
 import {
   findFathomConnectionById,
   type FathomConnectionDoc,
   updateFathomConnectionById,
 } from "@/lib/fathom-connections";
-import type { FathomInstallationDoc } from "@/lib/fathom/types";
 import { logFathomIntegration } from "@/lib/fathom-logs";
+import { buildLegacyFathomInstallation } from "@/lib/fathom-installation-helpers";
 import { recordExternalApiFailure } from "@/lib/observability-metrics";
 import {
   buildWebhookBody,
   getWebhookId,
   getWebhookUrl,
 } from "@/lib/fathom-webhook-helpers";
-import { buildLegacyFathomInstallation } from "@/lib/fathom-installation-helpers";
 import {
   buildConnectionWebhookUpsert,
   buildLegacyWebhookUpsert,
 } from "@/lib/fathom-webhook-sync-helpers";
-import {
-  applyFathomConnectionRefresh,
-  applyFathomInstallationRefresh,
-  buildFathomRefreshRequestParams,
-} from "@/lib/fathom-oauth-helpers";
 import {
   FATHOM_WEBHOOK_EVENT,
   FATHOM_WEBHOOK_TRIGGERED_FOR,
@@ -31,6 +24,10 @@ import {
 import {
   deleteFathomWebhook,
 } from "@/lib/fathom-webhooks";
+import {
+  getFathomInstallation,
+  saveFathomInstallation,
+} from "@/lib/fathom/oauth";
 export { FATHOM_SCOPES } from "@/lib/fathom-utils";
 export {
   FATHOM_WEBHOOK_EVENT,
@@ -44,23 +41,26 @@ export {
   getFathomWebhookUrlPrefix,
   hashFathomRecordingId,
 } from "@/lib/fathom-utils";
+export {
+  consumeFathomOAuthState,
+  createFathomOAuthState,
+  deleteFathomInstallation,
+  getFathomInstallation,
+  getValidFathomAccessToken,
+  getValidFathomAccessTokenForConnection,
+  saveFathomInstallation,
+} from "@/lib/fathom/oauth";
 export { deleteFathomWebhook, pruneFathomManagedWebhooks } from "@/lib/fathom-webhooks";
-export type { FathomInstallationDoc } from "@/lib/fathom/types";
-
-const INSTALLATIONS_COLLECTION = "fathomInstallations";
-const OAUTH_STATE_COLLECTION = "fathomOauthStates";
-
-const FATHOM_CLIENT_ID = process.env.FATHOM_CLIENT_ID;
-const FATHOM_CLIENT_SECRET = process.env.FATHOM_CLIENT_SECRET;
 const FATHOM_WEBHOOK_TRIGGERED_FOR_FALLBACK = [
   "my_recordings",
   "shared_external_recordings",
   "my_shared_with_team_recordings",
   "shared_team_recordings",
 ] as const;
+
 const syncLegacyInstallationFromConnection = async (
   connection: FathomConnectionDoc,
-  overrides: Partial<FathomInstallationDoc> = {}
+  overrides: Partial<import("@/lib/fathom/types").FathomInstallationDoc> = {}
 ) => {
   if (!connection.legacyUserId) return null;
   const userId = connection.legacyUserId;
@@ -73,240 +73,6 @@ const syncLegacyInstallationFromConnection = async (
 
   await saveFathomInstallation(installation);
   return installation;
-};
-
-export const createFathomOAuthState = async (userId: string): Promise<string> => {
-  const db = await getDb();
-  const state = randomBytes(24).toString("hex");
-  await db.collection(OAUTH_STATE_COLLECTION).insertOne({
-    _id: state,
-    userId,
-    createdAt: new Date(),
-  });
-  return state;
-};
-
-export const consumeFathomOAuthState = async (
-  state: string
-): Promise<string | null> => {
-  const db = await getDb();
-  const record = await db
-    .collection(
-      OAUTH_STATE_COLLECTION
-    )
-    .findOne({ _id: state });
-  if (!record) return null;
-  await db.collection(OAUTH_STATE_COLLECTION).deleteOne({ _id: state });
-  return record.userId;
-};
-
-export const getFathomInstallation = async (
-  userId: string
-): Promise<FathomInstallationDoc | null> => {
-  const db = await getDb();
-  return db
-    .collection(INSTALLATIONS_COLLECTION)
-    .findOne({ _id: userId });
-};
-
-export const saveFathomInstallation = async (
-  installation: FathomInstallationDoc
-) => {
-  const db = await getDb();
-  const { createdAt, ...rest } = installation;
-  await db
-    .collection(INSTALLATIONS_COLLECTION)
-    .updateOne(
-      { _id: installation.userId },
-      { $set: rest, $setOnInsert: { createdAt: createdAt || new Date() } },
-      { upsert: true }
-    );
-};
-
-export const deleteFathomInstallation = async (userId: string) => {
-  const db = await getDb();
-  await db.collection(INSTALLATIONS_COLLECTION).deleteOne({ _id: userId });
-};
-
-const refreshFathomToken = async (installation: FathomInstallationDoc) => {
-  if (!FATHOM_CLIENT_ID || !FATHOM_CLIENT_SECRET) {
-    throw new Error("Fathom client credentials are not configured.");
-  }
-  if (!installation.refreshToken) {
-    throw new Error("Missing Fathom refresh token.");
-  }
-
-  const params = buildFathomRefreshRequestParams(
-    installation.refreshToken,
-    FATHOM_CLIENT_ID,
-    FATHOM_CLIENT_SECRET
-  );
-
-  let response: Response;
-  try {
-    response = await fetch(
-      "https://fathom.video/external/v1/oauth2/token",
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body: params,
-      }
-    );
-  } catch (error) {
-    void recordExternalApiFailure({
-      provider: "fathom",
-      operation: "oauth.token.refresh",
-      userId: installation.userId,
-      error,
-    });
-    throw error;
-  }
-
-  const payload = (await response.json()) as {
-    access_token?: string;
-    refresh_token?: string;
-    expires_in?: number;
-    scope?: string;
-    error?: string;
-  };
-
-  if (!payload.access_token) {
-    void recordExternalApiFailure({
-      provider: "fathom",
-      operation: "oauth.token.refresh",
-      userId: installation.userId,
-      statusCode: response.status,
-      error: payload.error || "Failed to refresh Fathom token.",
-    });
-    throw new Error(payload.error || "Failed to refresh Fathom token.");
-  }
-
-  const updated = applyFathomInstallationRefresh(installation, payload);
-
-  await saveFathomInstallation(updated);
-  return updated.accessToken;
-};
-
-const refreshFathomConnectionToken = async (connection: FathomConnectionDoc) => {
-  if (!FATHOM_CLIENT_ID || !FATHOM_CLIENT_SECRET) {
-    throw new Error("Fathom client credentials are not configured.");
-  }
-  if (!connection.oauth.refreshToken) {
-    throw new Error("Missing Fathom refresh token.");
-  }
-
-  const params = buildFathomRefreshRequestParams(
-    connection.oauth.refreshToken,
-    FATHOM_CLIENT_ID,
-    FATHOM_CLIENT_SECRET
-  );
-
-  let response: Response;
-  try {
-    response = await fetch(
-      "https://fathom.video/external/v1/oauth2/token",
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body: params,
-      }
-    );
-  } catch (error) {
-    void recordExternalApiFailure({
-      provider: "fathom",
-      operation: "oauth.token.refresh",
-      userId: connection.legacyUserId || connection.createdByUserId,
-      error,
-      metadata: {
-        connectionId: connection._id,
-      },
-    });
-    throw error;
-  }
-
-  const payload = (await response.json()) as {
-    access_token?: string;
-    refresh_token?: string;
-    expires_in?: number;
-    scope?: string;
-    error?: string;
-  };
-
-  if (!payload.access_token) {
-    void recordExternalApiFailure({
-      provider: "fathom",
-      operation: "oauth.token.refresh",
-      userId: connection.legacyUserId || connection.createdByUserId,
-      statusCode: response.status,
-      error: payload.error || "Failed to refresh Fathom token.",
-      metadata: {
-        connectionId: connection._id,
-      },
-    });
-    throw new Error(payload.error || "Failed to refresh Fathom token.");
-  }
-
-  const db = await getDb();
-  const refreshed = await updateFathomConnectionById(db as any, connection._id, {
-    ...applyFathomConnectionRefresh(connection, payload),
-    updatedByUserId: connection.updatedByUserId || connection.createdByUserId,
-  });
-
-  if (!refreshed) {
-    throw new Error("Fathom connection not found after refresh.");
-  }
-
-  await syncLegacyInstallationFromConnection(refreshed, {
-    accessToken: payload.access_token,
-    refreshToken: payload.refresh_token || connection.oauth.refreshToken || null,
-    expiresAt: payload.expires_in
-      ? Date.now() + payload.expires_in * 1000
-      : connection.oauth.expiresAt || null,
-    scope: payload.scope || connection.oauth.scope || null,
-  });
-
-  return payload.access_token;
-};
-
-export const getValidFathomAccessToken = async (
-  userId: string
-): Promise<string> => {
-  const installation = await getFathomInstallation(userId);
-  if (!installation) {
-    throw new Error("Fathom installation not found for this user.");
-  }
-
-  const now = Date.now();
-  if (
-    installation.expiresAt &&
-    now >= installation.expiresAt - 60_000 &&
-    installation.refreshToken
-  ) {
-    return refreshFathomToken(installation);
-  }
-
-  return installation.accessToken;
-};
-
-export const getValidFathomAccessTokenForConnection = async (
-  connectionId: string
-): Promise<string> => {
-  const db = await getDb();
-  const connection = await findFathomConnectionById(db as any, connectionId);
-  if (!connection || !connection.oauth.accessToken) {
-    throw new Error("Fathom connection not found.");
-  }
-
-  const now = Date.now();
-  if (
-    connection.oauth.expiresAt &&
-    now >= connection.oauth.expiresAt - 60_000 &&
-    connection.oauth.refreshToken
-  ) {
-    return refreshFathomConnectionToken(connection);
-  }
-
-  return connection.oauth.accessToken;
 };
 
 const fathomApiFetch = async <T>(
