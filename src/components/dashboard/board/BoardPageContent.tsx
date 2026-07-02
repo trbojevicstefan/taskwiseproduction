@@ -97,7 +97,7 @@ import { subscribeRealtimeUpdates } from "@/lib/realtime-client";
 import type { Task } from "@/types/project";
 import type { Board, BoardStatus, BoardStatusCategory } from "@/types/board";
 import type { Person } from "@/types/person";
-import type { ExtractedTaskSchema } from "@/types/chat";
+import type { ExtractedTaskSchema, TaskPriorityLabel } from "@/types/chat";
 import { buildBriefContext } from "@/lib/brief-context";
 import { generateBriefsForTasks } from "@/lib/task-briefs";
 
@@ -114,16 +114,18 @@ type BoardTaskItem = Task & {
 
 const priorityOptions: TaskPriority[] = ["low", "medium", "high"];
 
-const priorityStyles: Record<TaskPriority, string> = {
+const priorityStyles: Record<TaskPriorityLabel, string> = {
   low: "bg-emerald-500/15 text-emerald-600 border-emerald-500/30 dark:text-emerald-400",
   medium: "bg-amber-500/15 text-amber-700 border-amber-500/30 dark:text-amber-400",
   high: "bg-rose-500/15 text-rose-600 border-rose-500/30 dark:text-rose-400",
+  urgent: "bg-red-600/15 text-red-700 border-red-600/40 dark:text-red-400",
 };
 
-const priorityLabel: Record<TaskPriority, string> = {
+const priorityLabel: Record<TaskPriorityLabel, string> = {
   low: "Low",
   medium: "Medium",
   high: "High",
+  urgent: "Urgent",
 };
 
 type DueFilter = "all" | "today" | "overdue" | "this_week";
@@ -246,9 +248,16 @@ function BoardUnavailableState() {
     </div>
   );
 }
-function PriorityBadge({ priority }: { priority: TaskPriority }) {
+function PriorityBadge({
+  priority,
+  reason,
+}: {
+  priority: TaskPriorityLabel;
+  reason?: string | null;
+}) {
   return (
     <span
+      title={reason || undefined}
       className={cn(
         "text-xs font-medium px-2 py-0.5 rounded-full border",
         priorityStyles[priority]
@@ -486,7 +495,10 @@ function AssigneeDropdown({
               aria-label={`Select ${task.title}`}
               className="h-4 w-4"
             />
-            <PriorityBadge priority={priority} />
+            <PriorityBadge
+              priority={task.priorityLabel || priority}
+              reason={task.priorityReason}
+            />
             <CleanupBadge task={task} />
           </div>
           <TaskActionsMenu onEdit={onEdit} onDelete={onDelete} />
@@ -2586,7 +2598,10 @@ function BoardWorkspaceContent({
                   </div>
 
                   <div className="col-span-2">
-                    <PriorityBadge priority={task.priority || "medium"} />
+                    <PriorityBadge
+                      priority={task.priorityLabel || task.priority || "medium"}
+                      reason={task.priorityReason}
+                    />
                   </div>
 
                   <div className="col-span-2 text-sm text-muted-foreground">{dueLabel}</div>

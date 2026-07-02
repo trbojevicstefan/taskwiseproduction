@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { apiError } from "@/lib/api-route";
 import { getDb } from "@/lib/db";
 import { getSessionUserId } from "@/lib/server-auth";
+import { computeTaskPriority } from "@/lib/task-priority";
 import { normalizePersonNameKey } from "@/lib/transcript-utils";
 import { syncTasksForSource } from "@/lib/task-sync";
 import { publishDomainEvent } from "@/lib/domain-events";
@@ -12,6 +13,16 @@ import {
   updateMeetingTasks,
 } from "@/lib/services/session-task-sync";
 import type { ExtractedTaskSchema } from "@/types/chat";
+
+// Body fields that feed the deterministic priority scorer — touching any of
+// them triggers an inline recompute for this task (Phase 9).
+const PRIORITY_INPUT_FIELDS = [
+  "dueAt",
+  "priority",
+  "assignee",
+  "assigneeName",
+  "status",
+] as const;
 
 const serializeTask = (task: any) => ({
   ...task,
@@ -335,6 +346,29 @@ export async function PATCH(
     userId,
     $or: [{ _id: id }, { id }],
   };
+
+  // Inline priority recompute (Phase 9): when the body touches a scoring
+  // input, rescore the merged task (existing doc + this update) so the
+  // stored priority never lags the edit. Uses a cheap { now }-only context —
+  // POST /api/tasks/priority/recompute refines scores with client-impact and
+  // workload signals across the whole workspace.
+  const touchesPriorityInputs = PRIORITY_INPUT_FIELDS.some((field) =>
+    Object.prototype.hasOwnProperty.call(body, field)
+  );
+  if (touchesPriorityInputs) {
+    const existing = await db.collection("tasks").findOne(filter);
+    if (existing) {
+      const merged = { ...existing, ...update };
+      const now = new Date();
+      const { priorityScore, priorityLabel, priorityReason } =
+        computeTaskPriority(merged, { now });
+      update.priorityScore = priorityScore;
+      update.priorityLabel = priorityLabel;
+      update.priorityReason = priorityReason;
+      update.priorityUpdatedAt = now.toISOString();
+    }
+  }
+
   await db.collection("tasks").updateOne(filter, { $set: update });
 
   const task = await db.collection("tasks").findOne(filter);

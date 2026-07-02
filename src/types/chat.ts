@@ -37,6 +37,10 @@ export interface TaskCleanupEvidence {
   snippet: string;
 }
 
+// Phase 9 task prioritization metadata. All fields are additive and optional;
+// scores are computed deterministically by src/lib/task-priority.ts.
+export type TaskPriorityLabel = 'low' | 'medium' | 'high' | 'urgent';
+
 export interface TaskReferenceSchema {
   taskId: string;
   sourceTaskId: string;
@@ -118,6 +122,12 @@ export interface ExtractedTaskSchema {
   duplicateOfTaskId?: string | null;
   cleanupReviewedAt?: string | null;
   cleanupReviewedBy?: string | null;
+
+  // Task prioritization metadata (Phase 9). Computed deterministically.
+  priorityScore?: number | null;
+  priorityLabel?: TaskPriorityLabel | null;
+  priorityReason?: string | null;
+  priorityUpdatedAt?: string | null;
 }
 
 

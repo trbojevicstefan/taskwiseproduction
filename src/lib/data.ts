@@ -271,5 +271,11 @@ export function normalizeTask(task: any): ExtractedTaskSchema {
       task.cleanupReviewedAt === undefined ? null : task.cleanupReviewedAt,
     cleanupReviewedBy:
       task.cleanupReviewedBy === undefined ? null : task.cleanupReviewedBy,
+    priorityScore: task.priorityScore === undefined ? null : task.priorityScore,
+    priorityLabel: task.priorityLabel === undefined ? null : task.priorityLabel,
+    priorityReason:
+      task.priorityReason === undefined ? null : task.priorityReason,
+    priorityUpdatedAt:
+      task.priorityUpdatedAt === undefined ? null : task.priorityUpdatedAt,
   };
 }

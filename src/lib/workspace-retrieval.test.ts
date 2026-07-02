@@ -346,6 +346,146 @@ describe("searchWorkspaceContext", () => {
     expect(result.tasks.map((t) => t.id)).toEqual(["t-overdue", "t-keyword"]);
   });
 
+  it("passes through priorityScore/priorityLabel on keyword-matched tasks", async () => {
+    const { db } = makeDb({
+      tasks: [
+        {
+          _id: "t-scored",
+          title: "Update pricing page",
+          status: "todo",
+          priorityScore: 62,
+          priorityLabel: "high",
+        },
+        {
+          _id: "t-unscored",
+          title: "Pricing follow-up",
+          status: "todo",
+        },
+      ],
+    });
+
+    const result = await searchWorkspaceContext(db, scope, "pricing");
+    const scoredTask = result.tasks.find((t) => t.id === "t-scored");
+    const unscoredTask = result.tasks.find((t) => t.id === "t-unscored");
+    expect(scoredTask?.priorityScore).toBe(62);
+    expect(scoredTask?.priorityLabel).toBe("high");
+    expect(unscoredTask?.priorityScore).toBeNull();
+    expect(unscoredTask?.priorityLabel).toBeNull();
+  });
+
+  it("surfaces top open tasks by priorityScore for priority-intent questions without keyword overlap", async () => {
+    const { db, calls } = makeDb({
+      tasks: [
+        {
+          _id: "t-mid",
+          title: "Refactor auth module",
+          status: "todo",
+          priorityScore: 45,
+          priorityLabel: "high",
+        },
+        {
+          _id: "t-top",
+          title: "Ship invoice PDF",
+          status: "inprogress",
+          priorityScore: 80,
+          priorityLabel: "urgent",
+        },
+        {
+          _id: "t-low",
+          title: "Water plants",
+          status: "todo",
+          priorityScore: 5,
+          priorityLabel: "low",
+        },
+      ],
+    });
+
+    const result = await searchWorkspaceContext(
+      db,
+      scope,
+      "What should I work on first?"
+    );
+
+    // Open-only filter and score-first Mongo sort applied.
+    const taskCall = calls.tasks[0];
+    expect(taskCall.filter.status).toEqual({ $ne: "done" });
+    expect(taskCall.filter.taskState).toEqual({ $ne: "archived" });
+
+    expect(result.tasks.map((t) => t.id)).toEqual(["t-top", "t-mid", "t-low"]);
+    expect(result.tasks[0].priorityLabel).toBe("urgent");
+    expect(result.tasks[0].priorityScore).toBe(80);
+  });
+
+  it("fires the priority intent for 'priority'/'urgent' phrasings", async () => {
+    const { db } = makeDb({
+      tasks: [
+        {
+          _id: "t-1",
+          title: "Ship invoice PDF",
+          status: "todo",
+          priorityScore: 70,
+          priorityLabel: "urgent",
+        },
+      ],
+    });
+    const result = await searchWorkspaceContext(
+      db,
+      scope,
+      "What are my most urgent priorities?"
+    );
+    expect(result.tasks.map((t) => t.id)).toEqual(["t-1"]);
+  });
+
+  it("orders unscored tasks overdue-first then by due date after scored ones under priority intent", async () => {
+    const { db } = makeDb({
+      tasks: [
+        {
+          _id: "t-due-later",
+          title: "Prepare slides",
+          status: "todo",
+          dueAt: daysAgo(-10),
+        },
+        {
+          _id: "t-overdue",
+          title: "Send contract",
+          status: "todo",
+          dueAt: daysAgo(2),
+        },
+        {
+          _id: "t-due-soon",
+          title: "Book venue",
+          status: "todo",
+          dueAt: daysAgo(-1),
+        },
+        {
+          _id: "t-scored",
+          title: "Ship invoice PDF",
+          status: "todo",
+          priorityScore: 30,
+          priorityLabel: "medium",
+        },
+        {
+          _id: "t-done",
+          title: "Old chore",
+          status: "done",
+          dueAt: daysAgo(20),
+        },
+      ],
+    });
+
+    const result = await searchWorkspaceContext(
+      db,
+      scope,
+      "What should I do first?"
+    );
+    expect(result.tasks.map((t) => t.id)).toEqual([
+      "t-scored",
+      "t-overdue",
+      "t-due-soon",
+      "t-due-later",
+    ]);
+  });
+
   it("boosts client people for client questions and normalizes personType", async () => {
     const { db } = makeDb({
       people: [

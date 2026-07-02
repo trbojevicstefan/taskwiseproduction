@@ -41,6 +41,10 @@ export const TASK_LIST_PROJECTION = {
   duplicateOfTaskId: 1,
   cleanupReviewedAt: 1,
   cleanupReviewedBy: 1,
+  priorityScore: 1,
+  priorityLabel: 1,
+  priorityReason: 1,
+  priorityUpdatedAt: 1,
   createdAt: 1,
   lastUpdated: 1,
 } as const;

@@ -7,6 +7,7 @@ import type {
   TaskCleanupStatus,
   TaskComment,
   TaskEvidence,
+  TaskPriorityLabel,
 } from '@/types/chat';
 
 export interface Project {
@@ -58,4 +59,10 @@ export interface Task {
   duplicateOfTaskId?: string | null;
   cleanupReviewedAt?: string | null;
   cleanupReviewedBy?: string | null;
+  // Task prioritization metadata (Phase 9). Computed deterministically by
+  // src/lib/task-priority.ts.
+  priorityScore?: number | null;
+  priorityLabel?: TaskPriorityLabel | null;
+  priorityReason?: string | null;
+  priorityUpdatedAt?: string | null;
 }

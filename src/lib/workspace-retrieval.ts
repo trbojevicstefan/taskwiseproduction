@@ -46,6 +46,8 @@ export type RetrievedTask = {
   assigneeName: string | null;
   overdue: boolean;
   sourceSessionId: string | null;
+  priorityLabel?: string | null;
+  priorityScore?: number | null;
   score: number;
 };
 
@@ -104,6 +106,10 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 
 const OVERDUE_INTENT_REGEX = /\b(overdue|late|deadline|deadlines|due)\b/i;
 const CLIENT_INTENT_REGEX = /\bclients?\b/i;
+// "What should I do first / work on", "top priority", "most urgent", etc. —
+// surfaces top open tasks by priorityScore even without keyword overlap.
+const PRIORITY_INTENT_REGEX =
+  /\bfirst\b|priorit|\burgent|most important|what should i (?:do|work on)/i;
 
 // Canonical transcript line format: "MM:SS - Speaker: text" (bracketed and
 // parenthesized timestamps also appear in normalized transcripts).
@@ -405,6 +411,8 @@ const TASK_CANDIDATE_PROJECTION = {
   assigneeName: 1,
   sourceSessionId: 1,
   lastUpdated: 1,
+  priorityScore: 1,
+  priorityLabel: 1,
 } as const;
 
 const PEOPLE_CANDIDATE_PROJECTION = {
@@ -534,18 +542,31 @@ const retrieveTasks = async (
   query: QuestionTokens,
   maxTasks: number,
   overdueIntent: boolean,
+  priorityIntent: boolean,
   now: Date
 ): Promise<RetrievedTask[]> => {
   const hasSignal = query.tokens.length > 0 || query.phrases.length > 0;
-  if (!hasSignal && !overdueIntent) return [];
+  if (!hasSignal && !overdueIntent && !priorityIntent) return [];
+
+  const filter: Record<string, any> = {
+    ...scopeFilter,
+    taskState: { $ne: "archived" },
+  };
+  if (priorityIntent) {
+    // Priority intent surfaces open tasks only, ordered by score. Mongo sorts
+    // missing/null fields last on a descending sort, so scored tasks come
+    // first; unscored ones are re-ordered in code below.
+    filter.status = { $ne: "done" };
+  }
 
   const candidates: any[] = await db
     .collection("tasks")
-    .find(
-      { ...scopeFilter, taskState: { $ne: "archived" } },
-      { projection: TASK_CANDIDATE_PROJECTION }
+    .find(filter, { projection: TASK_CANDIDATE_PROJECTION })
+    .sort(
+      priorityIntent
+        ? { priorityScore: -1, lastUpdated: -1, _id: -1 }
+        : { lastUpdated: -1, _id: -1 }
     )
-    .sort({ lastUpdated: -1, _id: -1 })
     .limit(TASK_CANDIDATE_LIMIT)
     .toArray();
 
@@ -580,22 +601,53 @@ const retrieveTasks = async (
           typeof doc?.sourceSessionId === "string" && doc.sourceSessionId
             ? doc.sourceSessionId
             : null,
+        priorityLabel:
+          typeof doc?.priorityLabel === "string" && doc.priorityLabel
+            ? doc.priorityLabel
+            : null,
+        priorityScore:
+          typeof doc?.priorityScore === "number" &&
+          Number.isFinite(doc.priorityScore)
+            ? doc.priorityScore
+            : null,
         score,
       };
     })
     .filter(
       (task) =>
-        task.id && (task.score > 0 || (overdueIntent && task.overdue))
+        task.id &&
+        (task.score > 0 ||
+          (overdueIntent && task.overdue) ||
+          (priorityIntent && task.status !== "done"))
     );
 
+  const compareDueAt = (a: RetrievedTask, b: RetrievedTask): number => {
+    const aDue = a.dueAt ? new Date(a.dueAt).getTime() : Number.MAX_SAFE_INTEGER;
+    const bDue = b.dueAt ? new Date(b.dueAt).getTime() : Number.MAX_SAFE_INTEGER;
+    return aDue - bDue;
+  };
+
   scored.sort((a, b) => {
+    if (priorityIntent) {
+      // priorityScore desc, scored before unscored; unscored fall back to
+      // overdue-first then earliest due date.
+      const aScore = typeof a.priorityScore === "number" ? a.priorityScore : null;
+      const bScore = typeof b.priorityScore === "number" ? b.priorityScore : null;
+      if (aScore !== null || bScore !== null) {
+        if (aScore === null) return 1;
+        if (bScore === null) return -1;
+        if (aScore !== bScore) return bScore - aScore;
+      } else {
+        if (a.overdue !== b.overdue) return a.overdue ? -1 : 1;
+        const dueDiff = compareDueAt(a, b);
+        if (dueDiff !== 0) return dueDiff;
+      }
+    }
     if (overdueIntent && a.overdue !== b.overdue) {
       return a.overdue ? -1 : 1;
     }
     if (b.score !== a.score) return b.score - a.score;
-    const aDue = a.dueAt ? new Date(a.dueAt).getTime() : Number.MAX_SAFE_INTEGER;
-    const bDue = b.dueAt ? new Date(b.dueAt).getTime() : Number.MAX_SAFE_INTEGER;
-    return aDue - bDue;
+    return compareDueAt(a, b);
   });
 
   return scored.slice(0, maxTasks);
@@ -694,6 +746,7 @@ export const searchWorkspaceContext = async (
   const rawQuestion = typeof question === "string" ? question : "";
   const overdueIntent = OVERDUE_INTENT_REGEX.test(rawQuestion);
   const clientIntent = CLIENT_INTENT_REGEX.test(rawQuestion);
+  const priorityIntent = PRIORITY_INTENT_REGEX.test(rawQuestion);
 
   const maxMeetings = clampLimit(opts.maxMeetings, DEFAULT_MAX_MEETINGS);
   const maxTasks = clampLimit(opts.maxTasks, DEFAULT_MAX_TASKS);
@@ -704,7 +757,15 @@ export const searchWorkspaceContext = async (
 
   const [meetings, tasks, people] = await Promise.all([
     retrieveMeetings(db, scopeFilter, query, maxMeetings, now),
-    retrieveTasks(db, scopeFilter, query, maxTasks, overdueIntent, now),
+    retrieveTasks(
+      db,
+      scopeFilter,
+      query,
+      maxTasks,
+      overdueIntent,
+      priorityIntent,
+      now
+    ),
     retrievePeople(db, scopeFilter, rawQuestion, query, maxPeople, clientIntent),
   ]);
 

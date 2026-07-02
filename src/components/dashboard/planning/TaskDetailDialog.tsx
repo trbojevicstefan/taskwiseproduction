@@ -631,6 +631,15 @@ export default function TaskDetailDialog({
     medium: "border-amber-500/60 bg-amber-500/10",
     low: "border-emerald-500/60 bg-emerald-500/10",
   } as const;
+
+  // Computed priority (Phase 9): badge tone per label, incl. 'urgent'.
+  const aiPriorityBadgeTone: Record<string, string> = {
+    urgent: "bg-red-600/15 text-red-700 border-red-600/40 dark:text-red-400",
+    high: "bg-rose-500/15 text-rose-600 border-rose-500/30 dark:text-rose-400",
+    medium:
+      "bg-amber-500/15 text-amber-700 border-amber-500/30 dark:text-amber-400",
+    low: "bg-emerald-500/15 text-emerald-600 border-emerald-500/30 dark:text-emerald-400",
+  };
   const briefLineCount = researchBrief ? researchBrief.split(/\r?\n/).length : 0;
   const shouldCollapseBrief =
     !!researchBrief && (briefLineCount > 6 || researchBrief.length > 1200);
@@ -1034,6 +1043,25 @@ export default function TaskDetailDialog({
                           <SelectItem value="high">High</SelectItem>
                         </SelectContent>
                       </Select>
+                      {task?.priorityLabel ? (
+                        <div className="space-y-1 pt-1">
+                          <span
+                            title={task?.priorityReason || undefined}
+                            className={cn(
+                              "inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium capitalize",
+                              aiPriorityBadgeTone[task.priorityLabel] ||
+                                aiPriorityBadgeTone.low
+                            )}
+                          >
+                            AI: {task.priorityLabel}
+                          </span>
+                          {task?.priorityReason ? (
+                            <p className="text-xs text-muted-foreground">
+                              {task.priorityReason}
+                            </p>
+                          ) : null}
+                        </div>
+                      ) : null}
                     </div>
                     <div className="space-y-2">
                       <Label htmlFor="dueAt">Due Date</Label>
