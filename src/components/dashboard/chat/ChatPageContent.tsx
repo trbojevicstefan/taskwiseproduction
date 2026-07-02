@@ -76,6 +76,7 @@ import { shareTasksNative, formatTasksToText, copyTextToClipboard, exportTasksTo
 import { moveTaskToBoard } from '@/lib/board-actions';
 import AssignPersonDialog from '../planning/AssignPersonDialog';
 import DashboardHeader from '../DashboardHeader';
+import GeneralChatPanel from './GeneralChatPanel';
 import { RadialMenu } from './RadialMenu';
 import TaskItem from '../tasks/TaskItem'; 
 import { useMeetingHistory } from '@/contexts/MeetingHistoryContext';
@@ -2453,7 +2454,10 @@ export default function ChatPageContent() {
             <div className="flex-1 flex flex-col bg-gradient-to-br from-background/90 via-background/70 to-background/40 border border-border/50 rounded-3xl shadow-[0_20px_60px_-40px_rgba(0,0,0,0.7)] backdrop-blur-xl overflow-hidden">
               <ScrollArea className={cn("flex-1", hasSelection && "pb-24")} ref={scrollAreaRef}>
                   <div className="p-6 md:p-8 space-y-8 max-w-3xl mx-auto w-full">
-                    {currentMessages.length === 0 && (
+                    {currentMessages.length === 0 && !sourceMeeting && (
+                      <GeneralChatPanel className="my-4" />
+                    )}
+                    {currentMessages.length === 0 && sourceMeeting && (
                       <Alert className="max-w-2xl mx-auto my-10 border-dashed bg-background/60 backdrop-blur-md rounded-2xl shadow-[0_16px_40px_-30px_rgba(0,0,0,0.6)]">
                         <Info className="h-4 w-4" />
                         <AlertTitle>What's on your mind?</AlertTitle>
