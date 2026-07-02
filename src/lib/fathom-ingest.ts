@@ -17,6 +17,15 @@ import {
   mergeCompletionSuggestions,
 } from "@/lib/task-completion";
 import { findFathomConnectionById } from "@/lib/fathom-connections";
+import {
+  pickFirst,
+  normalizeMeetingTitleKey,
+  normalizeMeetingUrlKey,
+  normalizeDurationBucket,
+  toFiveMinuteBucket,
+  toNumberOrNull,
+} from "@/lib/fathom-ingest-helpers";
+import * as ingestHelpers from "@/lib/fathom-ingest-helpers";
 import { runMeetingIngestionCommand } from "@/lib/services/meeting-ingestion-command";
 import { postMeetingAutomationToSlack } from "@/lib/slack-automation";
 
@@ -24,99 +33,6 @@ type FathomIngestResult =
   | { status: "created"; meetingId: string }
   | { status: "duplicate"; meetingId: string }
   | { status: "no_transcript" };
-
-const pickFirst = (...values: Array<string | null | undefined>) =>
-  values.find((value: any) => value && value.trim()) || null;
-
-const toDateOrNull = (value: any) => {
-  if (!value) return null;
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? null : date;
-};
-
-const toNumberOrNull = (value: any) => {
-  if (typeof value === "number" && Number.isFinite(value)) return value;
-  if (typeof value === "string" && value.trim()) {
-    const parsed = Number(value);
-    return Number.isFinite(parsed) ? parsed : null;
-  }
-  return null;
-};
-
-const normalizeMeetingTitleKey = (value: any) => {
-  if (typeof value !== "string") return null;
-  const normalized = value
-    .toLowerCase()
-    .replace(/[^a-z0-9\s]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-  return normalized || null;
-};
-
-const normalizeMeetingUrlKey = (value: any) => {
-  if (typeof value !== "string") return null;
-  const raw = value.trim();
-  if (!raw) return null;
-  try {
-    const parsed = new URL(raw);
-    parsed.hash = "";
-    const path = parsed.pathname.replace(/\/+$/, "");
-    const search = parsed.searchParams.toString();
-    const normalized = `${parsed.protocol}//${parsed.host}${path || "/"}${
-      search ? `?${search}` : ""
-    }`.toLowerCase();
-    return normalized;
-  } catch {
-    return raw.replace(/\/+$/, "").toLowerCase();
-  }
-};
-
-const normalizeDurationBucket = (durationSeconds: number | null) => {
-  if (durationSeconds === null) return null;
-  const minutes = Math.max(0, Math.round(durationSeconds / 60));
-  return String(minutes);
-};
-
-const toFiveMinuteBucket = (value: Date | null) => {
-  if (!value) return null;
-  return String(Math.floor(value.getTime() / (5 * 60 * 1000)));
-};
-
-const extractMeetingTitle = (payload: any, fallbackTitle?: string | null) =>
-  pickFirst(
-    payload?.meeting_title,
-    payload?.title,
-    payload?.recording?.title,
-    payload?.recording_name,
-    fallbackTitle
-  );
-
-const extractMeetingRecordingUrl = (payload: any) =>
-  pickFirst(payload?.url, payload?.meeting_url, payload?.recording?.url);
-
-const extractMeetingShareUrl = (payload: any) =>
-  pickFirst(payload?.share_url, payload?.meeting_share_url, payload?.recording?.share_url);
-
-const extractMeetingStartTime = (payload: any) =>
-  toDateOrNull(
-    payload?.recording_start_time ||
-      payload?.start_time ||
-      payload?.started_at ||
-      payload?.recording?.start_time ||
-      payload?.scheduled_start_time
-  );
-
-const extractMeetingEndTime = (payload: any) =>
-  toDateOrNull(
-    payload?.recording_end_time ||
-      payload?.end_time ||
-      payload?.ended_at ||
-      payload?.recording?.end_time ||
-      payload?.scheduled_end_time
-  );
-
-const extractMeetingDurationSeconds = (payload: any) =>
-  toNumberOrNull(payload?.duration || payload?.duration_seconds || payload?.recording?.duration);
 
 const escapeRegex = (value: string) =>
   value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -349,7 +265,7 @@ const buildUniqueMeetingPeople = (analysisResult: any, payload: any) => {
     ...person,
     role: "attendee" as const,
   }));
-  const payloadAttendees = extractMeetingAttendeesFromPayload(payload);
+  const payloadAttendees = ingestHelpers.extractMeetingAttendeesFromPayload(payload);
   const mentionedFromAnalysis = (analysisResult.mentionedPeople || []).map((person: any) => ({
     ...person,
     role: "mentioned" as const,
@@ -391,9 +307,12 @@ const selectBestAttendeeOverlapCandidate = (candidates: any[], incomingAttendeeK
   let bestCandidate: any = null;
   let bestRatio = 0;
   for (const candidate of candidates) {
-    const candidateAttendeeKeys = extractMeetingAttendeeKeysFromDocument(candidate);
+    const candidateAttendeeKeys = ingestHelpers.extractMeetingAttendeeKeysFromDocument(candidate);
     if (!candidateAttendeeKeys.length) continue;
-    const ratio = computeAttendeeOverlapRatio(incomingAttendeeKeys, candidateAttendeeKeys);
+    const ratio = ingestHelpers.computeAttendeeOverlapRatio(
+      incomingAttendeeKeys,
+      candidateAttendeeKeys
+    );
     if (ratio > bestRatio) {
       bestRatio = ratio;
       bestCandidate = candidate;
@@ -449,26 +368,6 @@ const buildMeetingDedupeFingerprints = ({
   return Array.from(keys);
 };
 
-const buildMeetingScopeFilter = ({
-  userId,
-  workspaceId,
-}: {
-  userId: string;
-  workspaceId: string | null;
-}) => {
-  if (!workspaceId) {
-    return { userId };
-  }
-  return {
-    userId,
-    $or: [
-      { workspaceId },
-      { workspaceId: null },
-      { workspaceId: { $exists: false } },
-    ],
-  };
-};
-
 const CROSS_NOTETAKER_DEDUPE_WINDOW_MS = Math.max(
   5 * 60 * 1000,
   Number(process.env.FATHOM_CROSS_NOTETAKER_DEDUPE_WINDOW_MS || 20 * 60 * 1000)
@@ -507,7 +406,7 @@ const findCanonicalFathomDuplicate = async ({
   durationSeconds: number | null;
 }) => {
   const meetings = db.collection("meetings");
-  const scopeFilter = buildMeetingScopeFilter({ userId, workspaceId });
+  const scopeFilter = ingestHelpers.buildMeetingScopeFilter({ userId, workspaceId });
 
   if (dedupeFingerprints.length) {
     const incomingFingerprintSet = new Set(dedupeFingerprints);
@@ -533,7 +432,11 @@ const findCanonicalFathomDuplicate = async ({
           incomingFingerprintSet.has(fingerprint)
         );
         if (!matchedFingerprints.length) continue;
-        if (matchedFingerprints.some((fingerprint: string) => hasStrongFingerprint(fingerprint))) {
+        if (
+          matchedFingerprints.some((fingerprint: string) =>
+            ingestHelpers.hasStrongFingerprint(fingerprint)
+          )
+        ) {
           strongMatches.push(candidate);
         } else {
           weakMatches.push(candidate);
@@ -545,7 +448,7 @@ const findCanonicalFathomDuplicate = async ({
           return strongMatches[0];
         }
         if (incomingAttendeeKeys.length) {
-          const bestStrong = selectBestAttendeeOverlapCandidate(
+          const bestStrong = ingestHelpers.selectBestAttendeeOverlapCandidate(
             strongMatches,
             incomingAttendeeKeys
           );
@@ -560,7 +463,7 @@ const findCanonicalFathomDuplicate = async ({
       }
 
       if (weakMatches.length > 0 && incomingAttendeeKeys.length) {
-        const bestWeak = selectBestAttendeeOverlapCandidate(
+        const bestWeak = ingestHelpers.selectBestAttendeeOverlapCandidate(
           weakMatches,
           incomingAttendeeKeys
         );
@@ -609,7 +512,7 @@ const findCanonicalFathomDuplicate = async ({
     return null;
   }
 
-  const bestTitleTimeMatch = selectBestAttendeeOverlapCandidate(
+  const bestTitleTimeMatch = ingestHelpers.selectBestAttendeeOverlapCandidate(
     titleTimeMatches,
     incomingAttendeeKeys
   );
@@ -837,21 +740,21 @@ export const ingestFathomMeeting = async ({
   const connectionWorkspaceId = connection?.workspaceId || null;
   const ingestWorkspaceId =
     connectionWorkspaceId || user.activeWorkspaceId || user.workspace?.id || null;
-  const workspaceScopeFilter = buildMeetingScopeFilter({
+  const workspaceScopeFilter = ingestHelpers.buildMeetingScopeFilter({
     userId,
     workspaceId: ingestWorkspaceId,
   });
   const payload = data || {};
-  const meetingTitleFromPayload = extractMeetingTitle(payload);
-  const recordingUrlFromPayload = extractMeetingRecordingUrl(payload);
-  const shareUrlFromPayload = extractMeetingShareUrl(payload);
-  const startTimeFromPayload = extractMeetingStartTime(payload);
-  const endTimeFromPayload = extractMeetingEndTime(payload);
-  const durationSecondsFromPayload = extractMeetingDurationSeconds(payload);
+  const meetingTitleFromPayload = ingestHelpers.extractMeetingTitle(payload);
+  const recordingUrlFromPayload = ingestHelpers.extractMeetingRecordingUrl(payload);
+  const shareUrlFromPayload = ingestHelpers.extractMeetingShareUrl(payload);
+  const startTimeFromPayload = ingestHelpers.extractMeetingStartTime(payload);
+  const endTimeFromPayload = ingestHelpers.extractMeetingEndTime(payload);
+  const durationSecondsFromPayload = ingestHelpers.extractMeetingDurationSeconds(payload);
   const organizerEmailFromPayload = extractMeetingOrganizerEmail(payload);
-  const payloadAttendees = extractMeetingAttendeesFromPayload(payload);
-  const incomingAttendeeKeys = extractMeetingAttendeeKeysFromPayload(payload);
-  const dedupeFingerprintsFromPayload = buildMeetingDedupeFingerprints({
+  const payloadAttendees = ingestHelpers.extractMeetingAttendeesFromPayload(payload);
+  const incomingAttendeeKeys = ingestHelpers.extractMeetingAttendeeKeysFromPayload(payload);
+  const dedupeFingerprintsFromPayload = ingestHelpers.buildMeetingDedupeFingerprints({
     title: meetingTitleFromPayload,
     recordingUrl: recordingUrlFromPayload,
     shareUrl: shareUrlFromPayload,
@@ -1054,7 +957,7 @@ export const ingestFathomMeeting = async ({
       );
       let sanitizedTaskLevels = sanitizeLevels(allTaskLevels);
 
-      const uniquePeople = buildUniqueMeetingPeople(analysisResult, payload);
+      const uniquePeople = ingestHelpers.buildUniqueMeetingPeople(analysisResult, payload);
 
       const completionMatchThreshold = resolveCompletionMatchThreshold(user);
       // Completion detection is intentionally creation-only.
@@ -1145,7 +1048,7 @@ export const ingestFathomMeeting = async ({
         meetingMetadata: analysisResult.meetingMetadata || undefined,
         state: "tasks_ready",
       };
-      const refreshedDedupeFingerprints = buildMeetingDedupeFingerprints({
+      const refreshedDedupeFingerprints = ingestHelpers.buildMeetingDedupeFingerprints({
         title: meetingTitle,
         recordingUrl: recordingUrl || existing.recordingUrl || null,
         shareUrl: shareUrl || existing.shareUrl || null,
@@ -1339,7 +1242,7 @@ export const ingestFathomMeeting = async ({
   );
   let sanitizedTaskLevels = sanitizeLevels(allTaskLevels);
 
-  const uniquePeople = buildUniqueMeetingPeople(analysisResult, payload);
+  const uniquePeople = ingestHelpers.buildUniqueMeetingPeople(analysisResult, payload);
 
   const completionMatchThreshold = resolveCompletionMatchThreshold(user);
   const completionSummary =
