@@ -744,7 +744,7 @@ export default function TaskDetailDialog({
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="sm:max-w-5xl h-[92vh] p-0 overflow-hidden">
+      <DialogContent className="sm:max-w-5xl h-[92vh] p-0 overflow-hidden flex flex-col">
         <div className="relative h-full">
           <div className="flex h-full min-h-0 flex-col">
             <DialogHeader className="px-6 py-4 border-b bg-gradient-to-r from-background via-muted/30 to-background backdrop-blur">

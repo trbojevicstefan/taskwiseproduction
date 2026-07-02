@@ -188,6 +188,10 @@ export default function PlanningPageContent() {
   const { isSlackConnected, isGoogleTasksConnected, isTrelloConnected } = useIntegrations();
   const { meetings } = useMeetingHistory();
   const [pastedContent, setPastedContent] = useState('');
+  const [isPlanningAlertDismissed, setIsPlanningAlertDismissed] = useState(() => {
+    if (typeof window !== "undefined") return localStorage.getItem("taskwise_planning_alert") === "true";
+    return false;
+  });
   const [typedInput, setTypedInput] = useState('');
   const [isGeneratingInitialPlan, setIsGeneratingInitialPlan] = useState(false);
   const [extractedTasks, setExtractedTasks] = useState<DisplayTask[]>([]);
@@ -1184,16 +1188,23 @@ export default function PlanningPageContent() {
           )}
         </DashboardHeader>
 
-        <div className="flex-grow flex flex-col p-4 space-y-4 overflow-hidden">
+        <div className="flex-grow flex flex-col p-4 space-y-4 min-h-0">
           {isInputAreaVisible && (
             <div className="space-y-3">
-              <Alert className="border-primary/30 bg-primary/5">
+              {!isPlanningAlertDismissed && (
+              <Alert className="relative border-primary/30 bg-primary/5">
                 <Sparkles className="h-4 w-4" />
                 <AlertTitle>Turn Ideas into Action Plans</AlertTitle>
                 <AlertDescription>
                   Paste rough notes, meeting transcripts, or project briefs below. AI will structure them into a prioritize plan. Pro tip: Press <kbd className="px-1.5 py-0.5 border rounded bg-muted font-mono text-xs">Ctrl+V</kbd> anywhere to start.
                 </AlertDescription>
+                <button
+                  onClick={() => { localStorage.setItem("taskwise_planning_alert", "true"); setIsPlanningAlertDismissed(true); }}
+                  className="absolute top-3 right-3 rounded-md p-1 text-muted-foreground hover:text-foreground hover:bg-muted transition"
+                  aria-label="Dismiss"
+                ><X className="h-4 w-4" /></button>
               </Alert>
+              )}
 
               {pastedContent && (
                 <div className="relative rounded-md border bg-muted/50 p-3">

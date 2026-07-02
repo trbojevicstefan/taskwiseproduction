@@ -5,7 +5,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import Link from 'next/link';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from '@/components/ui/card';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import { Users, UserPlus, Info, Loader2, Briefcase, Slack, LayoutGrid, List, Trash2, Shield, ShieldOff, GitMerge } from 'lucide-react';
+import { Users, UserPlus, Info, Loader2, Briefcase, Slack, LayoutGrid, List, Trash2, Shield, ShieldOff, GitMerge, X } from 'lucide-react';
 import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert';
 import { useAuth } from '@/contexts/AuthContext';
 import { useIntegrations } from '@/contexts/IntegrationsContext';
@@ -54,6 +54,13 @@ export default function PeoplePageContent() {
   const [newPersonEmail, setNewPersonEmail] = useState("");
   const [newPersonTitle, setNewPersonTitle] = useState("");
   const [isSlackSyncDialogOpen, setIsSlackSyncDialogOpen] = useState(false);
+  const TEAM_HUB_DISMISS_KEY = "taskwise_team_hub_alert_dismissed";
+  const [isTeamHubAlertDismissed, setIsTeamHubAlertDismissed] = useState(() => {
+    if (typeof window !== "undefined") {
+      return localStorage.getItem(TEAM_HUB_DISMISS_KEY) === "true";
+    }
+    return false;
+  });
 
   const visiblePeople = useMemo(
     () => people.filter((person: any) => !person.isBlocked),
@@ -386,13 +393,25 @@ export default function PeoplePageContent() {
       </DashboardHeader>
 
       <div className="flex-grow p-4 sm:p-6 lg:p-8 space-y-6 overflow-auto">
-        <Alert>
-          <Info className="h-4 w-4" />
-          <AlertTitle>This is Your Team Hub!</AlertTitle>
-          <AlertDescription>
-            This view is automatically populated when you process a meeting transcript. The AI extracts attendees and lists them here. Clicking on a person will show you all tasks assigned to them across all your sessions.
-          </AlertDescription>
-        </Alert>
+        {!isTeamHubAlertDismissed && (
+          <Alert className="relative">
+            <Info className="h-4 w-4" />
+            <AlertTitle>This is Your Team Hub!</AlertTitle>
+            <AlertDescription>
+              This view is automatically populated when you process a meeting transcript. The AI extracts attendees and lists them here. Clicking on a person will show you all tasks assigned to them across all your sessions.
+            </AlertDescription>
+            <button
+              onClick={() => {
+                localStorage.setItem(TEAM_HUB_DISMISS_KEY, "true");
+                setIsTeamHubAlertDismissed(true);
+              }}
+              className="absolute top-3 right-3 rounded-md p-1 text-muted-foreground hover:text-foreground hover:bg-muted transition"
+              aria-label="Dismiss"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </Alert>
+        )}
 
         {isLoading ? (
           <DashboardScreenSkeleton className="px-0 py-2" />

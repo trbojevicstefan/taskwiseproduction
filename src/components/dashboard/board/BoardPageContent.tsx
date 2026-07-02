@@ -281,7 +281,7 @@ function AssigneeAvatar({
     }
     return (
       <div className={cn(frameClass, "bg-muted")} title="Unassigned">
-        <img src="/logo.svg" alt="TaskWiseAI" className="h-4 w-4" />
+        <img src="/logo.svg" alt="TaskWiseAI" className="h-4 w-4" width={16} height={16} />
       </div>
     );
   }
@@ -2331,7 +2331,7 @@ function BoardWorkspaceContent({
     [toast]
   );
   const renderBoardView = () => (
-    <div className="flex-1 overflow-x-auto overflow-y-hidden">
+    <div className="flex-1 min-h-0 overflow-x-auto">
       <div className="flex h-full gap-6 px-6 pb-6 min-w-[1000px]">
         {orderedStatuses.map((status: any) => {
           const columnTasks = tasksByStatus.get(status.id) || [];
@@ -2466,8 +2466,8 @@ function BoardWorkspaceContent({
   );
 
   const renderListView = () => (
-    <div className="flex-1 px-6 pb-6 overflow-hidden flex flex-col">
-      <div className="bg-card rounded-xl border border-border/50 shadow-sm overflow-hidden flex flex-col flex-1">
+    <div className="flex-1 px-6 pb-6 min-h-0 flex flex-col">
+      <div className="bg-card rounded-xl border border-border/50 shadow-sm flex flex-col flex-1 min-h-0">
         <div className="grid grid-cols-12 gap-4 p-4 border-b border-border/50 bg-muted/40 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
           <div className="col-span-1 flex items-center">
             <Checkbox
@@ -2575,12 +2575,8 @@ function BoardWorkspaceContent({
   return (
     <div className="flex h-full flex-col bg-background">
       <DashboardHeader
-        pageIcon={LayoutGrid}
-        pageTitle={
-          <h1 className="text-2xl font-bold font-headline">
-            {activeBoard?.name || "Board"}
-          </h1>
-        }
+        pageIcon={null}
+        pageTitle={null}
       >
         <div className="flex flex-wrap items-center gap-3">
           <div className="flex items-center gap-2">
@@ -2762,7 +2758,7 @@ function BoardWorkspaceContent({
         </div>
       </DashboardHeader>
 
-      <main className="flex-1 overflow-hidden pt-6 flex flex-col">
+      <main className="flex-1 min-h-0 pt-6 flex flex-col">
         {viewMode === "board" ? renderBoardView() : renderListView()}
       </main>
 

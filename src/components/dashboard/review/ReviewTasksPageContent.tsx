@@ -201,8 +201,8 @@ export default function ReviewTasksPageContent() {
         </Button>
       </DashboardHeader>
 
-      <div className="flex-1 overflow-hidden">
-        <div className="grid h-full grid-cols-1 gap-0 lg:grid-cols-[360px_1fr]">
+      <div className="flex-1 min-h-0">
+        <div className="grid h-full grid-cols-1 gap-0 lg:grid-cols-[300px_1fr]">
           <aside className="border-r bg-muted/20">
             <div className="space-y-4 p-4">
               {reviewHomeEnabled ? <CoreLoopStartPanel compact /> : null}
@@ -291,12 +291,19 @@ export default function ReviewTasksPageContent() {
 
           <main className="h-full overflow-auto">
             {selectedMeeting ? (
-              <MeetingDetailSheet
+              <>
+                <div className="sticky top-0 z-10 flex items-center gap-2 border-b bg-background/95 backdrop-blur px-4 py-3">
+                  <Button variant="ghost" size="sm" onClick={() => setSelectedMeetingId(null)}>
+                    ← Back to meetings
+                  </Button>
+                </div>
+                <MeetingDetailSheet
                 id={selectedMeeting.id}
                 onClose={() => setSelectedMeetingId(null)}
                 onNavigateToChat={() => router.push("/chat")}
                 variant="page"
               />
+              </>
             ) : (
               <div className="flex h-full items-center justify-center p-8">
                 <div className="max-w-md text-center">
