@@ -17,6 +17,7 @@ import {
 import { cn } from '@/lib/utils';
 import AnimatedTaskHero from '@/components/landing/AnimatedTaskHero';
 import OnboardingWizard from '@/components/auth/OnboardingWizard';
+import ErrorBoundary from '@/components/common/ErrorBoundary';
 
 const DashboardContentWrapper = ({ children }: { children: ReactNode }) => {
   const { user, loading } = useAuth();
@@ -57,7 +58,9 @@ const DashboardContentWrapper = ({ children }: { children: ReactNode }) => {
       {!user.onboardingCompleted && isOnboardingVisible && (
         <OnboardingWizard onClose={() => setIsOnboardingVisible(false)} />
       )}
-      {(user.onboardingCompleted || !isOnboardingVisible) && children}
+      {(user.onboardingCompleted || !isOnboardingVisible) && (
+        <ErrorBoundary>{children}</ErrorBoundary>
+      )}
     </>
   );
 };
