@@ -4,7 +4,7 @@ import ExplorePageContent from '@/components/dashboard/explore/ExplorePageConten
 import type { Metadata } from 'next';
 
 export const metadata: Metadata = {
-  title: 'Explore | TaskWiseAI',
+  title: 'Calendar | TaskWiseAI',
   description: 'Visually explore and interact with your sessions and tasks over time.',
 };
 

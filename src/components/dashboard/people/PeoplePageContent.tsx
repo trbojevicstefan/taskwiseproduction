@@ -351,6 +351,7 @@ export default function PeoplePageContent() {
       <DashboardHeader
         pageIcon={Users}
         pageTitle={<h1 className="text-2xl font-bold font-headline">People</h1>}
+        description="See who on your team owns what."
       >
         <div className="flex items-center gap-2">
           <Button

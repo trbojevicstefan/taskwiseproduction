@@ -10,6 +10,7 @@ import {
   RefreshCw,
   Search,
 } from "lucide-react";
+import EmptyState from "@/components/common/EmptyState";
 import DashboardHeader from "@/components/dashboard/DashboardHeader";
 import DashboardScreenSkeleton from "@/components/dashboard/DashboardScreenSkeleton";
 import CoreLoopStartPanel from "@/components/dashboard/home/CoreLoopStartPanel";
@@ -63,17 +64,17 @@ const statusMeta: Record<
   needs_review: {
     label: "Needs review",
     icon: ClipboardCheck,
-    className: "border-amber-500/30 bg-amber-500/10 text-amber-700",
+    className: "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300",
   },
   reviewed: {
     label: "Reviewed",
     icon: CheckCircle2,
-    className: "border-emerald-500/30 bg-emerald-500/10 text-emerald-700",
+    className: "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300",
   },
   processing: {
     label: "Processing",
     icon: Clock,
-    className: "border-sky-500/30 bg-sky-500/10 text-sky-700",
+    className: "border-sky-500/30 bg-sky-500/10 text-sky-700 dark:text-sky-300",
   },
   failed: {
     label: "Failed",
@@ -194,6 +195,7 @@ export default function ReviewTasksPageContent() {
       <DashboardHeader
         pageIcon={ClipboardCheck}
         pageTitle={<h1 className="text-2xl font-bold font-headline">Review Tasks</h1>}
+        description="Approve, fix, or discard AI-extracted tasks before they reach your board."
       >
         <Button variant="outline" size="sm" onClick={() => void refreshMeetings()}>
           <RefreshCw className="mr-2 h-4 w-4" />
@@ -305,15 +307,12 @@ export default function ReviewTasksPageContent() {
               />
               </>
             ) : (
-              <div className="flex h-full items-center justify-center p-8">
-                <div className="max-w-md text-center">
-                  <ClipboardCheck className="mx-auto mb-4 h-10 w-10 text-muted-foreground" />
-                  <h2 className="text-lg font-semibold">Select a meeting</h2>
-                  <p className="mt-2 text-sm text-muted-foreground">
-                    Choose a meeting from the queue to review suggested tasks, owners, due dates, and status.
-                  </p>
-                </div>
-              </div>
+              <EmptyState
+                className="h-full"
+                icon={ClipboardCheck}
+                title="Select a meeting"
+                description="Choose a meeting from the queue to review suggested tasks, owners, due dates, and status."
+              />
             )}
           </main>
         </div>

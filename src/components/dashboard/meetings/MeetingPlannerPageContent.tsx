@@ -713,6 +713,7 @@ export default function MeetingPlannerPageContent() {
       <DashboardHeader
         pageIcon={Wand2}
         pageTitle={<h1 className="text-2xl font-bold font-headline">Meeting Planner</h1>}
+        description="Turn upcoming meetings and open tasks into a practical plan."
       >
         {!isGoogleTasksConnected && (
           <Button variant="outline" onClick={connectGoogleTasks}>

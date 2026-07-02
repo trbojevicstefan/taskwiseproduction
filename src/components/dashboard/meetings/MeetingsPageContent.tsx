@@ -327,7 +327,7 @@ function MeetingListItem({
                       className="h-7 w-7 rounded-full"
                       onClick={(e) => handleNavigation(e, `/meetings/${m.id}`)}
                     >
-                      <ArrowUpRight className="h-4 w-4 text-white/70" />
+                      <ArrowUpRight className="h-4 w-4 text-foreground/70" />
                     </Button>
                   </TooltipTrigger>
                   <TooltipContent>
@@ -345,7 +345,7 @@ function MeetingListItem({
                         onChat(m);
                       }}
                     >
-                      <MessageSquareText className="h-4 w-4 text-white/70" />
+                      <MessageSquareText className="h-4 w-4 text-foreground/70" />
                     </Button>
                   </TooltipTrigger>
                   <TooltipContent>
@@ -509,12 +509,12 @@ const TaskRow: React.FC<{
             </Badge>
           )}
           {isPendingReview && (
-            <Badge variant="outline" className="rounded-full border-amber-500/40 bg-amber-500/10 text-[11px] text-amber-700">
+            <Badge variant="outline" className="rounded-full border-amber-500/40 bg-amber-500/10 text-[11px] text-amber-700 dark:text-amber-300">
               Review before board
             </Badge>
           )}
           {!isCompletionSuggested && isTaskReviewConfirmed(task) && (
-            <Badge variant="outline" className="rounded-full border-emerald-500/40 bg-emerald-500/10 text-[11px] text-emerald-700">
+            <Badge variant="outline" className="rounded-full border-emerald-500/40 bg-emerald-500/10 text-[11px] text-emerald-700 dark:text-emerald-300">
               Approved
             </Badge>
           )}
@@ -3736,7 +3736,7 @@ export default function MeetingsPageContent() {
   if (meetings.length === 0 && !isLoadingMeetingHistory) {
     return (
       <>
-        <DashboardHeader pageIcon={Video} pageTitle={<h1 className="text-2xl font-bold font-headline">Home</h1>} />
+        <DashboardHeader pageIcon={Video} pageTitle={<h1 className="text-2xl font-bold font-headline">Home</h1>} description="Import, sync, and review your meetings and their extracted tasks." />
         <div className="flex-grow flex items-center justify-center p-8">
           <CoreLoopStartPanel className="w-full max-w-3xl" />
         </div>
@@ -3746,7 +3746,7 @@ export default function MeetingsPageContent() {
 
   return (
     <div className="flex flex-col h-full bg-background">
-      <DashboardHeader pageIcon={Video} pageTitle={<h1 className="text-2xl font-bold font-headline">Home</h1>}>
+      <DashboardHeader pageIcon={Video} pageTitle={<h1 className="text-2xl font-bold font-headline">Home</h1>} description="Import, sync, and review your meetings and their extracted tasks.">
         <div className="flex items-center gap-2">
           <div className="relative w-64">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />

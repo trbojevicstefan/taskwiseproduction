@@ -115,9 +115,9 @@ type BoardTaskItem = Task & {
 const priorityOptions: TaskPriority[] = ["low", "medium", "high"];
 
 const priorityStyles: Record<TaskPriority, string> = {
-  low: "bg-emerald-500/15 text-emerald-600 border-emerald-500/30",
-  medium: "bg-amber-500/15 text-amber-700 border-amber-500/30",
-  high: "bg-rose-500/15 text-rose-600 border-rose-500/30",
+  low: "bg-emerald-500/15 text-emerald-600 border-emerald-500/30 dark:text-emerald-400",
+  medium: "bg-amber-500/15 text-amber-700 border-amber-500/30 dark:text-amber-400",
+  high: "bg-rose-500/15 text-rose-600 border-rose-500/30 dark:text-rose-400",
 };
 
 const priorityLabel: Record<TaskPriority, string> = {

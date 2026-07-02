@@ -184,7 +184,7 @@
 
 
   .dark .animated-gradient-border-wrapper:hover::before,
-  .dark .animated-gradient-border-wrapper:has(:focus-visible):-before {
+  .dark .animated-gradient-border-wrapper:has(:focus-visible)::before {
     background: conic-gradient(from var(--gradient-angle), hsl(var(--chart-2)), hsl(var(--chart-3)), hsl(var(--chart-4)), hsl(var(--chart-2)));
   }
   @property --gradient-angle {
@@ -226,8 +226,8 @@
     position: absolute;
     border-radius: 0.5rem;
     padding: 0.75rem 1rem;
-    background-color: hsla(var(--card), 0.7);
-    border: 1px solid hsla(var(--border), 0.5);
+    background-color: hsl(var(--card) / 0.7);
+    border: 1px solid hsl(var(--border) / 0.5);
     backdrop-filter: blur(4px);
     will-change: transform, opacity;
     display: flex;
@@ -358,14 +358,14 @@
 
   /* For BrainCircuit Icon */
   .animate-card-brain {
-    background: radial-gradient(circle at 20% 30%, hsla(var(--primary), 0.05), transparent 30%),
-                radial-gradient(circle at 80% 70%, hsla(var(--chart-3), 0.05), transparent 30%);
+    background: radial-gradient(circle at 20% 30%, hsl(var(--primary) / 0.05), transparent 30%),
+                radial-gradient(circle at 80% 70%, hsl(var(--chart-3) / 0.05), transparent 30%);
     background-size: 400% 400%;
     transition: background-position 0.5s ease-in-out, background-size 0.5s ease-in-out;
   }
    .group-hover\/node:hover .animate-card-brain {
-      background: radial-gradient(circle at 20% 30%, hsla(var(--primary), 0.15), transparent 40%),
-                  radial-gradient(circle at 80% 70%, hsla(var(--chart-3), 0.15), transparent 40%);
+      background: radial-gradient(circle at 20% 30%, hsl(var(--primary) / 0.15), transparent 40%),
+                  radial-gradient(circle at 80% 70%, hsl(var(--chart-3) / 0.15), transparent 40%);
       animation: brain-pulse-glow 4s ease-in-out infinite;
       background-size: 200% 200%;
   }
@@ -396,7 +396,7 @@
     position: absolute;
     inset: 0;
     border-radius: inherit;
-    background: linear-gradient(110deg, transparent 45%, hsla(var(--primary), 0.1), transparent 55%);
+    background: linear-gradient(110deg, transparent 45%, hsl(var(--primary) / 0.1), transparent 55%);
     background-size: 250% 100%;
     opacity: 0;
     transition: opacity 0.3s ease-in-out;

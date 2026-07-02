@@ -526,6 +526,7 @@ export default function ExplorePageContent() {
         <DashboardHeader
           pageIcon={Calendar}
           pageTitle={<h1 className="text-2xl font-bold font-headline">Calendar</h1>}
+          description="See what happened, what is due, and who needs a reminder."
         >
             {isGoogleTasksConnected && (
               <div className="flex items-center gap-2 text-xs text-muted-foreground">

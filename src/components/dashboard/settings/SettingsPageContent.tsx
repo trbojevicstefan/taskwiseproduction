@@ -2888,6 +2888,7 @@ export default function SettingsPageContent() {
         <DashboardHeader
           pageIcon={SettingsIcon}
           pageTitle={<h1 className="text-2xl font-bold font-headline">Settings</h1>}
+          description="Manage your profile, workspace, integrations, and preferences."
         />
         <div className="flex-grow p-4 sm:p-6 lg:p-8 space-y-8 overflow-auto">
             <div className="max-w-5xl mx-auto">
@@ -4236,7 +4237,7 @@ export default function SettingsPageContent() {
                               </p>
                             ) : null}
                             {workflow.autoDisabledAt ? (
-                              <p className="text-xs text-amber-700">
+                              <p className="text-xs text-amber-700 dark:text-amber-300">
                                 Auto-disabled:{" "}
                                 {workflow.autoDisabledReason || "repeated delivery failures"}
                                 {typeof workflow.autoDisabledFailureCount === "number"

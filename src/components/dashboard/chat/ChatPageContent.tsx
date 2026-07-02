@@ -2386,7 +2386,7 @@ export default function ChatPageContent() {
               }
             }}
         >
-          <DashboardHeader pageIcon={MessageSquareHeart} pageTitle={headerTitle}>
+          <DashboardHeader pageIcon={MessageSquareHeart} pageTitle={headerTitle} description="Ask anything about your meetings, tasks, and people.">
               <div className="flex items-center gap-2">
                 {meetingOptions.length > 0 && (
                   <DropdownMenu>

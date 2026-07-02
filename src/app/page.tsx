@@ -16,8 +16,6 @@ import {
   Layers,
   CheckCircle2,
 } from "lucide-react";
-import { useTheme } from "next-themes";
-
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -137,13 +135,10 @@ function ExploreTabs() {
 }
 
 export default function TaskwiseAIPage() {
-  const { setTheme } = useTheme();
-
-  React.useEffect(() => {
-    setTheme("dark");
-  }, [setTheme]);
-
   return (
+    // The landing page is always dark; scoping the .dark class here keeps the
+    // user's app theme (html-level, managed by next-themes) untouched.
+    <div className="dark">
     <main className={`relative min-h-screen bg-[#0B0B0F] text-white font-body ${brandGradient}`}>
       <header className="sticky top-0 z-40 border-b border-white/10 bg-black/20 backdrop-blur">
         <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-3 sm:px-6 lg:px-8">
@@ -189,7 +184,12 @@ export default function TaskwiseAIPage() {
               <Button size="lg" className="gem-button bg-gradient-to-r from-[#FF4D4D] via-[#FF9900] to-[#FF2E97] text-white" asChild>
                 <Link href="/signup" prefetch={false}>Try it free</Link>
               </Button>
-              <Button size="lg" variant="secondary" className="bg-white/10 text-white hover:bg-white/20">
+              <Button
+                size="lg"
+                variant="secondary"
+                className="bg-white/10 text-white hover:bg-white/20"
+                onClick={() => document.getElementById("demo")?.scrollIntoView({ behavior: "smooth" })}
+              >
                 Watch demo <ChevronRight className="ml-1 h-4 w-4" />
               </Button>
             </div>
@@ -302,11 +302,12 @@ export default function TaskwiseAIPage() {
           <div className="flex items-center justify-center md:justify-end gap-4">
             <Link href="/privacy" className="text-sm text-white/60 hover:text-white">Privacy Policy</Link>
             <Link href="/terms" className="text-sm text-white/60 hover:text-white">Terms of Service</Link>
-            <Link href="/contact" className="text-sm text-white/60 hover:text-white">Contact</Link>
+            <a href="mailto:hello@taskwise.ai" className="text-sm text-white/60 hover:text-white">Contact</a>
           </div>
         </div>
       </footer>
     </main>
+    </div>
   );
 }
 

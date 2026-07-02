@@ -3,7 +3,7 @@
 
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { MessageSquare, CheckSquare, BarChart3, Trash2, Edit3, Search, FolderOpen, MessageCircle as MessageCircleIcon, SquareKanban, MoreVertical, Folder as FolderIcon, FolderPlus, X, Check, Users, Video, Calendar, PanelLeft, Home, Settings, Lightbulb } from 'lucide-react';
+import { MessageSquare, CheckSquare, BarChart3, Trash2, Edit3, Search, FolderOpen, MessageCircle as MessageCircleIcon, SquareKanban, MoreVertical, Folder as FolderIcon, FolderPlus, X, Check, Users, Video, Calendar, PanelLeft, Settings, Lightbulb } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useAuth } from '@/contexts/AuthContext';
 import { useChatHistory } from '@/contexts/ChatHistoryContext';
@@ -92,15 +92,6 @@ export default function SidebarNav() {
   const [creatingFolderWithParent, setCreatingFolderWithParent] = useState<string | null | 'root'>(null);
   const [newFolderName, setNewFolderName] = useState("");
   const workspaceId = user?.workspace?.id;
-  const activeWorkspaceId = user?.activeWorkspaceId || workspaceId || null;
-  const activeWorkspaceMembership = user?.workspaceMemberships?.find(
-    (membership) =>
-      membership.workspaceId === activeWorkspaceId && membership.status === "active"
-  );
-  const activeWorkspaceRole =
-    user?.activeWorkspaceRole || activeWorkspaceMembership?.role || null;
-  const canAccessSettings =
-    activeWorkspaceRole === "owner" || activeWorkspaceRole === "admin";
   const simpleNavEnabled = isSimpleNavEnabled();
 
   const mainNavItems = useMemo(() => {
@@ -116,12 +107,14 @@ export default function SidebarNav() {
 
     if (simpleNavEnabled) {
       return [
-        { href: '/meetings', label: 'Home', icon: Home },
+        { href: '/meetings', label: 'Meetings', icon: Video },
+        { href: '/explore', label: 'Calendar', icon: Calendar },
         { href: '/review', label: 'Review Tasks', icon: CheckSquare },
         boardItem,
-        { href: '/people', label: 'People', icon: Users },
         { href: '/planning', label: 'Planning', icon: Lightbulb },
-        ...(canAccessSettings ? [{ href: '/settings', label: 'Settings', icon: Settings }] : []),
+        { href: '/people', label: 'People', icon: Users },
+        { href: '/chat', label: 'Chat', icon: MessageSquare },
+        { href: '/settings', label: 'Settings', icon: Settings },
       ];
     }
 
@@ -134,7 +127,7 @@ export default function SidebarNav() {
       baseNavItems[4],
       baseNavItems[5],
     ];
-  }, [canAccessSettings, simpleNavEnabled, workspaceId]);
+  }, [simpleNavEnabled, workspaceId]);
 
   const handleEdit = (type: 'session' | 'folder', item: {id: string, title?: string, name?: string}) => {
     setEditingId(`${type}-${item.id}`);
