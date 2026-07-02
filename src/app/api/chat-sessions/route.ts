@@ -11,6 +11,7 @@ import {
 import { getDb } from "@/lib/db";
 import { attachCorrelationIdHeader, serializeError } from "@/lib/observability";
 import { getSessionUserId } from "@/lib/server-auth";
+import { withTimeout } from "@/lib/api-timeout";
 import { resolveWorkspaceScopeForUser } from "@/lib/workspace-scope";
 
 const ROUTE = "/api/chat-sessions";
@@ -150,12 +151,16 @@ export async function GET(request?: Request) {
     if (pageSessions.length > 0) {
       try {
         const { hydrateTaskReferenceLists } = await import("@/lib/task-hydration");
-        const hydratedTaskLists = await hydrateTaskReferenceLists(
-          userId,
-          pageSessions.map((session: any) =>
-            Array.isArray(session.suggestedTasks) ? session.suggestedTasks : []
+        const hydratedTaskLists = await withTimeout(
+          hydrateTaskReferenceLists(
+            userId,
+            pageSessions.map((session: any) =>
+              Array.isArray(session.suggestedTasks) ? session.suggestedTasks : []
+            ),
+            { workspaceId }
           ),
-          { workspaceId }
+          10_000,
+          "chat-session-task-hydration"
         );
         pageSessions.forEach((session: any, index: number) => {
           session.suggestedTasks = hydratedTaskLists[index] || [];
