@@ -21,6 +21,7 @@ import * as ingestHelpers from "@/lib/fathom-ingest-helpers";
 import * as analysisHelpers from "@/lib/fathom-ingest-analysis";
 import * as ingestDuplicates from "@/lib/fathom-ingest-duplicates";
 import { ensureMeetingRecordingHashIndex } from "@/lib/fathom-ingest/deduplication";
+import { parseFathomMeetingWebhookPayload } from "@/lib/fathom-ingest/webhook-parser";
 import { resolveSummaryText } from "@/lib/fathom-ingest-summary";
 import { runMeetingIngestionCommand } from "@/lib/services/meeting-ingestion-command";
 import { postMeetingAutomationToSlack } from "@/lib/slack-automation";
@@ -29,22 +30,6 @@ type FathomIngestResult =
   | { status: "created"; meetingId: string }
   | { status: "duplicate"; meetingId: string }
   | { status: "no_transcript" };
-
-const extractMeetingOrganizerEmail = (payload: any) => {
-  const candidate = ingestHelpers.pickFirst(
-    payload?.organizer_email,
-    payload?.organizer?.email,
-    payload?.host?.email,
-    payload?.owner?.email,
-    payload?.recording?.organizer_email,
-    payload?.recording?.organizer?.email,
-    payload?.recording?.host?.email,
-    payload?.recording?.owner?.email
-  );
-  if (typeof candidate !== "string") return null;
-  const email = candidate.trim().toLowerCase();
-  return email.includes("@") ? email : null;
-};
 
 const DUPLICATE_REANALYZE_MAX_AGE_MS = Math.max(
   0,
@@ -90,23 +75,17 @@ export const ingestFathomMeeting = async ({
     workspaceId: ingestWorkspaceId,
   });
   const payload = data || {};
-  const meetingTitleFromPayload = ingestHelpers.extractMeetingTitle(payload);
-  const recordingUrlFromPayload = ingestHelpers.extractMeetingRecordingUrl(payload);
-  const shareUrlFromPayload = ingestHelpers.extractMeetingShareUrl(payload);
-  const startTimeFromPayload = ingestHelpers.extractMeetingStartTime(payload);
-  const endTimeFromPayload = ingestHelpers.extractMeetingEndTime(payload);
-  const durationSecondsFromPayload = ingestHelpers.extractMeetingDurationSeconds(payload);
-  const organizerEmailFromPayload = extractMeetingOrganizerEmail(payload);
-  const payloadAttendees = ingestHelpers.extractMeetingAttendeesFromPayload(payload);
-  const incomingAttendeeKeys = ingestHelpers.extractMeetingAttendeeKeysFromPayload(payload);
-  const dedupeFingerprintsFromPayload = ingestHelpers.buildMeetingDedupeFingerprints({
-    title: meetingTitleFromPayload,
-    recordingUrl: recordingUrlFromPayload,
-    shareUrl: shareUrlFromPayload,
-    startTime: startTimeFromPayload,
-    endTime: endTimeFromPayload,
-    durationSeconds: durationSecondsFromPayload,
-  });
+  const parsedPayload = parseFathomMeetingWebhookPayload(payload);
+  const meetingTitleFromPayload = parsedPayload.title;
+  const recordingUrlFromPayload = parsedPayload.recordingUrl;
+  const shareUrlFromPayload = parsedPayload.shareUrl;
+  const startTimeFromPayload = parsedPayload.startTime;
+  const endTimeFromPayload = parsedPayload.endTime;
+  const durationSecondsFromPayload = parsedPayload.durationSeconds;
+  const organizerEmailFromPayload = parsedPayload.organizerEmail;
+  const payloadAttendees = parsedPayload.attendees;
+  const incomingAttendeeKeys = parsedPayload.attendeeKeys;
+  const dedupeFingerprintsFromPayload = parsedPayload.dedupeFingerprints;
   const recordingHashScope = getFathomRecordingHashScope({ userId, connectionId });
   const legacyRecordingHashScope = getFathomRecordingHashScope({ userId });
   const recordingIdHash = hashFathomRecordingId(recordingHashScope, recordingId);
