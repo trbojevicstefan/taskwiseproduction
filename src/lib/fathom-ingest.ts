@@ -28,6 +28,7 @@ import {
 import * as ingestHelpers from "@/lib/fathom-ingest-helpers";
 import * as analysisHelpers from "@/lib/fathom-ingest-analysis";
 import * as ingestDuplicates from "@/lib/fathom-ingest-duplicates";
+import { resolveSummaryText } from "@/lib/fathom-ingest-summary";
 import { runMeetingIngestionCommand } from "@/lib/services/meeting-ingestion-command";
 import { postMeetingAutomationToSlack } from "@/lib/slack-automation";
 
@@ -608,31 +609,6 @@ const ensureMeetingRecordingHashIndex = async (db: any) => {
   })();
 
   await meetingRecordingHashIndexPromise;
-};
-
-const resolveSummaryText = (payload: any, summaryPayload: any) => {
-  const payloadSummary =
-    payload?.default_summary?.markdown_formatted ||
-    payload?.default_summary?.markdownFormatted ||
-    payload?.summary ||
-    payload?.recording?.summary;
-  const payloadSummaryText =
-    typeof payloadSummary === "string"
-      ? payloadSummary
-      : payloadSummary?.markdown_formatted ||
-        payloadSummary?.markdownFormatted ||
-        payloadSummary?.text ||
-        payloadSummary?.summary ||
-        null;
-  const summaryText =
-    typeof summaryPayload === "string"
-      ? summaryPayload
-      : summaryPayload?.markdown_formatted ||
-        summaryPayload?.markdownFormatted ||
-        summaryPayload?.text ||
-        summaryPayload?.summary ||
-        null;
-  return pickFirst(payloadSummaryText, summaryText);
 };
 
 export const ingestFathomMeeting = async ({
