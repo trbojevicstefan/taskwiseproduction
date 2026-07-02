@@ -1,4 +1,4 @@
-import crypto from "crypto";
+import { randomBytes } from "crypto";
 import { getDb } from "@/lib/db";
 import {
   findFathomConnectionById,
@@ -169,7 +169,7 @@ const syncLegacyInstallationFromConnection = async (
 
 export const createFathomOAuthState = async (userId: string): Promise<string> => {
   const db = await getDb();
-  const state = crypto.randomBytes(24).toString("hex");
+  const state = randomBytes(24).toString("hex");
   await db.collection(OAUTH_STATE_COLLECTION).insertOne({
     _id: state,
     userId,

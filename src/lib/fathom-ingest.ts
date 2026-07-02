@@ -2,10 +2,10 @@ import { randomUUID } from "crypto";
 import { analyzeMeeting } from "@/ai/flows/analyze-meeting-flow";
 import { getDb } from "@/lib/db";
 import {
-  getFathomRecordingHashScope,
   fetchFathomSummary,
   fetchFathomTranscript,
   formatFathomTranscript,
+  getFathomRecordingHashScope,
   hashFathomRecordingId,
 } from "@/lib/fathom";
 import { normalizeTask } from "@/lib/data";
