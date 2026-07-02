@@ -27,6 +27,7 @@ import {
 } from "@/lib/fathom-ingest-helpers";
 import * as ingestHelpers from "@/lib/fathom-ingest-helpers";
 import * as analysisHelpers from "@/lib/fathom-ingest-analysis";
+import * as ingestDuplicates from "@/lib/fathom-ingest-duplicates";
 import { runMeetingIngestionCommand } from "@/lib/services/meeting-ingestion-command";
 import { postMeetingAutomationToSlack } from "@/lib/slack-automation";
 
@@ -792,7 +793,7 @@ export const ingestFathomMeeting = async ({
       ],
     });
   if (!existing) {
-    existing = await findCanonicalFathomDuplicate({
+    existing = await ingestDuplicates.findCanonicalFathomDuplicate({
       db,
       userId,
       workspaceId: ingestWorkspaceId,
