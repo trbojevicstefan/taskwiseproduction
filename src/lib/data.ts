@@ -256,5 +256,20 @@ export function normalizeTask(task: any): ExtractedTaskSchema {
       task.completionEvidence === undefined ? null : task.completionEvidence,
     completionTargets:
       task.completionTargets === undefined ? null : task.completionTargets,
+    cleanupStatus: task.cleanupStatus === undefined ? null : task.cleanupStatus,
+    cleanupCategory:
+      task.cleanupCategory === undefined ? null : task.cleanupCategory,
+    cleanupReason: task.cleanupReason === undefined ? null : task.cleanupReason,
+    cleanupConfidence:
+      task.cleanupConfidence === undefined ? null : task.cleanupConfidence,
+    cleanupEvidence:
+      task.cleanupEvidence === undefined ? null : task.cleanupEvidence,
+    expiresAt: task.expiresAt === undefined ? null : task.expiresAt,
+    duplicateOfTaskId:
+      task.duplicateOfTaskId === undefined ? null : task.duplicateOfTaskId,
+    cleanupReviewedAt:
+      task.cleanupReviewedAt === undefined ? null : task.cleanupReviewedAt,
+    cleanupReviewedBy:
+      task.cleanupReviewedBy === undefined ? null : task.cleanupReviewedBy,
   };
 }

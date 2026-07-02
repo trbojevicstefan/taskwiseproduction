@@ -259,6 +259,56 @@ function PriorityBadge({ priority }: { priority: TaskPriority }) {
   );
 }
 
+const getCleanupBadgeMeta = (
+  task: Pick<Task, "cleanupStatus" | "cleanupCategory">
+): { label: string; className: string } | null => {
+  switch (task.cleanupStatus) {
+    case "suggested_expire":
+      return task.cleanupCategory === "stale_follow_up" ||
+        task.cleanupCategory === "expired_event"
+        ? {
+            label: "Stale?",
+            className:
+              "bg-slate-500/15 text-slate-600 border-slate-500/30 dark:text-slate-400",
+          }
+        : {
+            label: "Vanity?",
+            className:
+              "bg-amber-500/15 text-amber-700 border-amber-500/30 dark:text-amber-400",
+          };
+    case "duplicate_suggested":
+      return {
+        label: "Duplicate?",
+        className:
+          "bg-violet-500/15 text-violet-600 border-violet-500/30 dark:text-violet-400",
+      };
+    case "completed_suggested":
+      return {
+        label: "Done?",
+        className:
+          "bg-emerald-500/15 text-emerald-600 border-emerald-500/30 dark:text-emerald-400",
+      };
+    default:
+      return null;
+  }
+};
+
+function CleanupBadge({ task }: { task: Task }) {
+  const meta = getCleanupBadgeMeta(task);
+  if (!meta) return null;
+  return (
+    <span
+      title={task.cleanupReason || undefined}
+      className={cn(
+        "text-xs font-medium px-2 py-0.5 rounded-full border",
+        meta.className
+      )}
+    >
+      {meta.label}
+    </span>
+  );
+}
+
 function AssigneeAvatar({
   label,
   person,
@@ -437,6 +487,7 @@ function AssigneeDropdown({
               className="h-4 w-4"
             />
             <PriorityBadge priority={priority} />
+            <CleanupBadge task={task} />
           </div>
           <TaskActionsMenu onEdit={onEdit} onDelete={onDelete} />
         </div>

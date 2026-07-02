@@ -22,6 +22,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { cn } from '@/lib/utils';
 import DashboardHeader from '../DashboardHeader';
+import TaskCleanupSettingsCard from '@/components/dashboard/settings/TaskCleanupSettingsCard';
 import { isAdvancedSettingsEnabled } from '@/lib/simplification-flags';
 
 const AVATAR_STYLES = [
@@ -3398,6 +3399,11 @@ export default function SettingsPageContent() {
                     </div>
                   </CardContent>
                 </Card>
+
+                {/* Task Cleanup Settings */}
+                <TaskCleanupSettingsCard
+                  className={cn("mt-8", activeSettingsSection !== "preferences" && "hidden")}
+                />
 
                  {/* Integrations Settings */}
                 <Card className={cn("shadow-lg rounded-xl mt-8", activeSettingsSection !== "integrations" && "hidden")}>

@@ -1,6 +1,13 @@
 // src/types/project.ts
 import type { AppUser } from '@/contexts/AuthContext';
-import type { CompletionTarget, TaskComment, TaskEvidence } from '@/types/chat';
+import type {
+  CompletionTarget,
+  TaskCleanupCategory,
+  TaskCleanupEvidence,
+  TaskCleanupStatus,
+  TaskComment,
+  TaskEvidence,
+} from '@/types/chat';
 
 export interface Project {
   id: string; // Document ID
@@ -41,4 +48,14 @@ export interface Task {
   taskState?: "active" | "suggested" | "archived" | null;
   researchBrief?: string | null;
   aiAssistanceText?: string | null;
+  // Task cleanup metadata (Phase 3). Absent cleanupStatus === 'active'.
+  cleanupStatus?: TaskCleanupStatus | null;
+  cleanupCategory?: TaskCleanupCategory | null;
+  cleanupReason?: string | null;
+  cleanupConfidence?: number | null;
+  cleanupEvidence?: TaskCleanupEvidence[] | null;
+  expiresAt?: string | null;
+  duplicateOfTaskId?: string | null;
+  cleanupReviewedAt?: string | null;
+  cleanupReviewedBy?: string | null;
 }

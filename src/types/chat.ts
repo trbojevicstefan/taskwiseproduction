@@ -12,6 +12,31 @@ export interface TaskEvidence {
   timestamp?: string | null;
 }
 
+// Phase 3 task cleanup (vanity filter) metadata. All fields are additive and
+// optional; a task without cleanupStatus is treated as 'active'.
+export type TaskCleanupStatus =
+  | 'active'
+  | 'suggested_expire'
+  | 'expired'
+  | 'duplicate_suggested'
+  | 'completed_suggested'
+  | 'dismissed';
+
+export type TaskCleanupCategory =
+  | 'scheduling_admin'
+  | 'meeting_logistics'
+  | 'already_completed'
+  | 'duplicate'
+  | 'low_specificity'
+  | 'stale_follow_up'
+  | 'expired_event';
+
+export interface TaskCleanupEvidence {
+  sourceType: 'task' | 'transcript' | 'meeting';
+  sourceId: string;
+  snippet: string;
+}
+
 export interface TaskReferenceSchema {
   taskId: string;
   sourceTaskId: string;
@@ -82,6 +107,17 @@ export interface ExtractedTaskSchema {
   completionConfidence?: number | null;
   completionEvidence?: TaskEvidence[] | null;
   completionTargets?: CompletionTarget[] | null;
+
+  // Task cleanup metadata (Phase 3). Absent cleanupStatus === 'active'.
+  cleanupStatus?: TaskCleanupStatus | null;
+  cleanupCategory?: TaskCleanupCategory | null;
+  cleanupReason?: string | null;
+  cleanupConfidence?: number | null;
+  cleanupEvidence?: TaskCleanupEvidence[] | null;
+  expiresAt?: string | null;
+  duplicateOfTaskId?: string | null;
+  cleanupReviewedAt?: string | null;
+  cleanupReviewedBy?: string | null;
 }
 
 

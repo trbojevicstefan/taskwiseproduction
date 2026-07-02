@@ -9,6 +9,7 @@ import {
   Clock,
   RefreshCw,
   Search,
+  Sparkles,
 } from "lucide-react";
 import EmptyState from "@/components/common/EmptyState";
 import DashboardHeader from "@/components/dashboard/DashboardHeader";
@@ -197,6 +198,10 @@ export default function ReviewTasksPageContent() {
         pageTitle={<h1 className="text-2xl font-bold font-headline">Review Tasks</h1>}
         description="Approve, fix, or discard AI-extracted tasks before they reach your board."
       >
+        <Button variant="ghost" size="sm" onClick={() => router.push("/review/cleanup")}>
+          <Sparkles className="mr-2 h-4 w-4" />
+          Cleanup suggestions
+        </Button>
         <Button variant="outline" size="sm" onClick={() => void refreshMeetings()}>
           <RefreshCw className="mr-2 h-4 w-4" />
           Refresh

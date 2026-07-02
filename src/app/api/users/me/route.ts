@@ -17,7 +17,9 @@ import {
 } from "@/lib/workspace-memberships";
 import { findWorkspaceById, listWorkspacesByIds, updateWorkspaceById } from "@/lib/workspaces";
 import {
+  resolveTaskCleanupSettings,
   resolveWorkspaceAdminAccess,
+  type TaskCleanupSettings,
   type WorkspaceAdminAccessSettings,
 } from "@/lib/workspace-settings";
 
@@ -42,6 +44,25 @@ const updateSchema = z.object({
               integrations: z.boolean().optional(),
             })
             .partial()
+            .optional(),
+          taskCleanup: z
+            .object({
+              enabled: z.boolean().optional(),
+              strictness: z.enum(["light", "balanced", "aggressive"]).optional(),
+              autoExpireDays: z.number().min(1).max(90).optional(),
+              categories: z
+                .object({
+                  scheduling_admin: z.boolean().optional(),
+                  meeting_logistics: z.boolean().optional(),
+                  already_completed: z.boolean().optional(),
+                  duplicate: z.boolean().optional(),
+                  low_specificity: z.boolean().optional(),
+                  stale_follow_up: z.boolean().optional(),
+                  expired_event: z.boolean().optional(),
+                })
+                .partial()
+                .optional(),
+            })
             .optional(),
         })
         .optional(),
@@ -103,6 +124,7 @@ const toAppUser = (
   options: {
     activeWorkspaceRole?: string | null;
     activeWorkspaceAdminAccess?: WorkspaceAdminAccessSettings | null;
+    activeWorkspaceTaskCleanup?: TaskCleanupSettings | null;
     workspaceIntegrations?: WorkspaceIntegrationSummary;
   } = {}
 ) => {
@@ -126,6 +148,7 @@ const toAppUser = (
     workspaceMemberships,
     activeWorkspaceRole: options.activeWorkspaceRole || null,
     activeWorkspaceAdminAccess: options.activeWorkspaceAdminAccess || null,
+    activeWorkspaceTaskCleanup: options.activeWorkspaceTaskCleanup || null,
     workspaceIntegrations: options.workspaceIntegrations || emptyWorkspaceIntegrationSummary(),
     firefliesWebhookToken: user.firefliesWebhookToken,
     slackTeamId: user.slackTeamId || null,
@@ -182,6 +205,7 @@ const buildWorkspaceContext = async (
     memberships: summaries,
     activeMembershipRole: activeMembership?.role || null,
     activeWorkspaceAdminAccess: resolveWorkspaceAdminAccess(activeWorkspace?.settings),
+    activeWorkspaceTaskCleanup: resolveTaskCleanupSettings(activeWorkspace),
   };
 };
 
@@ -338,6 +362,7 @@ export async function GET() {
     const appUser = toAppUser(user, workspaceContext.memberships, {
       activeWorkspaceRole: workspaceContext.activeMembershipRole,
       activeWorkspaceAdminAccess: workspaceContext.activeWorkspaceAdminAccess,
+      activeWorkspaceTaskCleanup: workspaceContext.activeWorkspaceTaskCleanup,
       workspaceIntegrations,
     });
     if (!appUser) {
@@ -395,9 +420,23 @@ export async function PATCH(request: Request) {
             ...update.workspace.settings.adminAccess,
           }
         : resolveWorkspaceAdminAccess(existingWorkspace.settings);
+      const taskCleanupUpdate = update.workspace.settings?.taskCleanup;
+      const resolvedTaskCleanup = resolveTaskCleanupSettings(existingWorkspace);
+      const nextTaskCleanup = taskCleanupUpdate
+        ? {
+            ...resolvedTaskCleanup,
+            ...taskCleanupUpdate,
+            categories: {
+              ...resolvedTaskCleanup.categories,
+              ...(taskCleanupUpdate.categories || {}),
+            },
+          }
+        : (existingWorkspace.settings as { taskCleanup?: TaskCleanupSettings } | undefined)
+            ?.taskCleanup;
       const nextSettings = {
         ...(existingWorkspace.settings || {}),
         adminAccess: nextAdminAccess,
+        ...(nextTaskCleanup !== undefined ? { taskCleanup: nextTaskCleanup } : {}),
       };
       await updateWorkspaceById(db as any, targetWorkspaceId, {
         name: update.workspace.name,
@@ -457,6 +496,7 @@ export async function PATCH(request: Request) {
     const appUser = toAppUser(user, workspaceContext.memberships, {
       activeWorkspaceRole: workspaceContext.activeMembershipRole,
       activeWorkspaceAdminAccess: workspaceContext.activeWorkspaceAdminAccess,
+      activeWorkspaceTaskCleanup: workspaceContext.activeWorkspaceTaskCleanup,
       workspaceIntegrations,
     });
     if (!appUser) {

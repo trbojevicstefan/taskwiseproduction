@@ -434,6 +434,40 @@ const getStatusVariant = (status?: ExtractedTaskSchema["status"] | null) => {
   return "secondary";
 };
 
+const getCleanupBadgeMeta = (
+  task: ExtractedTaskSchema
+): { label: string; className: string } | null => {
+  switch (task.cleanupStatus) {
+    case "suggested_expire":
+      return task.cleanupCategory === "stale_follow_up" ||
+        task.cleanupCategory === "expired_event"
+        ? {
+            label: "Stale?",
+            className:
+              "border-slate-500/40 bg-slate-500/10 text-slate-700 dark:text-slate-300",
+          }
+        : {
+            label: "Vanity?",
+            className:
+              "border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-300",
+          };
+    case "duplicate_suggested":
+      return {
+        label: "Duplicate?",
+        className:
+          "border-violet-500/40 bg-violet-500/10 text-violet-700 dark:text-violet-300",
+      };
+    case "completed_suggested":
+      return {
+        label: "Done?",
+        className:
+          "border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300",
+      };
+    default:
+      return null;
+  }
+};
+
 const isTaskReviewConfirmed = (task: ExtractedTaskSchema) =>
   task.reviewStatus === "confirmed" ||
   task.taskState === "active" ||
@@ -463,6 +497,7 @@ const TaskRow: React.FC<{
   const isCompletionSuggested = Boolean(task.completionSuggested);
   const completionEvidence = task.completionEvidence?.[0]?.snippet;
   const isPendingReview = !isCompletionSuggested && isTaskReviewPending(task);
+  const cleanupBadge = getCleanupBadgeMeta(task);
 
   return (
     <div className={cn("flex flex-col", level > 0 && "pl-5 mt-2 border-l-2 border-border/30")}>
@@ -501,6 +536,15 @@ const TaskRow: React.FC<{
           {task.status && task.status !== "todo" && (
             <Badge variant={getStatusVariant(task.status)} className="rounded-full text-[11px] capitalize">
               {getStatusLabel(task.status)}
+            </Badge>
+          )}
+          {cleanupBadge && (
+            <Badge
+              variant="outline"
+              title={task.cleanupReason || undefined}
+              className={cn("rounded-full text-[11px]", cleanupBadge.className)}
+            >
+              {cleanupBadge.label}
             </Badge>
           )}
           {isCompletionSuggested && (
