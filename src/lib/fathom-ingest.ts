@@ -1,4 +1,3 @@
-import { randomUUID } from "crypto";
 import { analyzeMeeting } from "@/ai/flows/analyze-meeting-flow";
 import { getDb } from "@/lib/db";
 import {
@@ -21,6 +20,7 @@ import * as ingestHelpers from "@/lib/fathom-ingest-helpers";
 import * as analysisHelpers from "@/lib/fathom-ingest-analysis";
 import * as ingestDuplicates from "@/lib/fathom-ingest-duplicates";
 import { ensureMeetingRecordingHashIndex } from "@/lib/fathom-ingest/deduplication";
+import { finalizeExistingFathomMeetingReanalysis } from "@/lib/fathom-ingest/existing-meeting-reanalysis";
 import { buildCreatedFathomMeetingRecords } from "@/lib/fathom-ingest/meeting-builder";
 import { parseFathomMeetingWebhookPayload } from "@/lib/fathom-ingest/webhook-parser";
 import { resolveSummaryText } from "@/lib/fathom-ingest-summary";
@@ -264,7 +264,6 @@ export const ingestFathomMeeting = async ({
       if (!transcriptText) {
         return { status: "no_transcript" };
       }
-
       const summaryPayload =
         payload.summary ||
         payload?.recording?.summary ||
@@ -283,7 +282,7 @@ export const ingestFathomMeeting = async ({
       const sanitizedTasks = selectedTasks.map((task: any) =>
         normalizeTask(task as ExtractedTaskSchema)
       );
-      let sanitizedTaskLevels = analysisHelpers.sanitizeLevels(allTaskLevels);
+      const sanitizedTaskLevels = analysisHelpers.sanitizeLevels(allTaskLevels);
 
       const uniquePeople = ingestHelpers.buildUniqueMeetingPeople(analysisResult, payload);
 
@@ -302,47 +301,6 @@ export const ingestFathomMeeting = async ({
         }
       }
 
-      const mergedTasks = mergeCompletionSuggestions(
-        sanitizedTasks,
-        completionSuggestions
-      );
-      const finalizedTasks = shouldAutoApprove
-        ? analysisHelpers.applyAutoApprovalFlags(mergedTasks, completionMatchThreshold)
-        : mergedTasks;
-
-      if (sanitizedTaskLevels) {
-        sanitizedTaskLevels = {
-          light: mergeCompletionSuggestions(
-            sanitizedTaskLevels.light || [],
-            completionSuggestions
-          ),
-          medium: mergeCompletionSuggestions(
-            sanitizedTaskLevels.medium || [],
-            completionSuggestions
-          ),
-          detailed: mergeCompletionSuggestions(
-            sanitizedTaskLevels.detailed || [],
-            completionSuggestions
-          ),
-        };
-        if (shouldAutoApprove) {
-          sanitizedTaskLevels = {
-            light: analysisHelpers.applyAutoApprovalFlags(
-              sanitizedTaskLevels.light || [],
-              completionMatchThreshold
-            ),
-            medium: analysisHelpers.applyAutoApprovalFlags(
-              sanitizedTaskLevels.medium || [],
-              completionMatchThreshold
-            ),
-            detailed: analysisHelpers.applyAutoApprovalFlags(
-              sanitizedTaskLevels.detailed || [],
-              completionMatchThreshold
-            ),
-          };
-        }
-      }
-
       const meetingTitle = ingestHelpers.pickFirst(
         existing.title,
         meetingTitleFromPayload,
@@ -358,161 +316,36 @@ export const ingestFathomMeeting = async ({
           summaryText
         ) || "";
 
-      const now = new Date();
-      const meetingUpdate: Record<string, any> = {
-        lastActivityAt: now,
-        title: meetingTitle,
-        summary: meetingSummary,
-        analysisAttemptedAt: now,
-        organizerEmail: existing.organizerEmail || organizerEmailFromPayload || null,
-        attendees: uniquePeople,
-        extractedTasks: finalizedTasks,
-        allTaskLevels: sanitizedTaskLevels,
-        originalAiTasks: sanitizedTasks,
-        originalAllTaskLevels: sanitizedTaskLevels,
-        keyMoments: analysisResult.keyMoments || [],
-        overallSentiment: analysisResult.overallSentiment ?? null,
-        speakerActivity: analysisResult.speakerActivity || [],
-        meetingMetadata: analysisResult.meetingMetadata || undefined,
-        state: "tasks_ready",
-      };
-      const refreshedDedupeFingerprints = ingestHelpers.buildMeetingDedupeFingerprints({
-        title: meetingTitle,
-        recordingUrl: recordingUrl || existing.recordingUrl || null,
-        shareUrl: shareUrl || existing.shareUrl || null,
-        startTime: startTime || existing.startTime || null,
-        endTime: endTime || existing.endTime || null,
-        durationSeconds:
-          (typeof duration === "number" ? duration : null) ??
-          ingestHelpers.toNumberOrNull(existing.duration) ??
-          null,
-      });
-      if (refreshedDedupeFingerprints.length) {
-        meetingUpdate.dedupeFingerprints = Array.from(
-          new Set([...mergedDedupeFingerprints, ...refreshedDedupeFingerprints])
-        );
-      }
-
-      // Defer updating chat sessions until after tasks are synced and board items ensured
-      const chatSessionId = existing.chatSessionId
-        ? String(existing.chatSessionId)
-        : null;
-
-      let planningSessionId = existing.planningSessionId
-        ? String(existing.planningSessionId)
-        : null;
-      if (!planningSessionId) {
-        planningSessionId = randomUUID();
-        meetingUpdate.planningSessionId = planningSessionId;
-        await db.collection("planningSessions").insertOne({
-          _id: planningSessionId,
-          userId,
-          workspaceId,
-          connectionId: connectionId || existing.connectionId || null,
-          providerSourceId: providerSourceId || existing.providerSourceId || null,
-          title: `Plan from "${meetingTitle}"`,
-          inputText: meetingSummary,
-          extractedTasks: finalizedTasks,
-          originalAiTasks: sanitizedTasks,
-          originalAllTaskLevels: sanitizedTaskLevels,
-          taskRevisions: [],
-          folderId: null,
-          sourceMeetingId: existing._id.toString(),
-          allTaskLevels: sanitizedTaskLevels,
-          meetingMetadata: analysisResult.meetingMetadata || undefined,
-          createdAt: now,
-          lastActivityAt: now,
-        });
-      } else {
-        await db.collection("planningSessions").updateMany(
-          {
-            userId,
-            $or: [
-              { _id: planningSessionId },
-              { id: planningSessionId },
-            ],
-          },
-          {
-            $set: {
-              connectionId: connectionId || existing.connectionId || null,
-              providerSourceId: providerSourceId || existing.providerSourceId || null,
-              title: `Plan from "${meetingTitle}"`,
-              inputText: meetingSummary,
-              extractedTasks: finalizedTasks,
-              originalAiTasks: sanitizedTasks,
-              originalAllTaskLevels: sanitizedTaskLevels,
-              allTaskLevels: sanitizedTaskLevels,
-              meetingMetadata: analysisResult.meetingMetadata || undefined,
-              lastActivityAt: now,
-            },
-          }
-        );
-      }
-
-      await db.collection("meetings").updateOne(
-        { _id: existing._id },
-        { $set: meetingUpdate }
-      );
-
-      await runMeetingIngestionCommand(db, {
-        mode: "flagged-event",
-        eventType: "meeting.updated",
-        userId,
-        payload: {
-          meetingId: String(existing._id),
-          workspaceId,
-          title: meetingTitle,
-          attendees: uniquePeople,
-          extractedTasks: finalizedTasks,
-        },
-      });
-
-      // Now that tasks are synced and board items exist, attach canonical ids to chat session suggested tasks
-      if (chatSessionId) {
-        try {
-          const sourceIds = finalizedTasks
-            .map((t: any) => t.id)
-            .filter(Boolean);
-          if (sourceIds.length) {
-            const tasks = await db
-              .collection("tasks")
-              .find({ userId, sourceTaskId: { $in: sourceIds } })
-              .project({ _id: 1, sourceTaskId: 1 })
-              .toArray();
-            const map = new Map(tasks.map((r: any) => [String(r.sourceTaskId), String(r._id)]));
-            const augmented = finalizedTasks.map((t: any) => ({
-              ...t,
-              taskCanonicalId: map.get(t.id) || undefined,
-            }));
-            await db.collection("chatSessions").updateMany(
-              {
-                userId,
-                $or: [{ _id: chatSessionId }, { id: chatSessionId }],
-              },
-              {
-                $set: {
-                  title: `Chat about "${meetingTitle}"`,
-                  suggestedTasks: augmented,
-                  originalAiTasks: sanitizedTasks,
-                  originalAllTaskLevels: sanitizedTaskLevels,
-                  people: uniquePeople,
-                  allTaskLevels: sanitizedTaskLevels,
-                  meetingMetadata: analysisResult.meetingMetadata || undefined,
-                  lastActivityAt: now,
-                },
-              }
-            );
-          }
-        } catch (error) {
-          console.error("Failed to attach canonical ids to chat sessions:", error);
-        }
-      }
-
-      await postMeetingAutomationToSlack({
+      await finalizeExistingFathomMeetingReanalysis({
+        db,
         user,
-        meetingTitle: meetingTitle || "Meeting",
+        userId,
+        existing,
+        connectionId: connectionId || existing.connectionId || null,
+        providerSourceId: providerSourceId || existing.providerSourceId || null,
+        workspaceId: existing.workspaceId || ingestWorkspaceId || null,
+        organizerEmailFromPayload,
+        meetingTitle,
         meetingSummary,
-        tasks: finalizedTasks,
+        uniquePeople,
+        finalizedTasks: analysisHelpers.applyAutoApprovalFlags(
+          mergeCompletionSuggestions(sanitizedTasks, completionSuggestions),
+          completionMatchThreshold
+        ),
+        sanitizedTasks,
+        sanitizedTaskLevels,
+        analysisResult,
+        completionSuggestions,
+        completionMatchThreshold,
+        shouldAutoApprove,
+        recordingUrl: recordingUrlFromPayload || existing.recordingUrl || null,
+        shareUrl: shareUrlFromPayload || existing.shareUrl || null,
+        startTime: startTimeFromPayload || existing.startTime || null,
+        endTime: endTimeFromPayload || existing.endTime || null,
+        duration:
+          (typeof durationSecondsFromPayload === "number"
+            ? durationSecondsFromPayload
+            : null) ?? ingestHelpers.toNumberOrNull(existing.duration) ?? null,
       });
     } else if (Array.isArray(existing.extractedTasks) && existing.extractedTasks.length) {
       const attendeesForUpdate = ingestHelpers.mergeMeetingPeopleLists(
