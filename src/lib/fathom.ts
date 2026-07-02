@@ -5,6 +5,7 @@ import {
   type FathomConnectionDoc,
   updateFathomConnectionById,
 } from "@/lib/fathom-connections";
+import type { FathomInstallationDoc } from "@/lib/fathom/types";
 import { logFathomIntegration } from "@/lib/fathom-logs";
 import { recordExternalApiFailure } from "@/lib/observability-metrics";
 import {
@@ -44,32 +45,7 @@ export {
   hashFathomRecordingId,
 } from "@/lib/fathom-utils";
 export { deleteFathomWebhook, pruneFathomManagedWebhooks } from "@/lib/fathom-webhooks";
-
-export interface FathomInstallationDoc {
-  _id: string;
-  userId: string;
-  accessToken: string;
-  refreshToken?: string | null;
-  expiresAt?: number | null;
-  scope?: string | null;
-  fathomUserId?: string | null;
-  webhookId?: string | null;
-  webhookUrl?: string | null;
-  webhookEvent?: string | null;
-  webhookSecret?: string | null;
-  webhooks?: Array<{
-    id?: string | null;
-    url?: string | null;
-    createdAt?: string | Date | null;
-    include_transcript?: boolean | null;
-    include_summary?: boolean | null;
-    include_action_items?: boolean | null;
-    include_crm_matches?: boolean | null;
-    triggered_for?: string[] | null;
-  }>;
-  createdAt?: Date;
-  updatedAt?: Date;
-}
+export type { FathomInstallationDoc } from "@/lib/fathom/types";
 
 const INSTALLATIONS_COLLECTION = "fathomInstallations";
 const OAUTH_STATE_COLLECTION = "fathomOauthStates";
