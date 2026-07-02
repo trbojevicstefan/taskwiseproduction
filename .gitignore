@@ -15,6 +15,10 @@
 tsconfig.tsbuildinfo
 *.tsbuildinfo
 
+# Git worktrees
+.worktrees/
+worktrees/
+
 # Production
 /build
 
