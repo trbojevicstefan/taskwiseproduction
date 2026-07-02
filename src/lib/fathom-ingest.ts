@@ -10,11 +10,6 @@ import {
 import { normalizeTask } from "@/lib/data";
 import type { ExtractedTaskSchema } from "@/types/chat";
 import type { DbUser } from "@/lib/db/users";
-import {
-  applyCompletionTargets,
-  buildCompletionSuggestions,
-  mergeCompletionSuggestions,
-} from "@/lib/task-completion";
 import { findFathomConnectionById } from "@/lib/fathom-connections";
 import * as ingestHelpers from "@/lib/fathom-ingest-helpers";
 import * as analysisHelpers from "@/lib/fathom-ingest-analysis";
@@ -22,10 +17,15 @@ import * as ingestDuplicates from "@/lib/fathom-ingest-duplicates";
 import { ensureMeetingRecordingHashIndex } from "@/lib/fathom-ingest/deduplication";
 import { finalizeExistingFathomMeetingReanalysis } from "@/lib/fathom-ingest/existing-meeting-reanalysis";
 import { buildCreatedFathomMeetingRecords } from "@/lib/fathom-ingest/meeting-builder";
+import { extractFathomMeetingTasks } from "@/lib/fathom-ingest/task-extraction";
 import { parseFathomMeetingWebhookPayload } from "@/lib/fathom-ingest/webhook-parser";
 import { resolveSummaryText } from "@/lib/fathom-ingest-summary";
 import { runMeetingIngestionCommand } from "@/lib/services/meeting-ingestion-command";
 import { postMeetingAutomationToSlack } from "@/lib/slack-automation";
+import {
+  applyCompletionTargets,
+  mergeCompletionSuggestions,
+} from "@/lib/task-completion";
 
 type FathomIngestResult =
   | { status: "created"; meetingId: string }
@@ -388,103 +388,26 @@ export const ingestFathomMeeting = async ({
     (await fetchFathomSummary(recordingId, accessToken).catch(() => null));
   const summaryText = resolveSummaryText(payload, summaryPayload);
 
-  const detailLevel = analysisHelpers.resolveDetailLevel(user);
   const workspaceId = ingestWorkspaceId;
-  const analysisResult = await analyzeMeeting({
-    transcript: transcriptText,
-    requestedDetailLevel: detailLevel,
-  });
-
-  const allTaskLevels = analysisResult.allTaskLevels || null;
-  const selectedTasks = analysisHelpers.selectTasksForLevel(allTaskLevels, detailLevel);
-
-  const sanitizedTasks = selectedTasks.map((task: any) =>
-    normalizeTask(task as ExtractedTaskSchema)
-  );
-  let sanitizedTaskLevels = analysisHelpers.sanitizeLevels(allTaskLevels);
-
-  const uniquePeople = ingestHelpers.buildUniqueMeetingPeople(analysisResult, payload);
-
-  const completionMatchThreshold = analysisHelpers.resolveCompletionMatchThreshold(user);
-  const completionSummary =
-    ingestHelpers.pickFirst(
-      analysisResult.meetingSummary,
-      analysisResult.chatResponseText,
-      summaryText
-    ) || "";
-  const completionSuggestions = await buildCompletionSuggestions({
+  const taskExtraction = await extractFathomMeetingTasks({
+    db,
+    user,
     userId,
-    transcript: transcriptText,
-    summary: completionSummary,
-    attendees: uniquePeople,
     workspaceId,
-    requireAttendeeMatch: false,
-    minMatchRatio: completionMatchThreshold,
-  });
-
-  const shouldAutoApprove = Boolean(user.autoApproveCompletedTasks);
-  if (shouldAutoApprove && completionSuggestions.length) {
-    const autoApproveSuggestions = completionSuggestions.filter((task: any) =>
-      analysisHelpers.shouldAutoApproveSuggestion(task, completionMatchThreshold)
-    );
-    if (autoApproveSuggestions.length) {
-      await applyCompletionTargets(db, userId, autoApproveSuggestions);
-    }
-  }
-
-  const mergedTasks = mergeCompletionSuggestions(
-    sanitizedTasks,
-    completionSuggestions
-  );
-  const finalizedTasks = shouldAutoApprove
-    ? analysisHelpers.applyAutoApprovalFlags(mergedTasks, completionMatchThreshold)
-    : mergedTasks;
-
-  if (sanitizedTaskLevels) {
-    sanitizedTaskLevels = {
-      light: mergeCompletionSuggestions(
-        sanitizedTaskLevels.light || [],
-        completionSuggestions
-      ),
-      medium: mergeCompletionSuggestions(
-        sanitizedTaskLevels.medium || [],
-        completionSuggestions
-      ),
-      detailed: mergeCompletionSuggestions(
-        sanitizedTaskLevels.detailed || [],
-        completionSuggestions
-      ),
-    };
-    if (shouldAutoApprove) {
-      sanitizedTaskLevels = {
-        light: analysisHelpers.applyAutoApprovalFlags(
-          sanitizedTaskLevels.light || [],
-          completionMatchThreshold
-        ),
-        medium: analysisHelpers.applyAutoApprovalFlags(
-          sanitizedTaskLevels.medium || [],
-          completionMatchThreshold
-        ),
-        detailed: analysisHelpers.applyAutoApprovalFlags(
-          sanitizedTaskLevels.detailed || [],
-          completionMatchThreshold
-        ),
-      };
-    }
-  }
-
-  const meetingTitle = ingestHelpers.pickFirst(
+    payload,
+    transcriptText,
+    summaryText,
     meetingTitleFromPayload,
-    analysisResult.sessionTitle,
-    "Fathom Meeting"
-  );
-
-  const meetingSummary =
-    ingestHelpers.pickFirst(
-      analysisResult.meetingSummary,
-      analysisResult.chatResponseText,
-      summaryText
-    ) || "";
+  });
+  const {
+    analysisResult,
+    sanitizedTasks,
+    sanitizedTaskLevels,
+    uniquePeople,
+    finalizedTasks,
+    meetingTitle,
+    meetingSummary,
+  } = taskExtraction;
 
   const now = new Date();
   const { meeting, planningSession, meetingId } = buildCreatedFathomMeetingRecords({
