@@ -1,0 +1,444 @@
+﻿// src/contexts/IntegrationsContext.tsx
+"use client";
+
+import React, { createContext, useContext, useState, ReactNode, useCallback, useEffect } from 'react';
+import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/contexts/AuthContext";
+import { signIn } from "next-auth/react";
+import { GOOGLE_INTEGRATION_USER_COOKIE } from "@/lib/integration-cookies";
+
+export interface ClientSideGoogleTokenInfo {
+  accessToken: string;
+  expiryDate: string;
+  scope?: string;
+  tokenType?: string;
+  lastUpdated?: string;
+  userId: string;
+}
+
+export interface TrelloTokenInfo {
+  accessToken: string;
+  tokenSecret: string;
+  lastUpdated: string;
+}
+
+export interface SlackInstallation {
+  teamId: string;
+  teamName: string;
+  botUserId: string;
+  accessToken: string;
+  refreshToken: string;
+  expiresAt: number;
+  scope: string;
+}
+
+interface IntegrationsContextType {
+  googleTokenInfo: ClientSideGoogleTokenInfo | null;
+  isGoogleTasksConnected: boolean;
+  isLoadingGoogleConnection: boolean;
+  connectGoogleTasks: () => Promise<void>;
+  disconnectGoogleTasks: () => Promise<void>;
+  getValidGoogleAccessToken: () => Promise<string | null>;
+  triggerTokenFetch: () => Promise<void>;
+  isTrelloConnected: boolean;
+  isLoadingTrelloConnection: boolean;
+  trelloToken: TrelloTokenInfo | null;
+  connectTrello: () => void;
+  disconnectTrello: () => Promise<void>;
+  isSlackConnected: boolean;
+  isLoadingSlackConnection: boolean;
+  slackInstallation: SlackInstallation | null;
+  connectSlack: () => void;
+  disconnectSlack: () => Promise<void>;
+  isFathomConnected: boolean;
+  isLoadingFathomConnection: boolean;
+  connectFathom: (options?: { connectionId?: string | null; label?: string | null }) => void;
+  disconnectFathom: () => Promise<void>;
+}
+
+const IntegrationsContext = createContext<IntegrationsContextType | undefined>(undefined);
+
+const GOOGLE_INTEGRATION_LOCAL_CALLBACK_URL =
+  "http://localhost:9002/api/auth/callback/google-integration";
+const GOOGLE_INTEGRATION_PRODUCTION_CALLBACK_URL = "${NEXTAUTH_URL}/api/auth/callback/google-integration";
+
+const resolveGoogleIntegrationConnectErrorMessage = (code: string) => {
+  if (code === "OAuthSignin") {
+    return "Google OAuth could not start. Verify Google OAuth client settings.";
+  }
+  if (code === "OAuthCallback") {
+    return `Google OAuth callback failed. Ensure Google Cloud allows ${GOOGLE_INTEGRATION_LOCAL_CALLBACK_URL} locally and ${GOOGLE_INTEGRATION_PRODUCTION_CALLBACK_URL} in production.`;
+  }
+  if (code === "Configuration") {
+    return "Google integration is not configured. Set GOOGLE_INTEGRATION_CLIENT_ID and GOOGLE_INTEGRATION_CLIENT_SECRET.";
+  }
+  if (code === "AccessDenied") {
+    return "Google Workspace authorization was canceled or denied.";
+  }
+  if (code === "google-integration") {
+    return "Google Workspace provider is unavailable. Verify integration OAuth env vars and callback URL.";
+  }
+  return `Google Workspace connect failed (${code}).`;
+};
+
+export const IntegrationsProvider = ({ children }: { children: ReactNode }) => {
+  const { toast } = useToast();
+  const { user, loading, refreshUserProfile } = useAuth();
+  const [googleTokenInfo, setGoogleTokenInfo] = useState<ClientSideGoogleTokenInfo | null>(null);
+  const [trelloToken] = useState<TrelloTokenInfo | null>(null);
+  const [slackInstallation, setSlackInstallation] = useState<SlackInstallation | null>(null);
+  const [isLoadingSlackConnection, setIsLoadingSlackConnection] = useState(true);
+  const [isLoadingFathomConnection, setIsLoadingFathomConnection] = useState(true);
+  const [isLoadingGoogleConnection, setIsLoadingGoogleConnection] = useState(true);
+  const workspaceSlack = user?.workspaceIntegrations?.slack;
+  const workspaceGoogle = user?.workspaceIntegrations?.google;
+  const workspaceFathom = user?.workspaceIntegrations?.fathom;
+  const activeWorkspaceId = user?.activeWorkspaceId || user?.workspace?.id || null;
+  const activeFathomConnectionId = workspaceFathom?.activeConnectionId || null;
+  const slackManagedByWorkspace =
+    Boolean(workspaceSlack?.connected) && !workspaceSlack?.connectedByCurrentUser;
+  const googleManagedByWorkspace =
+    Boolean(workspaceGoogle?.connected) && !workspaceGoogle?.connectedByCurrentUser;
+  const fathomManagedByWorkspace =
+    Boolean(workspaceFathom?.connected) && !workspaceFathom?.connectedByCurrentUser;
+  const canManageWorkspaceIntegrations =
+    user?.activeWorkspaceRole === "owner" ||
+    (user?.activeWorkspaceRole === "admin" &&
+      Boolean(user?.activeWorkspaceAdminAccess?.integrations));
+
+  const warnDisabled = useCallback(() => {
+    toast({
+      title: "Integrations Disabled",
+      description: "Integrations are paused during the Mongo migration.",
+      variant: "destructive",
+    });
+  }, [toast]);
+
+  const connectGoogleTasks = async () => {
+    if (!user?.uid) {
+      toast({
+        title: "Sign-in Required",
+        description: "Please sign in before connecting Google.",
+        variant: "destructive",
+      });
+      return;
+    }
+    const cookieParts = [
+      `${GOOGLE_INTEGRATION_USER_COOKIE}=${encodeURIComponent(user.uid)}`,
+      "Path=/",
+      "Max-Age=600",
+      "SameSite=Lax",
+    ];
+    if (typeof window !== "undefined" && window.location.protocol === "https:") {
+      cookieParts.push("Secure");
+    }
+    document.cookie = cookieParts.join("; ");
+    try {
+      const result = await signIn("google-integration", {
+        redirect: false,
+        callbackUrl: "/settings?google_success=true",
+      });
+      if (!result) {
+        throw new Error("No response from Google sign-in.");
+      }
+      if (result.error) {
+        throw new Error(resolveGoogleIntegrationConnectErrorMessage(result.error));
+      }
+      if (result.url && typeof window !== "undefined") {
+        window.location.assign(result.url);
+        return;
+      }
+      throw new Error("Google sign-in redirect URL is missing.");
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Could not start Google OAuth.";
+      console.error("Failed to connect Google:", error);
+      if (activeWorkspaceId) {
+        void fetch(`/api/workspaces/${encodeURIComponent(activeWorkspaceId)}/google/logs`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            level: "error",
+            event: "oauth.connect.failed",
+            message,
+            metadata: {
+              source: "integrations.context",
+            },
+          }),
+        });
+      }
+      toast({
+        title: "Google Connect Failed",
+        description: message,
+        variant: "destructive",
+      });
+    }
+  };
+
+  const disconnectGoogleTasks = async () => {
+    if (googleManagedByWorkspace && !user?.googleConnected && !canManageWorkspaceIntegrations) {
+      toast({
+        title: "Managed by Workspace",
+        description: "Google integration is connected by another workspace admin.",
+      });
+      return;
+    }
+    try {
+      let endpoint = "/api/google/revoke";
+      const payload: Record<string, unknown> = {};
+      if (activeWorkspaceId) {
+        endpoint = `/api/workspaces/${encodeURIComponent(activeWorkspaceId)}/google/revoke`;
+        if (
+          canManageWorkspaceIntegrations &&
+          workspaceGoogle?.connectedByUserId &&
+          workspaceGoogle.connectedByUserId !== user?.uid
+        ) {
+          payload.targetUserId = workspaceGoogle.connectedByUserId;
+        }
+      }
+
+      const response = await fetch(endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const responsePayload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(responsePayload?.error || "Could not disconnect Google.");
+      }
+      if (responsePayload?.warning) {
+        toast({
+          title: "Google Disconnect Warning",
+          description: String(responsePayload.warning),
+          variant: "destructive",
+        });
+      }
+      await refreshUserProfile();
+      setGoogleTokenInfo(null);
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Could not disconnect Google. Please try again.";
+      console.error("Failed to disconnect Google:", error);
+      toast({
+        title: "Google Disconnect Failed",
+        description: message,
+        variant: "destructive",
+      });
+    }
+  };
+
+  const getValidGoogleAccessToken = useCallback(async () => {
+    try {
+      const response = await fetch("/api/google/token");
+      if (!response.ok) {
+        return null;
+      }
+      const data = await response.json();
+      if (!data?.accessToken) {
+        return null;
+      }
+      setGoogleTokenInfo((prev) => ({
+        accessToken: data.accessToken,
+        expiryDate: prev?.expiryDate || new Date().toISOString(),
+        scope: prev?.scope,
+        tokenType: prev?.tokenType,
+        lastUpdated: new Date().toISOString(),
+        userId: user?.uid || "",
+      }));
+      return data.accessToken as string;
+    } catch (error) {
+      console.error("Failed to fetch Google access token:", error);
+      return null;
+    }
+  }, [user?.uid]);
+  const connectTrello = () => warnDisabled();
+  const disconnectTrello = async () => warnDisabled();
+  const connectSlack = () => {
+    window.location.href = "/api/slack/oauth/start";
+  };
+  const disconnectSlack = async () => {
+    if (slackManagedByWorkspace && !user?.slackTeamId && !canManageWorkspaceIntegrations) {
+      toast({
+        title: "Managed by Workspace",
+        description: "Slack integration is connected by another workspace admin.",
+      });
+      return;
+    }
+    try {
+      await fetch("/api/slack/revoke", { method: "POST" });
+      await refreshUserProfile();
+      setSlackInstallation(null);
+    } catch (error) {
+      console.error("Failed to disconnect Slack:", error);
+      toast({
+        title: "Slack Disconnect Failed",
+        description: "Could not disconnect Slack. Please try again.",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const connectFathom = (options?: { connectionId?: string | null; label?: string | null }) => {
+    const query = new URLSearchParams();
+    if (activeWorkspaceId) {
+      query.set("workspaceId", activeWorkspaceId);
+    }
+    if (options?.connectionId) {
+      query.set("connectionId", options.connectionId);
+    }
+    if (options?.label) {
+      query.set("label", options.label);
+    }
+    const suffix = query.toString();
+    window.location.href = suffix
+      ? `/api/fathom/oauth/start?${suffix}`
+      : "/api/fathom/oauth/start";
+  };
+
+  const resolveWorkspaceFathomConnectionId = useCallback(async () => {
+    if (!activeWorkspaceId) {
+      return null;
+    }
+    if (activeFathomConnectionId) {
+      return activeFathomConnectionId;
+    }
+
+    const response = await fetch(
+      `/api/workspaces/${encodeURIComponent(activeWorkspaceId)}/fathom/connections`
+    );
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(payload?.error || "Could not load Fathom connections.");
+    }
+
+    const connections = Array.isArray(payload?.connections) ? payload.connections : [];
+    const preferredConnectionId =
+      typeof payload?.preferredConnectionId === "string" ? payload.preferredConnectionId : null;
+    const selectedConnection =
+      (preferredConnectionId
+        ? connections.find((connection: any) => connection?.id === preferredConnectionId)
+        : null) ||
+      connections.find((connection: any) => connection?.isPreferred) ||
+      connections.find((connection: any) => connection?.status === "active") ||
+      connections[0] ||
+      null;
+
+    return typeof selectedConnection?.id === "string" ? selectedConnection.id : null;
+  }, [activeFathomConnectionId, activeWorkspaceId]);
+
+  const disconnectFathom = async () => {
+    if (
+      fathomManagedByWorkspace &&
+      !workspaceFathom?.connectedByCurrentUser &&
+      !canManageWorkspaceIntegrations
+    ) {
+      toast({
+        title: "Managed by Workspace",
+        description: "Fathom integration is connected by another workspace admin.",
+      });
+      return;
+    }
+    try {
+      const connectionId = await resolveWorkspaceFathomConnectionId();
+      if (!activeWorkspaceId || !connectionId) {
+        throw new Error("No workspace Fathom connection is available to disconnect.");
+      }
+      const response = await fetch(
+        `/api/workspaces/${encodeURIComponent(
+          activeWorkspaceId
+        )}/fathom/connections/${encodeURIComponent(connectionId)}`,
+        { method: "DELETE" }
+      );
+      if (!response.ok) {
+        let message = "Could not disconnect Fathom. Please try again.";
+        try {
+          const payload = await response.json();
+          if (payload && typeof payload === "object" && "error" in payload) {
+            message = String(payload.error);
+          } else if (typeof payload === "string" && payload.trim()) {
+            message = payload.trim();
+          }
+        } catch (error) {
+          if (error instanceof Error) {
+            message = error.message;
+          }
+        }
+        throw new Error(message);
+      }
+      await refreshUserProfile();
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Could not disconnect Fathom. Please try again.";
+      console.error("Failed to disconnect Fathom:", error);
+      toast({
+        title: "Fathom Disconnect Failed",
+        description: message,
+        variant: "destructive",
+      });
+    }
+  };
+
+  useEffect(() => {
+    setIsLoadingSlackConnection(loading);
+    setIsLoadingFathomConnection(loading);
+    setIsLoadingGoogleConnection(loading);
+    if (!loading && user?.slackTeamId) {
+      setSlackInstallation({
+        teamId: user.slackTeamId,
+        teamName: "",
+        botUserId: "",
+        accessToken: "",
+        refreshToken: "",
+        expiresAt: 0,
+        scope: "",
+      });
+    }
+    if (!loading && !user?.slackTeamId) {
+      setSlackInstallation(null);
+    }
+  }, [loading, user?.slackTeamId]);
+
+  const triggerTokenFetch = async () => {
+    await refreshUserProfile();
+  };
+
+  return (
+    <IntegrationsContext.Provider value={{
+      googleTokenInfo,
+      isGoogleTasksConnected: Boolean(user?.googleConnected || workspaceGoogle?.connected),
+      isLoadingGoogleConnection,
+      connectGoogleTasks,
+      disconnectGoogleTasks,
+      getValidGoogleAccessToken,
+      triggerTokenFetch,
+      isTrelloConnected: false,
+      isLoadingTrelloConnection: false,
+      trelloToken,
+      connectTrello,
+      disconnectTrello,
+      isSlackConnected: Boolean(user?.slackTeamId || workspaceSlack?.connected),
+      isLoadingSlackConnection,
+      slackInstallation,
+      connectSlack,
+      disconnectSlack,
+      isFathomConnected: Boolean(workspaceFathom?.connected),
+      isLoadingFathomConnection,
+      connectFathom,
+      disconnectFathom,
+    }}>
+      {children}
+    </IntegrationsContext.Provider>
+  );
+};
+
+export const useIntegrations = () => {
+  const context = useContext(IntegrationsContext);
+  if (context === undefined) {
+    throw new Error('useIntegrations must be used within an IntegrationsProvider');
+  }
+  return context;
+};
