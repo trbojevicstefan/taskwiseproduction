@@ -3,7 +3,7 @@
 
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { MessageSquare, CheckSquare, BarChart3, Trash2, Edit3, Search, FolderOpen, MessageCircle as MessageCircleIcon, SquareKanban, MoreVertical, Folder as FolderIcon, FolderPlus, X, Check, Users, Video, Calendar, PanelLeft, Settings, Lightbulb } from 'lucide-react';
+import { MessageSquare, CheckSquare, BarChart3, Trash2, Edit3, Search, FolderOpen, MessageCircle as MessageCircleIcon, SquareKanban, MoreVertical, Folder as FolderIcon, FolderPlus, X, Check, Users, Video, Calendar, PanelLeft, Settings, Lightbulb, Building2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useAuth } from '@/contexts/AuthContext';
 import { useChatHistory } from '@/contexts/ChatHistoryContext';
@@ -113,6 +113,7 @@ export default function SidebarNav() {
         boardItem,
         { href: '/planning', label: 'Planning', icon: Lightbulb },
         { href: '/people', label: 'People', icon: Users },
+        { href: '/clients', label: 'Clients', icon: Building2 },
         { href: '/chat', label: 'Chat', icon: MessageSquare },
         { href: '/settings', label: 'Settings', icon: Settings },
       ];

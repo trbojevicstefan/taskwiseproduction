@@ -5,7 +5,7 @@ import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
-import { User, Mail, Loader2, Briefcase, Save, MessageSquare, Bot, FileText, Slack, Edit3, CheckCircle2, X, Trash2, Filter } from 'lucide-react';
+import { User, Mail, Loader2, Briefcase, Save, MessageSquare, Bot, FileText, Slack, Edit3, CheckCircle2, X, Trash2, Filter, Tag, Building2, CalendarClock } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { getPersonDetails, onTasksForPersonSnapshot, updatePerson } from '@/lib/data';
 import type { Person, PersonWithTaskCount } from '@/types/person';
@@ -55,14 +55,15 @@ const getInitials = (name: string | null | undefined) => {
     return name.split(' ').map(n => n[0]).join('').toUpperCase().substring(0, 2);
 };
 
-const DetailField = ({ 
-    icon: Icon, 
-    label, 
-    value, 
+const DetailField = ({
+    icon: Icon,
+    label,
+    value,
     placeholder,
     isEditing,
     onChange,
-    className
+    className,
+    type
 }: {
     icon: React.ElementType;
     label: string;
@@ -71,19 +72,21 @@ const DetailField = ({
     isEditing: boolean;
     onChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
     className?: string;
+    type?: string;
 }) => (
     <div className={cn("p-4 rounded-lg bg-background/50 border border-border/30", className)}>
         <Label htmlFor={`person-${label.toLowerCase()}`} className="flex items-center text-sm font-medium text-muted-foreground mb-1">
             <Icon className="mr-2 h-4 w-4" />
             {label}
         </Label>
-        
+
         {isEditing ? (
-            <Input 
-                id={`person-${label.toLowerCase()}`} 
-                value={value} 
-                onChange={onChange} 
+            <Input
+                id={`person-${label.toLowerCase()}`}
+                value={value}
+                onChange={onChange}
                 placeholder={placeholder}
+                type={type}
                 className="bg-transparent border-none p-0 text-base h-auto focus-visible:ring-0 placeholder:text-muted-foreground/60"
             />
         ) : (
@@ -268,7 +271,7 @@ export default function PersonDetailPageContent({ personId }: PersonDetailPageCo
     });
   }, [tasks]);
 
-  const handleInputChange = (field: keyof Person, value: string | string[]) => {
+  const handleInputChange = (field: keyof Person, value: string | string[] | null) => {
       setEditablePerson(prev => ({ ...prev, [field]: value }));
   }
 
@@ -297,7 +300,13 @@ export default function PersonDetailPageContent({ personId }: PersonDetailPageCo
 
     setIsSaving(true);
     try {
-        await updatePerson(user.uid, person.id, editablePerson);
+        const payload: Partial<Person> = { ...editablePerson };
+        // Only send personType when the user actually changed it — the server
+        // marks any PATCHed personType as a manual classification.
+        if ((payload.personType ?? 'unknown') === (person.personType ?? 'unknown')) {
+            delete payload.personType;
+        }
+        await updatePerson(user.uid, person.id, payload);
         const updatedPersonDetails = await getPersonDetails(user.uid, person.id);
         setPerson(updatedPersonDetails);
         setEditablePerson(updatedPersonDetails || {});
@@ -862,13 +871,58 @@ export default function PersonDetailPageContent({ personId }: PersonDetailPageCo
                             isEditing={isEditing}
                             onChange={(e) => handleInputChange('email', e.target.value)}
                         />
-                        <DetailField 
+                        <DetailField
                             icon={Briefcase}
                             label="Title"
                             value={editablePerson.title || ''}
                             placeholder="Job Title or Role"
                             isEditing={isEditing}
                             onChange={(e) => handleInputChange('title', e.target.value)}
+                        />
+                        <div className="p-4 rounded-lg bg-background/50 border border-border/30">
+                            <Label className="flex items-center text-sm font-medium text-muted-foreground mb-1">
+                                <Tag className="mr-2 h-4 w-4" />
+                                Type
+                            </Label>
+                            {isEditing ? (
+                                <Select
+                                    value={editablePerson.personType || 'unknown'}
+                                    onValueChange={(value) => handleInputChange('personType', value)}
+                                >
+                                    <SelectTrigger className="h-8 w-full">
+                                        <SelectValue placeholder="Unknown" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        <SelectItem value="teammate">Teammate</SelectItem>
+                                        <SelectItem value="client">Client</SelectItem>
+                                        <SelectItem value="unknown">Unknown</SelectItem>
+                                    </SelectContent>
+                                </Select>
+                            ) : (
+                                <p className="text-base font-normal text-foreground min-h-[26px] capitalize">
+                                    {currentPersonData.personType || 'unknown'}
+                                </p>
+                            )}
+                            {!isEditing && currentPersonData.personTypeReason && (
+                                <p className="text-xs text-muted-foreground mt-1">{currentPersonData.personTypeReason}</p>
+                            )}
+                        </div>
+                        <DetailField
+                            icon={Building2}
+                            label="Company"
+                            value={editablePerson.company || ''}
+                            placeholder="Company or account"
+                            isEditing={isEditing}
+                            onChange={(e) => handleInputChange('company', e.target.value)}
+                        />
+                        <DetailField
+                            icon={CalendarClock}
+                            label="Next Follow-up"
+                            type="date"
+                            value={(editablePerson.nextFollowUpAt || '').slice(0, 10)}
+                            placeholder="No follow-up scheduled"
+                            isEditing={isEditing}
+                            onChange={(e) => handleInputChange('nextFollowUpAt', e.target.value || null)}
                         />
                     </div>
                 </motion.div>

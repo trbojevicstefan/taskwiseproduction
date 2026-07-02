@@ -25,6 +25,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
     "/explore",
     "/reports",
     "/people",
+    "/clients",
     "/settings",
     "/workspaces",
   ];
