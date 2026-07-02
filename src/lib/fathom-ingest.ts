@@ -21,6 +21,7 @@ import * as ingestHelpers from "@/lib/fathom-ingest-helpers";
 import * as analysisHelpers from "@/lib/fathom-ingest-analysis";
 import * as ingestDuplicates from "@/lib/fathom-ingest-duplicates";
 import { ensureMeetingRecordingHashIndex } from "@/lib/fathom-ingest/deduplication";
+import { buildCreatedFathomMeetingRecords } from "@/lib/fathom-ingest/meeting-builder";
 import { parseFathomMeetingWebhookPayload } from "@/lib/fathom-ingest/webhook-parser";
 import { resolveSummaryText } from "@/lib/fathom-ingest-summary";
 import { runMeetingIngestionCommand } from "@/lib/services/meeting-ingestion-command";
@@ -653,80 +654,30 @@ export const ingestFathomMeeting = async ({
     ) || "";
 
   const now = new Date();
-  const meetingId = randomUUID();
-  const planId = randomUUID();
-
-  const meeting = {
-    _id: meetingId,
-    userId,
-    workspaceId,
-    connectionId: connectionId || null,
-    providerSourceId: providerSourceId || null,
-    title: meetingTitle,
-    originalTranscript: transcriptText,
-    summary: meetingSummary,
-    attendees: uniquePeople,
-    extractedTasks: finalizedTasks,
-    originalAiTasks: sanitizedTasks,
-    originalAllTaskLevels: sanitizedTaskLevels,
-    taskRevisions:
-      sanitizedTasks.length > 0
-        ? [
-            {
-              id: randomUUID(),
-              createdAt: Date.now(),
-              source: "ai",
-              summary: "Initial AI extraction",
-              tasksSnapshot: sanitizedTasks,
-            },
-          ]
-        : [],
-    chatSessionId: null,
-    planningSessionId: planId,
-    allTaskLevels: sanitizedTaskLevels,
-    keyMoments: analysisResult.keyMoments || [],
-    overallSentiment: analysisResult.overallSentiment ?? null,
-    speakerActivity: analysisResult.speakerActivity || [],
-    meetingMetadata: analysisResult.meetingMetadata || undefined,
-    recordingIdHash,
-    recordingIdHashes: candidateRecordingHashes,
-    dedupeFingerprints: dedupeFingerprintsFromPayload,
-    recordingUrl: recordingUrlFromPayload,
-    organizerEmail: organizerEmailFromPayload,
-    ingestSource: "fathom",
-    fathomNotificationReadAt: null,
-    shareUrl: shareUrlFromPayload,
-    startTime: startTimeFromPayload,
-    endTime: endTimeFromPayload,
-    duration: durationSecondsFromPayload,
-    state: "tasks_ready",
-    analysisAttemptedAt: now,
-    completionAuditAttemptedAt: now,
-    completionAuditModel: analysisHelpers.resolveCompletionAuditModel(),
-    completionAuditSuggestionCount: completionSuggestions.length,
-    createdAt: now,
-    lastActivityAt: now,
-  };
-
-  const planningSession = {
-    _id: planId,
-    userId,
-    workspaceId,
-    connectionId: connectionId || null,
-    providerSourceId: providerSourceId || null,
-    title: `Plan from "${meetingTitle}"`,
-    inputText: meetingSummary,
-    extractedTasks: finalizedTasks,
-    originalAiTasks: sanitizedTasks,
-    originalAllTaskLevels: sanitizedTaskLevels,
-    taskRevisions: [],
-    folderId: null,
-    sourceMeetingId: meetingId as string,
-    allTaskLevels: sanitizedTaskLevels,
-    meetingMetadata: analysisResult.meetingMetadata || undefined,
-    createdAt: now,
-    lastActivityAt: now,
-  };
+  const { meeting, planningSession, meetingId } = buildCreatedFathomMeetingRecords({
+      now,
+      userId,
+      workspaceId,
+      connectionId: connectionId || null,
+      providerSourceId: providerSourceId || null,
+      meetingTitle,
+      meetingSummary,
+      transcriptText,
+      startTime: startTimeFromPayload,
+      endTime: endTimeFromPayload,
+      durationSeconds: durationSecondsFromPayload,
+      uniquePeople,
+      finalizedTasks,
+      sanitizedTasks,
+      sanitizedTaskLevels,
+      analysisResult,
+      recordingIdHash,
+      candidateRecordingHashes,
+      dedupeFingerprints: dedupeFingerprintsFromPayload,
+      recordingUrl: recordingUrlFromPayload,
+      shareUrl: shareUrlFromPayload,
+      organizerEmail: organizerEmailFromPayload,
+    });
 
   const meetingsCollection = db.collection("meetings");
   let insertedMeeting = false;
