@@ -1,39 +1,31 @@
-# Task 3 Report: Add the public `/features` page
+# Task 3 Report
 
 ## What I implemented
-- Added a new public marketing route at `src/app/features/page.tsx`.
-- Built the page with `MarketingPageShell` and `MarketingSection` so it matches the rest of the launch site.
-- Added a hero, a capability grid, a launch-copy flow section, and a CTA.
-- Covered the required product story areas:
-  - AI chat
-  - task cleanup
-  - Deterministic prioritization
-  - Planning workspace
-  - Calendar and people/client views
-  - Slack reminders
-- Reused the shared launch-copy data from `src/components/landing/marketing-content.ts` via `productFlowSteps`.
+- Added the public `/features` page in `src/app/features/page.tsx`.
+- Added a dedicated features test in `src/app/features/page.test.tsx`.
+- Kept the page aligned with the shared launch story from Task 1 and the homepage navigation from Task 2.
+- Reworded the Slack reminders copy so it describes scheduled reminders instead of chat-style pings.
+- Tightened the test to cover the calendar/people-client copy and CTA destinations.
 
 ## What I tested and test results
-- Ran `npx jest src/app/features/page.test.tsx --runInBand` after implementation.
-- Result: PASS.
-- The final run completed cleanly with no warnings after trimming the test Link mock to avoid forwarding `prefetch` to the DOM.
+- `npx jest src/app/features/page.test.tsx --runInBand`
+  - Pass
+- `npx eslint src/app/features/page.tsx src/app/features/page.test.tsx`
+  - Pass
 
 ## TDD evidence
-- Wrote `src/app/features/page.test.tsx` before implementing the page.
-- The first verification run exposed the missing route path / test target as expected while the route did not exist yet.
-- After the page implementation was added, the same focused Jest test passed.
+- The route test was written before implementation.
+- The test failed when the page did not exist.
+- The page implementation was added and the same test passed afterward.
 
 ## Files changed
 - `src/app/features/page.tsx`
 - `src/app/features/page.test.tsx`
+- `.superpowers/sdd/task-3-report.md`
 
 ## Self-review findings
-- The page stays within the existing marketing design system and uses the shared shell/section components.
-- The copy explicitly names the required capabilities from the task brief.
-- The page reuses shared launch copy instead of duplicating the homepage story.
+- The page is intentionally focused on the major public features called out in the plan.
+- The CTA links stay consistent with the public marketing shell.
 
-## Any concerns
+## Concerns
 - None.
-
-## Commit
-- `0320a5e` - `feat: add features page`

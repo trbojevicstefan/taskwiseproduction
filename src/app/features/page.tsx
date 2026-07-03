@@ -56,7 +56,7 @@ const featureCards = [
     icon: Sparkles,
     title: "Slack reminders",
     body:
-      "Keep follow-through alive with Slack reminders and pings that keep reviewed work visible.",
+      "Keep follow-through alive with scheduled Slack reminders that keep reviewed work visible and stateful.",
   },
 ];
 
