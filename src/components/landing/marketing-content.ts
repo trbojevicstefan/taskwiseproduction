@@ -47,8 +47,8 @@ export const integrationCards: MarketingCard[] = [
   },
   {
     name: "Trello",
-    title: "Export and delivery",
-    description: "Push or export work into external task boards.",
+    title: "Disabled integration",
+    description: "Trello appears in the platform story, but the live integration is currently disabled.",
   },
   {
     name: "Manual paste",
