@@ -31,8 +31,14 @@ export const buildCreatedFathomMeetingRecords = (input: {
   recordingUrl: string | null;
   shareUrl: string | null;
   organizerEmail: string | null;
+  /** Phase 7: provider discriminator; defaults preserve fathom behavior. */
+  ingestSource?: string;
+  /** Phase 7: title fallback; defaults preserve fathom behavior. */
+  defaultTitle?: string;
 }) => {
   const now = input.now || new Date();
+  const ingestSource = input.ingestSource || "fathom";
+  const defaultTitle = input.defaultTitle || "Fathom Meeting";
   const meetingId = input.meetingId || randomUUID();
   const planId = input.planId || randomUUID();
   const taskRevisions =
@@ -54,7 +60,7 @@ export const buildCreatedFathomMeetingRecords = (input: {
     workspaceId: input.workspaceId,
     connectionId: input.connectionId,
     providerSourceId: input.providerSourceId,
-    title: input.meetingTitle || "Fathom Meeting",
+    title: input.meetingTitle || defaultTitle,
     originalTranscript: input.transcriptText,
     summary: input.meetingSummary || "",
     attendees: input.uniquePeople,
@@ -74,7 +80,7 @@ export const buildCreatedFathomMeetingRecords = (input: {
     dedupeFingerprints: input.dedupeFingerprints,
     recordingUrl: input.recordingUrl,
     organizerEmail: input.organizerEmail,
-    ingestSource: "fathom",
+    ingestSource,
     fathomNotificationReadAt: null,
     shareUrl: input.shareUrl,
     startTime: input.startTime,
@@ -95,7 +101,7 @@ export const buildCreatedFathomMeetingRecords = (input: {
     workspaceId: input.workspaceId,
     connectionId: input.connectionId,
     providerSourceId: input.providerSourceId,
-    title: `Plan from "${input.meetingTitle || "Fathom Meeting"}"`,
+    title: `Plan from "${input.meetingTitle || defaultTitle}"`,
     inputText: input.meetingSummary || "",
     extractedTasks: input.finalizedTasks,
     originalAiTasks: input.sanitizedTasks,

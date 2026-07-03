@@ -16,6 +16,8 @@ export const JOB_TYPES = [
   "workflow-webhook-delivery-send",
   "slack-reminder-send",
   "slack-reminder-sweep",
+  "meeting-provider-webhook-ingest",
+  "meeting-provider-sync",
 ] as const;
 
 export type JobType = (typeof JOB_TYPES)[number];
@@ -60,6 +62,20 @@ export type SlackReminderSweepJobPayload = {
   workspaceId: string | null;
 };
 
+export type MeetingProviderWebhookIngestJobPayload = {
+  provider: string;
+  connectionId: string;
+  /** Raw JSON webhook payload; re-parsed by the adapter inside the handler. */
+  payload: Record<string, unknown>;
+};
+
+export type MeetingProviderSyncJobPayload = {
+  provider: string;
+  connectionId: string;
+  /** ISO timestamp lower bound for listMeetings; null/absent = provider default. */
+  since?: string | null;
+};
+
 export type JobPayloadByType = {
   "meeting-rescan": MeetingRescanJobPayload;
   "fathom-sync": FathomSyncJobPayload;
@@ -69,6 +85,8 @@ export type JobPayloadByType = {
   "workflow-webhook-delivery-send": WorkflowWebhookDeliverySendJobPayload;
   "slack-reminder-send": SlackReminderSendJobPayload;
   "slack-reminder-sweep": SlackReminderSweepJobPayload;
+  "meeting-provider-webhook-ingest": MeetingProviderWebhookIngestJobPayload;
+  "meeting-provider-sync": MeetingProviderSyncJobPayload;
 };
 
 export type JobResult = Record<string, unknown> | null;

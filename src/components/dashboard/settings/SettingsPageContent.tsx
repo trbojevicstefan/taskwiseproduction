@@ -24,6 +24,7 @@ import { cn } from '@/lib/utils';
 import DashboardHeader from '../DashboardHeader';
 import TaskCleanupSettingsCard from '@/components/dashboard/settings/TaskCleanupSettingsCard';
 import SlackRemindersSettingsCard from '@/components/dashboard/settings/SlackRemindersSettingsCard';
+import MeetingProviderIntegrationCard from '@/components/dashboard/settings/MeetingProviderIntegrationCard';
 import { isAdvancedSettingsEnabled } from '@/lib/simplification-flags';
 
 const AVATAR_STYLES = [
@@ -3495,6 +3496,14 @@ export default function SettingsPageContent() {
                                 Logs
                               </Button>
                             ) : null}
+                        />
+                        <MeetingProviderIntegrationCard
+                            provider="fireflies"
+                            canManage={canManageWorkspaceIntegrations}
+                        />
+                        <MeetingProviderIntegrationCard
+                            provider="grain"
+                            canManage={canManageWorkspaceIntegrations}
                         />
                           </>
                         )}

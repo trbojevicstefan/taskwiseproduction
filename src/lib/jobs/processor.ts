@@ -3,6 +3,8 @@ import type {
   FathomWebhookIngestJobPayload,
   FathomSyncJobPayload,
   JobDocument,
+  MeetingProviderSyncJobPayload,
+  MeetingProviderWebhookIngestJobPayload,
   MeetingRescanJobPayload,
   SlackReminderSendJobPayload,
   SlackReminderSweepJobPayload,
@@ -12,6 +14,8 @@ import type {
 import { runDomainEventDispatchJob } from "@/lib/jobs/handlers/domain-event-dispatch-job";
 import { runFathomWebhookIngestJob } from "@/lib/jobs/handlers/fathom-webhook-ingest-job";
 import { runFathomSyncJob } from "@/lib/jobs/handlers/fathom-sync-job";
+import { runMeetingProviderSyncJob } from "@/lib/jobs/handlers/meeting-provider-sync-job";
+import { runMeetingProviderWebhookIngestJob } from "@/lib/jobs/handlers/meeting-provider-webhook-ingest-job";
 import { runMeetingRescanJob } from "@/lib/jobs/handlers/meeting-rescan-job";
 import { runSlackReminderSendJob } from "@/lib/jobs/handlers/slack-reminder-send-job";
 import { runSlackReminderSweepJob } from "@/lib/jobs/handlers/slack-reminder-sweep-job";
@@ -102,6 +106,28 @@ export const processJob = async (
       return runSlackReminderSweepJob({
         userId: job.userId,
         workspaceId: payload.workspaceId ?? null,
+        correlationId: context?.correlationId,
+        logger: context?.logger,
+      });
+    }
+    case "meeting-provider-webhook-ingest": {
+      const payload = job.payload as MeetingProviderWebhookIngestJobPayload;
+      return runMeetingProviderWebhookIngestJob({
+        userId: job.userId,
+        provider: payload.provider,
+        connectionId: payload.connectionId,
+        payload: payload.payload,
+        correlationId: context?.correlationId,
+        logger: context?.logger,
+      });
+    }
+    case "meeting-provider-sync": {
+      const payload = job.payload as MeetingProviderSyncJobPayload;
+      return runMeetingProviderSyncJob({
+        userId: job.userId,
+        provider: payload.provider,
+        connectionId: payload.connectionId,
+        since: payload.since ?? null,
         correlationId: context?.correlationId,
         logger: context?.logger,
       });

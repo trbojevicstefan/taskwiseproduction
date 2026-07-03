@@ -155,6 +155,31 @@ const indexPlan = [
     ],
   },
   {
+    collection: "meetingConnections",
+    indexes: [
+      {
+        key: { workspaceId: 1, provider: 1 },
+        options: {
+          name: "meeting_connections_workspace_provider_unique",
+          unique: true,
+        },
+      },
+      {
+        key: { webhookToken: 1 },
+        options: {
+          name: "meeting_connections_webhook_token_unique",
+          unique: true,
+          sparse: true,
+          partialFilterExpression: { webhookToken: { $type: "string" } },
+        },
+      },
+      {
+        key: { provider: 1, status: 1 },
+        options: { name: "meeting_connections_provider_status" },
+      },
+    ],
+  },
+  {
     collection: "domainEvents",
     indexes: [
       {
