@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { apiError, apiSuccess, mapApiError, parseJsonBody } from "@/lib/api-route";
-import { FATHOM_SCOPES } from "@/lib/fathom";
+import { FATHOM_SCOPES } from "@/lib/fathom-utils";
 import {
   findFathomConnectionById,
   findPreferredFathomConnectionForWorkspace,
@@ -160,4 +160,3 @@ export async function POST(
     return mapApiError(error, "Failed to prepare Fathom connection setup.");
   }
 }
-

@@ -8,10 +8,8 @@ import {
   listFathomConnectionsForWorkspace,
   updateFathomConnectionById,
 } from "@/lib/fathom-connections";
-import {
-  ensureFathomConnectionWebhook,
-  getFathomRedirectUri,
-} from "@/lib/fathom";
+import { ensureFathomConnectionWebhook } from "@/lib/fathom";
+import { getFathomRedirectUri } from "@/lib/fathom-utils";
 import { logFathomIntegration } from "@/lib/fathom-logs";
 
 const buildConnectionLabel = async (

@@ -210,6 +210,20 @@ export function normalizeTask(task: any): ExtractedTaskSchema {
   const sanitizedSubtasks = task.subtasks
     ? (task.subtasks || []).map(normalizeTask)
     : null;
+  const taskState =
+    task.taskState === "active" ||
+    task.taskState === "suggested" ||
+    task.taskState === "archived"
+      ? task.taskState
+      : null;
+  const reviewStatus =
+    task.reviewStatus === "confirmed" || task.reviewStatus === "suggested"
+      ? task.reviewStatus
+      : taskState === "active"
+        ? "confirmed"
+        : taskState === "suggested"
+          ? "suggested"
+          : null;
 
   return {
     id: resolvedId,
@@ -231,6 +245,9 @@ export function normalizeTask(task: any): ExtractedTaskSchema {
     addedToProjectName: task.addedToProjectName === undefined ? null : task.addedToProjectName,
     addedToBoardId: task.addedToBoardId === undefined ? null : task.addedToBoardId,
     addedToBoardName: task.addedToBoardName === undefined ? null : task.addedToBoardName,
+    reviewStatus,
+    reviewedAt: task.reviewedAt === undefined ? null : task.reviewedAt,
+    taskState,
     completionSuggested:
       task.completionSuggested === undefined ? null : task.completionSuggested,
     completionConfidence:
@@ -239,5 +256,26 @@ export function normalizeTask(task: any): ExtractedTaskSchema {
       task.completionEvidence === undefined ? null : task.completionEvidence,
     completionTargets:
       task.completionTargets === undefined ? null : task.completionTargets,
+    cleanupStatus: task.cleanupStatus === undefined ? null : task.cleanupStatus,
+    cleanupCategory:
+      task.cleanupCategory === undefined ? null : task.cleanupCategory,
+    cleanupReason: task.cleanupReason === undefined ? null : task.cleanupReason,
+    cleanupConfidence:
+      task.cleanupConfidence === undefined ? null : task.cleanupConfidence,
+    cleanupEvidence:
+      task.cleanupEvidence === undefined ? null : task.cleanupEvidence,
+    expiresAt: task.expiresAt === undefined ? null : task.expiresAt,
+    duplicateOfTaskId:
+      task.duplicateOfTaskId === undefined ? null : task.duplicateOfTaskId,
+    cleanupReviewedAt:
+      task.cleanupReviewedAt === undefined ? null : task.cleanupReviewedAt,
+    cleanupReviewedBy:
+      task.cleanupReviewedBy === undefined ? null : task.cleanupReviewedBy,
+    priorityScore: task.priorityScore === undefined ? null : task.priorityScore,
+    priorityLabel: task.priorityLabel === undefined ? null : task.priorityLabel,
+    priorityReason:
+      task.priorityReason === undefined ? null : task.priorityReason,
+    priorityUpdatedAt:
+      task.priorityUpdatedAt === undefined ? null : task.priorityUpdatedAt,
   };
 }

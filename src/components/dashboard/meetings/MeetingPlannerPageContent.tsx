@@ -1,7 +1,8 @@
 "use client";
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { Calendar, Clipboard, Loader2, Users, Video, Wand2, Plus } from "lucide-react";
+import Link from "next/link";
+import { ArrowLeft, Calendar, Clipboard, Loader2, Users, Video, Wand2, Plus } from "lucide-react";
 import DashboardHeader from "@/components/dashboard/DashboardHeader";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -713,7 +714,14 @@ export default function MeetingPlannerPageContent() {
       <DashboardHeader
         pageIcon={Wand2}
         pageTitle={<h1 className="text-2xl font-bold font-headline">Meeting Planner</h1>}
+        description="Prepare agendas for upcoming meetings and push them to Google Calendar."
       >
+        <Button variant="ghost" size="sm" asChild>
+          <Link href="/planning">
+            <ArrowLeft className="mr-2 h-4 w-4" />
+            Back to Planning
+          </Link>
+        </Button>
         {!isGoogleTasksConnected && (
           <Button variant="outline" onClick={connectGoogleTasks}>
             Connect Google Workspace

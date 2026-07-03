@@ -17,6 +17,7 @@ import {
   assertWorkspaceAccess,
   ensureWorkspaceBootstrapForUser,
 } from "@/lib/workspace-context";
+import { withTimeout } from "@/lib/api-timeout";
 import { postMeetingAutomationToSlack } from "@/lib/slack-automation";
 import type { ExtractedTaskSchema } from "@/types/chat";
 import {
@@ -82,7 +83,9 @@ const applyAutoApprovalFlags = (
 };
 
 const serializeMeeting = (meeting: any) => {
-  const { recordingId, recordingIdHash, ...rest } = meeting;
+  const rest = { ...meeting };
+  delete (rest as any).recordingId;
+  delete (rest as any).recordingIdHash;
   return {
     ...rest,
     id: meeting._id,
@@ -233,12 +236,16 @@ export async function GET(request?: Request) {
     if (pageMeetings.length > 0) {
       try {
         const { hydrateTaskReferenceLists } = await import("@/lib/task-hydration");
-        const hydratedTaskLists = await hydrateTaskReferenceLists(
-          userId,
-          pageMeetings.map((meeting: any) =>
-            Array.isArray(meeting.extractedTasks) ? meeting.extractedTasks : []
+        const hydratedTaskLists = await withTimeout(
+          hydrateTaskReferenceLists(
+            userId,
+            pageMeetings.map((meeting: any) =>
+              Array.isArray(meeting.extractedTasks) ? meeting.extractedTasks : []
+            ),
+            { workspaceId }
           ),
-          { workspaceId }
+          10_000,
+          "meeting-task-hydration"
         );
         pageMeetings.forEach((meeting: any, index: number) => {
           meeting.extractedTasks = hydratedTaskLists[index] || [];
@@ -342,7 +349,7 @@ export async function POST(request: Request) {
       createMeetingSchema,
       "Invalid meeting payload."
     );
-    const { recordingId, recordingIdHash, ...safeBody } = body || {};
+    const safeBody = body || {};
     const now = new Date();
     const db = await getDb();
     const user = await db.collection("users").findOne({
@@ -376,15 +383,28 @@ export async function POST(request: Request) {
         : "";
     if (user && transcript) {
       const completionMatchThreshold = resolveCompletionMatchThreshold(user);
-      const completionSuggestions = await buildCompletionSuggestions({
-        userId,
-        transcript,
-        summary: meeting.summary,
-        attendees: Array.isArray(meeting.attendees) ? meeting.attendees : [],
-        workspaceId,
-        requireAttendeeMatch: false,
-        minMatchRatio: completionMatchThreshold,
-      });
+      let completionSuggestions: ExtractedTaskSchema[] = [];
+      try {
+        completionSuggestions = await withTimeout(
+          buildCompletionSuggestions({
+            userId,
+            transcript,
+            summary: meeting.summary,
+            attendees: Array.isArray(meeting.attendees) ? meeting.attendees : [],
+            workspaceId,
+            requireAttendeeMatch: false,
+            minMatchRatio: completionMatchThreshold,
+          }),
+          25_000,
+          "meeting-completion-suggestions"
+        );
+      } catch (error) {
+        logger.warn("api.request.partial_hydration_failed", {
+          reason: "meeting_completion_suggestions_timeout",
+          error: serializeError(error),
+          durationMs: durationMs(),
+        });
+      }
       if (completionSuggestions.length) {
         const mergedTasks = mergeCompletionSuggestions(
           meeting.extractedTasks as ExtractedTaskSchema[],

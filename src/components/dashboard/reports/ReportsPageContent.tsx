@@ -445,6 +445,7 @@ export default function ReportsPageContent() {
       <DashboardHeader
         pageIcon={BarChart3}
         pageTitle={<h1 className="text-2xl font-bold font-headline">Reports</h1>}
+        description="Track task throughput and meeting outcomes over time."
       >
         <DropdownMenu>
           <DropdownMenuTrigger asChild>

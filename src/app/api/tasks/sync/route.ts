@@ -62,9 +62,7 @@ export async function POST(request: Request) {
       sourceSessionType,
       sourceSessionName,
       origin,
-      taskState:
-        body.taskState ||
-        (sourceSessionType === "chat" ? "suggested" : "active"),
+      taskState: body.taskState || "suggested",
     }
   );
 

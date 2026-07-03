@@ -22,23 +22,57 @@ export interface TaskSyncResult {
   taskMap: Map<string, string>;
 }
 
+type ExistingTaskInfo = {
+  id: string;
+  taskState?: "active" | "suggested" | "archived" | null;
+};
+
+const normalizeTaskState = (value: unknown) => {
+  if (value === "active" || value === "suggested" || value === "archived") {
+    return value;
+  }
+  return null;
+};
+
+const resolveTaskState = (
+  task: ExtractedTaskSchema,
+  sourceTaskId: string,
+  options: TaskSyncOptions,
+  existingBySourceTaskId: Map<string, ExistingTaskInfo>
+) => {
+  if (task.reviewStatus === "confirmed") return "active";
+  if (task.reviewStatus === "suggested") return "suggested";
+  const explicitTaskState = normalizeTaskState(task.taskState);
+  if (explicitTaskState) return explicitTaskState;
+  const existingTaskState = normalizeTaskState(
+    existingBySourceTaskId.get(sourceTaskId)?.taskState
+  );
+  return existingTaskState || options.taskState || "active";
+};
+
 const buildTaskRecords = (
   tasks: ExtractedTaskSchema[],
   options: TaskSyncOptions,
   now: Date,
-  existingBySourceTaskId: Map<string, string>
+  existingBySourceTaskId: Map<string, ExistingTaskInfo>
 ) => {
   const records: any[] = [];
   const ids: string[] = [];
   const origin = options.origin || options.sourceSessionType;
   const resolveTaskId = (sourceTaskId: string) =>
-    existingBySourceTaskId.get(sourceTaskId) || sourceTaskId;
+    existingBySourceTaskId.get(sourceTaskId)?.id || sourceTaskId;
 
   const walk = (items: ExtractedTaskSchema[], parentId: string | null) => {
     items.forEach((item, index) => {
       const task = normalizeTask(item);
       const sourceTaskId = task.id;
       const taskId = resolveTaskId(sourceTaskId);
+      const taskState = resolveTaskState(
+        task,
+        sourceTaskId,
+        options,
+        existingBySourceTaskId
+      );
       ids.push(taskId);
       const assigneeNameRaw = task.assigneeName || task.assignee?.name || null;
       const assigneeNameKey = assigneeNameRaw
@@ -67,9 +101,11 @@ const buildTaskRecords = (
         completionConfidence: task.completionConfidence ?? null,
         completionEvidence: task.completionEvidence ?? null,
         completionTargets: task.completionTargets ?? null,
+        reviewStatus: task.reviewStatus ?? (taskState === "active" ? "confirmed" : "suggested"),
+        reviewedAt: task.reviewedAt ?? null,
         aiSuggested: true,
         origin,
-        taskState: options.taskState ?? "active",
+        taskState,
         sourceSessionId: options.sourceSessionId,
         sourceSessionName: options.sourceSessionName ?? null,
         sourceSessionType: options.sourceSessionType,
@@ -104,14 +140,17 @@ export const syncTasksForSource = async (
       sourceSessionType: options.sourceSessionType,
       sourceSessionId: options.sourceSessionId,
     })
-    .project({ _id: 1, sourceTaskId: 1 })
+    .project({ _id: 1, sourceTaskId: 1, taskState: 1 })
     .toArray();
-  const existingBySourceTaskId = new Map<string, string>();
+  const existingBySourceTaskId = new Map<string, ExistingTaskInfo>();
   existingTasks.forEach((task: any) => {
     const key =
       task.sourceTaskId || task._id?.toString?.() || task.id;
     if (!key) return;
-    existingBySourceTaskId.set(String(key), task._id);
+    existingBySourceTaskId.set(String(key), {
+      id: String(task._id),
+      taskState: normalizeTaskState(task.taskState),
+    });
   });
 
   const { records, ids } = buildTaskRecords(

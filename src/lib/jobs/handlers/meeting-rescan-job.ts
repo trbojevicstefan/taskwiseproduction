@@ -14,8 +14,6 @@ import {
   updateLinkedChatSessions,
 } from "@/lib/services/session-task-sync";
 import { syncTasksForSource } from "@/lib/task-sync";
-import { ensureDefaultBoard } from "@/lib/boards";
-import { ensureBoardItemsForTasks } from "@/lib/board-items";
 import { getWorkspaceIdForUser } from "@/lib/workspace";
 import type { MeetingRescanMode } from "@/lib/jobs/types";
 import {
@@ -434,7 +432,7 @@ export const runMeetingRescanJob = async ({
       sourceSessionType: "meeting",
       sourceSessionName: updatedMeeting.title || "Meeting",
       origin: "meeting",
-      taskState: "active",
+      taskState: "suggested",
     });
     const linkedSessions = await updateLinkedChatSessions(
       db,
@@ -443,15 +441,6 @@ export const runMeetingRescanJob = async ({
       updatedTasks
     );
     await cleanupChatTasksForSessions(db, userId, linkedSessions);
-    if (workspaceId) {
-      const defaultBoard = await ensureDefaultBoard(db, userId, workspaceId);
-      await ensureBoardItemsForTasks(db, {
-        userId,
-        workspaceId,
-        boardId: String(defaultBoard._id),
-        tasks: syncTasks,
-      });
-    }
   }
 
   if (completionUpdates.size) {
@@ -539,7 +528,7 @@ export const runMeetingRescanJob = async ({
               sourceSessionType: "meeting",
               sourceSessionName: linkedMeeting.title || "Meeting",
               origin: "meeting",
-              taskState: "active",
+              taskState: "suggested",
             });
             const linkedSessions = await updateLinkedChatSessions(
               db,
@@ -548,19 +537,6 @@ export const runMeetingRescanJob = async ({
               linkedTasks
             );
             await cleanupChatTasksForSessions(db, userId, linkedSessions);
-            if (linkedWorkspaceId) {
-              const defaultBoard = await ensureDefaultBoard(
-                db,
-                userId,
-                linkedWorkspaceId
-              );
-              await ensureBoardItemsForTasks(db, {
-                userId,
-                workspaceId: linkedWorkspaceId,
-                boardId: String(defaultBoard._id),
-                tasks: syncTasks,
-              });
-            }
           }
           continue;
         }
@@ -611,7 +587,7 @@ export const runMeetingRescanJob = async ({
             sourceSessionType: "meeting",
             sourceSessionName: otherMeeting.title || "Meeting",
             origin: "meeting",
-            taskState: "active",
+            taskState: "suggested",
           });
           const linkedSessions = await updateLinkedChatSessions(
             db,
@@ -620,19 +596,6 @@ export const runMeetingRescanJob = async ({
             otherTasks
           );
           await cleanupChatTasksForSessions(db, userId, linkedSessions);
-          if (otherWorkspaceId) {
-            const defaultBoard = await ensureDefaultBoard(
-              db,
-              userId,
-              otherWorkspaceId
-            );
-            await ensureBoardItemsForTasks(db, {
-              userId,
-              workspaceId: otherWorkspaceId,
-              boardId: String(defaultBoard._id),
-              tasks: syncTasks,
-            });
-          }
         }
         continue;
       }

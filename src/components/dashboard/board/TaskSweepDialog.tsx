@@ -111,17 +111,17 @@ const priorityLabelMap: Record<string, string> = {
 };
 
 const priorityTone: Record<string, string> = {
-  high: "bg-rose-100 text-rose-700 border-rose-200",
-  medium: "bg-amber-100 text-amber-700 border-amber-200",
-  low: "bg-emerald-100 text-emerald-700 border-emerald-200",
+  high: "bg-rose-100 text-rose-700 border-rose-200 dark:bg-rose-950/50 dark:text-rose-300 dark:border-rose-900",
+  medium: "bg-amber-100 text-amber-700 border-amber-200 dark:bg-amber-950/50 dark:text-amber-300 dark:border-amber-900",
+  low: "bg-emerald-100 text-emerald-700 border-emerald-200 dark:bg-emerald-950/50 dark:text-emerald-300 dark:border-emerald-900",
 };
 
 const flagTone: Record<TaskSweepFlag, string> = {
-  old_timer: "bg-indigo-100 text-indigo-700 border-indigo-200",
-  vague: "bg-fuchsia-100 text-fuchsia-700 border-fuchsia-200",
-  overdue_loop: "bg-rose-100 text-rose-700 border-rose-200",
-  overdue: "bg-amber-100 text-amber-700 border-amber-200",
-  inactive: "bg-slate-100 text-slate-700 border-slate-200",
+  old_timer: "bg-indigo-100 text-indigo-700 border-indigo-200 dark:bg-indigo-950/50 dark:text-indigo-300 dark:border-indigo-900",
+  vague: "bg-fuchsia-100 text-fuchsia-700 border-fuchsia-200 dark:bg-fuchsia-950/50 dark:text-fuchsia-300 dark:border-fuchsia-900",
+  overdue_loop: "bg-rose-100 text-rose-700 border-rose-200 dark:bg-rose-950/50 dark:text-rose-300 dark:border-rose-900",
+  overdue: "bg-amber-100 text-amber-700 border-amber-200 dark:bg-amber-950/50 dark:text-amber-300 dark:border-amber-900",
+  inactive: "bg-slate-100 text-slate-700 border-slate-200 dark:bg-slate-800/60 dark:text-slate-300 dark:border-slate-700",
 };
 
 type SweepSummary = {
@@ -239,7 +239,8 @@ export default function TaskSweepDialog({
   const currentPriorityLabel =
     priorityLabelMap[currentPriorityKey] || currentTask?.priority || "Medium";
   const currentPriorityClass =
-    priorityTone[currentPriorityKey] || "bg-slate-100 text-slate-700 border-slate-200";
+    priorityTone[currentPriorityKey] ||
+    "bg-slate-100 text-slate-700 border-slate-200 dark:bg-slate-800/60 dark:text-slate-300 dark:border-slate-700";
   const currentScorePercent = currentTask
     ? Math.max(10, Math.min(100, Math.round((currentTask.sweepScore / 10) * 100)))
     : 0;
@@ -256,13 +257,13 @@ export default function TaskSweepDialog({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-[760px] overflow-hidden p-0">
-        <div className="border-b bg-gradient-to-r from-sky-50 via-indigo-50 to-emerald-50 px-6 py-4">
+        <div className="border-b bg-gradient-to-r from-sky-50 via-indigo-50 to-emerald-50 px-6 py-4 dark:from-sky-950/40 dark:via-indigo-950/40 dark:to-emerald-950/40">
           <div className="flex items-center justify-between gap-3">
-            <div className="flex items-center gap-2 text-sm font-semibold text-slate-700">
-              <Sparkles className="h-4 w-4 text-indigo-600" />
+            <div className="flex items-center gap-2 text-sm font-semibold text-slate-700 dark:text-slate-200">
+              <Sparkles className="h-4 w-4 text-indigo-600 dark:text-indigo-400" />
               Task Sweep
             </div>
-            <Badge className="border-indigo-200 bg-indigo-100 text-indigo-700">
+            <Badge className="border-indigo-200 bg-indigo-100 text-indigo-700 dark:border-indigo-900 dark:bg-indigo-950/50 dark:text-indigo-300">
               Session cleanup
             </Badge>
           </div>
@@ -279,32 +280,32 @@ export default function TaskSweepDialog({
               </DialogHeader>
               <div className="mt-5 space-y-5">
                 <div className="grid gap-3 sm:grid-cols-2">
-                  <div className="rounded-xl border border-sky-200 bg-sky-50 p-4">
-                    <div className="text-xs uppercase tracking-wide text-sky-700">Candidates</div>
-                    <div className="mt-1 text-2xl font-semibold text-sky-900">{candidates.length}</div>
+                  <div className="rounded-xl border border-sky-200 bg-sky-50 p-4 dark:border-sky-900 dark:bg-sky-950/40">
+                    <div className="text-xs uppercase tracking-wide text-sky-700 dark:text-sky-300">Candidates</div>
+                    <div className="mt-1 text-2xl font-semibold text-sky-900 dark:text-sky-100">{candidates.length}</div>
                   </div>
-                  <div className="rounded-xl border border-indigo-200 bg-indigo-50 p-4">
-                    <div className="text-xs uppercase tracking-wide text-indigo-700">Flagged stale</div>
-                    <div className="mt-1 text-2xl font-semibold text-indigo-900">{staleCount}</div>
+                  <div className="rounded-xl border border-indigo-200 bg-indigo-50 p-4 dark:border-indigo-900 dark:bg-indigo-950/40">
+                    <div className="text-xs uppercase tracking-wide text-indigo-700 dark:text-indigo-300">Flagged stale</div>
+                    <div className="mt-1 text-2xl font-semibold text-indigo-900 dark:text-indigo-100">{staleCount}</div>
                   </div>
                 </div>
 
                 <div className="rounded-xl border bg-muted/30 p-4">
                   <div className="text-sm font-medium">Action map</div>
                   <div className="mt-3 grid gap-2 text-xs sm:grid-cols-2">
-                    <div className="flex items-center gap-2 rounded-md border border-emerald-200 bg-emerald-50 p-2 text-emerald-700">
+                    <div className="flex items-center gap-2 rounded-md border border-emerald-200 bg-emerald-50 p-2 text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-300">
                       <CheckCircle2 className="h-4 w-4" />
                       Keep
                     </div>
-                    <div className="flex items-center gap-2 rounded-md border border-rose-200 bg-rose-50 p-2 text-rose-700">
+                    <div className="flex items-center gap-2 rounded-md border border-rose-200 bg-rose-50 p-2 text-rose-700 dark:border-rose-900 dark:bg-rose-950/40 dark:text-rose-300">
                       <Trash2 className="h-4 w-4" />
                       Discard
                     </div>
-                    <div className="flex items-center gap-2 rounded-md border border-amber-200 bg-amber-50 p-2 text-amber-700">
+                    <div className="flex items-center gap-2 rounded-md border border-amber-200 bg-amber-50 p-2 text-amber-700 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-300">
                       <ArrowUp className="h-4 w-4" />
                       Snooze
                     </div>
-                    <div className="flex items-center gap-2 rounded-md border border-sky-200 bg-sky-50 p-2 text-sky-700">
+                    <div className="flex items-center gap-2 rounded-md border border-sky-200 bg-sky-50 p-2 text-sky-700 dark:border-sky-900 dark:bg-sky-950/40 dark:text-sky-300">
                       <CheckCheck className="h-4 w-4" />
                       Complete
                     </div>
@@ -379,7 +380,7 @@ export default function TaskSweepDialog({
 
                   <div className="mt-4 space-y-2 rounded-lg border bg-muted/20 p-3">
                     <div className="text-xs font-medium text-muted-foreground">Stale score</div>
-                    <div className="h-1.5 w-full rounded-full bg-slate-200">
+                    <div className="h-1.5 w-full rounded-full bg-slate-200 dark:bg-slate-700">
                       <div
                         className="h-full rounded-full bg-gradient-to-r from-amber-400 via-orange-500 to-rose-500"
                         style={{ width: `${currentScorePercent}%` }}
@@ -393,16 +394,16 @@ export default function TaskSweepDialog({
                   <div
                     className={
                       currentTask.aiShouldRemove
-                        ? "mt-3 space-y-2 rounded-lg border border-rose-200 bg-rose-50 p-3"
-                        : "mt-3 space-y-2 rounded-lg border border-emerald-200 bg-emerald-50 p-3"
+                        ? "mt-3 space-y-2 rounded-lg border border-rose-200 bg-rose-50 p-3 dark:border-rose-900 dark:bg-rose-950/40"
+                        : "mt-3 space-y-2 rounded-lg border border-emerald-200 bg-emerald-50 p-3 dark:border-emerald-900 dark:bg-emerald-950/40"
                     }
                   >
                     <div className="flex items-center justify-between gap-2">
                       <div
                         className={
                           currentTask.aiShouldRemove
-                            ? "text-xs font-semibold text-rose-700"
-                            : "text-xs font-semibold text-emerald-700"
+                            ? "text-xs font-semibold text-rose-700 dark:text-rose-300"
+                            : "text-xs font-semibold text-emerald-700 dark:text-emerald-300"
                         }
                       >
                         AI recommendation
@@ -410,8 +411,8 @@ export default function TaskSweepDialog({
                       <Badge
                         className={
                           currentTask.aiShouldRemove
-                            ? "border-rose-200 bg-rose-100 text-rose-700"
-                            : "border-emerald-200 bg-emerald-100 text-emerald-700"
+                            ? "border-rose-200 bg-rose-100 text-rose-700 dark:border-rose-900 dark:bg-rose-950/50 dark:text-rose-300"
+                            : "border-emerald-200 bg-emerald-100 text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950/50 dark:text-emerald-300"
                         }
                       >
                         {currentTask.aiShouldRemove ? "Suggest remove" : "Suggest keep"}
@@ -420,13 +421,13 @@ export default function TaskSweepDialog({
                     <div
                       className={
                         currentTask.aiShouldRemove
-                          ? "text-xs text-rose-700"
-                          : "text-xs text-emerald-700"
+                          ? "text-xs text-rose-700 dark:text-rose-300"
+                          : "text-xs text-emerald-700 dark:text-emerald-300"
                       }
                     >
                       {currentTask.aiReason}
                     </div>
-                    <div className="h-1.5 w-full rounded-full bg-white/70">
+                    <div className="h-1.5 w-full rounded-full bg-white/70 dark:bg-white/10">
                       <div
                         className={
                           currentTask.aiShouldRemove
@@ -494,7 +495,7 @@ export default function TaskSweepDialog({
                 <div className="grid grid-cols-2 gap-2">
                   <Button
                     variant="outline"
-                    className="gap-2 border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100"
+                    className="gap-2 border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100 dark:border-rose-900 dark:bg-rose-950/40 dark:text-rose-300 dark:hover:bg-rose-950/60"
                     onClick={() => void handleAction("discard")}
                     disabled={isSubmitting}
                   >
@@ -503,7 +504,7 @@ export default function TaskSweepDialog({
                   </Button>
                   <Button
                     variant="outline"
-                    className="gap-2 border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
+                    className="gap-2 border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-300 dark:hover:bg-emerald-950/60"
                     onClick={() => void handleAction("keep")}
                     disabled={isSubmitting}
                   >
@@ -512,7 +513,7 @@ export default function TaskSweepDialog({
                   </Button>
                   <Button
                     variant="outline"
-                    className="gap-2 border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100"
+                    className="gap-2 border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-300 dark:hover:bg-amber-950/60"
                     onClick={() => void handleAction("snooze")}
                     disabled={isSubmitting}
                   >
@@ -541,8 +542,8 @@ export default function TaskSweepDialog({
                 </DialogDescription>
               </DialogHeader>
               <div className="mt-4 space-y-4">
-                <div className="rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm">
-                  <p className="font-medium text-rose-800">{pendingDiscardTask.title}</p>
+                <div className="rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm dark:border-rose-900 dark:bg-rose-950/40">
+                  <p className="font-medium text-rose-800 dark:text-rose-200">{pendingDiscardTask.title}</p>
                 </div>
                 <RadioGroup
                   value={discardReason}
@@ -595,21 +596,21 @@ export default function TaskSweepDialog({
                 </DialogDescription>
               </DialogHeader>
               <div className="mt-4 grid grid-cols-2 gap-2 text-sm sm:grid-cols-4">
-                <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-center">
-                  <div className="text-emerald-700">Keep</div>
-                  <div className="text-lg font-semibold text-emerald-900">{summary.keep}</div>
+                <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-center dark:border-emerald-900 dark:bg-emerald-950/40">
+                  <div className="text-emerald-700 dark:text-emerald-300">Keep</div>
+                  <div className="text-lg font-semibold text-emerald-900 dark:text-emerald-100">{summary.keep}</div>
                 </div>
-                <div className="rounded-lg border border-sky-200 bg-sky-50 p-3 text-center">
-                  <div className="text-sky-700">Complete</div>
-                  <div className="text-lg font-semibold text-sky-900">{summary.complete}</div>
+                <div className="rounded-lg border border-sky-200 bg-sky-50 p-3 text-center dark:border-sky-900 dark:bg-sky-950/40">
+                  <div className="text-sky-700 dark:text-sky-300">Complete</div>
+                  <div className="text-lg font-semibold text-sky-900 dark:text-sky-100">{summary.complete}</div>
                 </div>
-                <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-center">
-                  <div className="text-amber-700">Snooze</div>
-                  <div className="text-lg font-semibold text-amber-900">{summary.snooze}</div>
+                <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-center dark:border-amber-900 dark:bg-amber-950/40">
+                  <div className="text-amber-700 dark:text-amber-300">Snooze</div>
+                  <div className="text-lg font-semibold text-amber-900 dark:text-amber-100">{summary.snooze}</div>
                 </div>
-                <div className="rounded-lg border border-rose-200 bg-rose-50 p-3 text-center">
-                  <div className="text-rose-700">Discard</div>
-                  <div className="text-lg font-semibold text-rose-900">{summary.discard}</div>
+                <div className="rounded-lg border border-rose-200 bg-rose-50 p-3 text-center dark:border-rose-900 dark:bg-rose-950/40">
+                  <div className="text-rose-700 dark:text-rose-300">Discard</div>
+                  <div className="text-lg font-semibold text-rose-900 dark:text-rose-100">{summary.discard}</div>
                 </div>
               </div>
               <DialogFooter className="mt-6">

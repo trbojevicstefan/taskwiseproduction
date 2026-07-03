@@ -8,7 +8,7 @@ import { getSessionUserId } from "@/lib/server-auth";
 import {
   FATHOM_SCOPES,
   getFathomRedirectUri,
-} from "@/lib/fathom";
+} from "@/lib/fathom-utils";
 import { resolveWorkspaceScopeForUser } from "@/lib/workspace-scope";
 
 export async function GET(request: Request) {

@@ -1,9 +1,7 @@
 import { z } from "zod";
 import { apiError, apiSuccess, mapApiError, parseJsonBody } from "@/lib/api-route";
-import {
-  deleteFathomWebhook,
-  getValidFathomAccessTokenForConnection,
-} from "@/lib/fathom";
+import { deleteFathomWebhook } from "@/lib/fathom-webhooks";
+import { getValidFathomAccessTokenForConnection } from "@/lib/fathom-auth";
 import {
   findFathomConnectionById,
   listFathomConnectionsForWorkspace,

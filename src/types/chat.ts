@@ -12,10 +12,40 @@ export interface TaskEvidence {
   timestamp?: string | null;
 }
 
+// Phase 3 task cleanup (vanity filter) metadata. All fields are additive and
+// optional; a task without cleanupStatus is treated as 'active'.
+export type TaskCleanupStatus =
+  | 'active'
+  | 'suggested_expire'
+  | 'expired'
+  | 'duplicate_suggested'
+  | 'completed_suggested'
+  | 'dismissed';
+
+export type TaskCleanupCategory =
+  | 'scheduling_admin'
+  | 'meeting_logistics'
+  | 'already_completed'
+  | 'duplicate'
+  | 'low_specificity'
+  | 'stale_follow_up'
+  | 'expired_event';
+
+export interface TaskCleanupEvidence {
+  sourceType: 'task' | 'transcript' | 'meeting';
+  sourceId: string;
+  snippet: string;
+}
+
+// Phase 9 task prioritization metadata. All fields are additive and optional;
+// scores are computed deterministically by src/lib/task-priority.ts.
+export type TaskPriorityLabel = 'low' | 'medium' | 'high' | 'urgent';
+
 export interface TaskReferenceSchema {
   taskId: string;
   sourceTaskId: string;
   title: string;
+  subtasks?: TaskReferenceSchema[] | null;
   // Dynamic status/properties fetched from canonical task
 }
 
@@ -63,6 +93,9 @@ export interface ExtractedTaskSchema {
   addedToProjectName?: string | null;
   addedToBoardId?: string | null;
   addedToBoardName?: string | null;
+  reviewStatus?: 'suggested' | 'confirmed' | null;
+  reviewedAt?: string | Date | null;
+  taskState?: 'active' | 'suggested' | 'archived' | null;
 
   // AI-generated content
   researchBrief?: string | null;
@@ -78,6 +111,23 @@ export interface ExtractedTaskSchema {
   completionConfidence?: number | null;
   completionEvidence?: TaskEvidence[] | null;
   completionTargets?: CompletionTarget[] | null;
+
+  // Task cleanup metadata (Phase 3). Absent cleanupStatus === 'active'.
+  cleanupStatus?: TaskCleanupStatus | null;
+  cleanupCategory?: TaskCleanupCategory | null;
+  cleanupReason?: string | null;
+  cleanupConfidence?: number | null;
+  cleanupEvidence?: TaskCleanupEvidence[] | null;
+  expiresAt?: string | null;
+  duplicateOfTaskId?: string | null;
+  cleanupReviewedAt?: string | null;
+  cleanupReviewedBy?: string | null;
+
+  // Task prioritization metadata (Phase 9). Computed deterministically.
+  priorityScore?: number | null;
+  priorityLabel?: TaskPriorityLabel | null;
+  priorityReason?: string | null;
+  priorityUpdatedAt?: string | null;
 }
 
 

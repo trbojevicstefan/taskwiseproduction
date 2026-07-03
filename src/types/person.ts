@@ -1,5 +1,8 @@
 // src/types/person.ts
 
+export type PersonType = "teammate" | "client" | "unknown";
+export type PersonTypeSource = "manual" | "auto";
+
 export interface Person {
   id: string; // Document ID
   userId: string; // The TaskWiseAI user who this person belongs to
@@ -13,6 +16,11 @@ export interface Person {
   aliases?: string[]; 
   isBlocked?: boolean | null;
   sourceSessionIds: string[]; // List of session IDs where this person was identified
+  personType?: PersonType; // absent === 'unknown'
+  personTypeSource?: PersonTypeSource; // 'manual' set only by user actions; auto must never overwrite manual
+  personTypeReason?: string; // short human-readable heuristic reason
+  company?: string | null; // client accounts; user-editable; may be auto-suggested from email domain
+  nextFollowUpAt?: string | null; // ISO date, user-set
   createdAt: any; // Timestamp
   lastSeenAt: any; // Timestamp
 }
@@ -27,4 +35,6 @@ export interface PersonWithTaskCount extends Person {
       done: number;
       recurring: number;
     };
+    lastMeetingAt?: string | null; // ISO string — max meeting startTime among sourceSessionIds
+    overdueTaskCount?: number; // open tasks with dueAt < now and status !== 'done'
 }

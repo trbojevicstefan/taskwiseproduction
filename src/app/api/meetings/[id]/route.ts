@@ -4,8 +4,7 @@ import { getDb } from "@/lib/db";
 import { getSessionUserId } from "@/lib/server-auth";
 import { normalizeTask } from "@/lib/data";
 import { syncTasksForSource } from "@/lib/task-sync";
-import { ensureBoardItemsForTasks } from "@/lib/board-items";
-import { ensureDefaultBoard } from "@/lib/boards";
+import { buildTaskReferenceTree } from "@/lib/meeting-task-references";
 import {
   cleanupChatTasksForSessions,
   updateLinkedChatSessions,
@@ -28,6 +27,31 @@ const serializeMeeting = (meeting: any) => {
     createdAt: meeting.createdAt?.toISOString?.() || meeting.createdAt,
     lastActivityAt: meeting.lastActivityAt?.toISOString?.() || meeting.lastActivityAt,
   };
+};
+
+const hydrateMeetingTasksForResponse = async (
+  userId: string,
+  meeting: any,
+  workspaceId?: string | null
+) => {
+  if (!meeting || !Array.isArray(meeting.extractedTasks)) {
+    return meeting;
+  }
+  try {
+    const { hydrateTaskReferenceLists } = await import("@/lib/task-hydration");
+    const [hydratedExtracted] = await hydrateTaskReferenceLists(
+      userId,
+      [meeting.extractedTasks],
+      workspaceId ? { workspaceId } : undefined
+    );
+    return {
+      ...meeting,
+      extractedTasks: hydratedExtracted || [],
+    };
+  } catch (error) {
+    console.error("Failed to hydrate meeting tasks for response:", error);
+    return meeting;
+  }
 };
 
 const ACTIVITY_KEYS = new Set([
@@ -168,21 +192,14 @@ export async function PATCH(
         sourceSessionType: "meeting",
         sourceSessionName: meeting.title || body.title || "Meeting",
         origin: "meeting",
-        taskState: "active",
+        taskState: "suggested",
       });
 
-      // Convert to references
-      const referencedTasks = extractedTasks.map((task: any) => {
-        const canonicalId = syncResult.taskMap.get(task.id);
-        return canonicalId
-          ? {
-            taskId: canonicalId,
-            sourceTaskId: task.id,
-            title: task.title,
-            // Status is dynamic
-          }
-          : task;
-      });
+      // Store lightweight references while preserving the nested task shape for hydration.
+      const referencedTasks = buildTaskReferenceTree(
+        extractedTasks,
+        syncResult.taskMap
+      );
       update.extractedTasks = referencedTasks;
 
       // Update the meeting with references
@@ -201,18 +218,6 @@ export async function PATCH(
         );
         await cleanupChatTasksForSessions(db, ownerUserId, linkedSessions);
       }
-      if (workspaceId) {
-        const defaultBoard = await ensureDefaultBoard(db, ownerUserId, workspaceId);
-        await ensureBoardItemsForTasks(db, {
-          userId: ownerUserId,
-          workspaceId,
-          boardId: String(defaultBoard._id),
-          tasks: extractedTasks, // Board likely needs full info? Or syncTasksForSource handled it?
-          // syncTasksForSource handled updating tasks collection.
-          // ensureBoardItemsForTasks likely reads tasks? Or uses the array passed?
-          // It likely uses array passed. So pass FULL extractedTasks.
-        });
-      }
     } catch (error) {
       console.error("Failed to sync meeting tasks after update:", error);
       // Fallback update if sync failed
@@ -224,7 +229,12 @@ export async function PATCH(
 
   // Re-fetch to return the definitive updated document? OR just patch local object
   const updatedMeeting = await db.collection("meetings").findOne(filter);
-  return NextResponse.json(serializeMeeting(updatedMeeting || meeting));
+  const hydratedMeeting = await hydrateMeetingTasksForResponse(
+    ownerUserId,
+    updatedMeeting || meeting,
+    scopedWorkspaceId || null
+  );
+  return NextResponse.json(serializeMeeting(hydratedMeeting));
 }
 
 export async function GET(

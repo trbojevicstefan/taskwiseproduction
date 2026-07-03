@@ -4,6 +4,7 @@ import { getDb } from "@/lib/db";
 import { findUserById } from "@/lib/db/users";
 import { recordExternalApiFailure } from "@/lib/observability-metrics";
 import { getValidSlackToken } from "@/lib/slack";
+import { SLACK_TEAMMATE_REASON } from "@/lib/person-classification";
 import {
   createLogger,
   ensureCorrelationId,
@@ -168,6 +169,13 @@ export const runSlackUsersSyncJob = async ({
             ...(existing.name ? {} : { name: member.realName }),
             ...(existing.title ? {} : { title: member.title || null }),
             ...(existing.avatarUrl ? {} : { avatarUrl: member.image || null }),
+            ...(existing.personTypeSource === "manual"
+              ? {}
+              : {
+                  personType: "teammate",
+                  personTypeSource: "auto",
+                  personTypeReason: SLACK_TEAMMATE_REASON,
+                }),
             lastSeenAt: new Date(),
           },
         }
@@ -187,6 +195,9 @@ export const runSlackUsersSyncJob = async ({
         phantomBusterId: null,
         aliases: [],
         sourceSessionIds: [],
+        personType: "teammate",
+        personTypeSource: "auto",
+        personTypeReason: SLACK_TEAMMATE_REASON,
         createdAt: now,
         lastSeenAt: now,
       });

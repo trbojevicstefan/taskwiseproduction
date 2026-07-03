@@ -4,12 +4,11 @@ import {
   POST,
 } from "@/app/api/workspaces/[workspaceId]/fathom/connections/[connectionId]/webhooks/route";
 import {
-  deleteFathomWebhook,
   ensureFathomConnectionWebhook,
   getFathomWebhookUrl,
-  pruneFathomManagedWebhooks,
-  getValidFathomAccessTokenForConnection,
 } from "@/lib/fathom";
+import { getValidFathomAccessTokenForConnection } from "@/lib/fathom-auth";
+import { deleteFathomWebhook, pruneFathomManagedWebhooks } from "@/lib/fathom-webhooks";
 import {
   findFathomConnectionById,
   updateFathomConnectionById,
@@ -28,15 +27,21 @@ jest.mock("@/lib/fathom-connections", () => ({
 
 jest.mock("@/lib/fathom", () => ({
   FATHOM_WEBHOOK_EVENT: "new-meeting-content-ready",
-  deleteFathomWebhook: jest.fn(),
   ensureFathomConnectionWebhook: jest.fn(),
   getFathomWebhookUrl: jest.fn((token: string) => `https://public.example/webhook?token=${token}`),
+}));
+
+jest.mock("@/lib/fathom-auth", () => ({
+  getValidFathomAccessTokenForConnection: jest.fn(),
+}));
+
+jest.mock("@/lib/fathom-webhooks", () => ({
+  deleteFathomWebhook: jest.fn(),
   pruneFathomManagedWebhooks: jest.fn(async (_accessToken: string, input: any) => ({
     managedWebhooks: input.managedWebhooks || [],
     deletedCount: 0,
     cleanupErrors: [],
   })),
-  getValidFathomAccessTokenForConnection: jest.fn(),
 }));
 
 const mockedRequireWorkspaceRouteAccess =

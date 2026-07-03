@@ -15,7 +15,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { LogOut, Settings, UserCircle, Sun, Moon, HelpCircle, ClipboardPaste, Copy, Building, UserPlus, Command, RefreshCw } from 'lucide-react';
+import { LogOut, Settings, UserCircle, Sun, Moon, HelpCircle, ClipboardPaste, Building, UserPlus, Command, RefreshCw } from 'lucide-react';
 import { useTheme } from 'next-themes';
 import { useRouter } from 'next/navigation';
 import { useUIState } from '@/contexts/UIStateContext';
@@ -186,10 +186,6 @@ export default function HeaderNav() {
                             <ClipboardPaste className="mr-2 h-4 w-4" />
                             <span>Paste Content (Ctrl+V)</span>
                         </DropdownMenuItem>
-                        <DropdownMenuItem>
-                            <Copy className="mr-2 h-4 w-4" />
-                            <span>Copy Selected (Ctrl+C)</span>
-                        </DropdownMenuItem>
                         <DropdownMenuSeparator />
                         <DropdownMenuItem onSelect={handleResetOnboarding}>
                             <RefreshCw className="mr-2 h-4 w-4" />
@@ -304,11 +300,11 @@ export default function HeaderNav() {
                 </DropdownMenuItem>
             )}
             <DropdownMenuSeparator />
-            <DropdownMenuItem onClick={() => router.push('/settings')}>
+            <DropdownMenuItem onClick={() => router.push('/settings?section=workspace')}>
                 <UserPlus className="mr-2 h-4 w-4" />
                 <span>Add teammates</span>
             </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => router.push('/settings')}>
+            <DropdownMenuItem onClick={() => router.push('/settings?section=workspace')}>
                 <Building className="mr-2 h-4 w-4" />
                 <span>Workspace settings</span>
             </DropdownMenuItem>
@@ -333,7 +329,7 @@ export default function HeaderNav() {
                 <Settings className="mr-2 h-4 w-4" />
                 <span>Settings</span>
             </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => router.push('/settings')}>
+            <DropdownMenuItem onClick={() => router.push('/settings?section=profile')}>
                 <UserCircle className="mr-2 h-4 w-4" />
                 <span>Profile</span>
             </DropdownMenuItem>

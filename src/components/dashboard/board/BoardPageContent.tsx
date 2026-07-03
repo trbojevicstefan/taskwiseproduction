@@ -97,7 +97,7 @@ import { subscribeRealtimeUpdates } from "@/lib/realtime-client";
 import type { Task } from "@/types/project";
 import type { Board, BoardStatus, BoardStatusCategory } from "@/types/board";
 import type { Person } from "@/types/person";
-import type { ExtractedTaskSchema } from "@/types/chat";
+import type { ExtractedTaskSchema, TaskPriorityLabel } from "@/types/chat";
 import { buildBriefContext } from "@/lib/brief-context";
 import { generateBriefsForTasks } from "@/lib/task-briefs";
 
@@ -114,16 +114,18 @@ type BoardTaskItem = Task & {
 
 const priorityOptions: TaskPriority[] = ["low", "medium", "high"];
 
-const priorityStyles: Record<TaskPriority, string> = {
-  low: "bg-emerald-500/15 text-emerald-600 border-emerald-500/30",
-  medium: "bg-amber-500/15 text-amber-700 border-amber-500/30",
-  high: "bg-rose-500/15 text-rose-600 border-rose-500/30",
+const priorityStyles: Record<TaskPriorityLabel, string> = {
+  low: "bg-emerald-500/15 text-emerald-600 border-emerald-500/30 dark:text-emerald-400",
+  medium: "bg-amber-500/15 text-amber-700 border-amber-500/30 dark:text-amber-400",
+  high: "bg-rose-500/15 text-rose-600 border-rose-500/30 dark:text-rose-400",
+  urgent: "bg-red-600/15 text-red-700 border-red-600/40 dark:text-red-400",
 };
 
-const priorityLabel: Record<TaskPriority, string> = {
+const priorityLabel: Record<TaskPriorityLabel, string> = {
   low: "Low",
   medium: "Medium",
   high: "High",
+  urgent: "Urgent",
 };
 
 type DueFilter = "all" | "today" | "overdue" | "this_week";
@@ -218,15 +220,100 @@ interface TaskDraft {
   assigneeId: string;
   dueDate: string;
 }
-function PriorityBadge({ priority }: { priority: TaskPriority }) {
+
+function BoardUnavailableState() {
+  const router = useRouter();
+
+  return (
+    <div className="flex h-full flex-col bg-background">
+      <DashboardHeader
+        pageIcon={LayoutGrid}
+        pageTitle={<h1 className="text-2xl font-bold font-headline">Board</h1>}
+      />
+      <div className="flex flex-1 items-center justify-center p-8">
+        <div className="max-w-md rounded-lg border bg-card p-6 text-center shadow-sm">
+          <AlertCircle className="mx-auto mb-4 h-10 w-10 text-muted-foreground" />
+          <h2 className="text-lg font-semibold">Workspace not loaded</h2>
+          <p className="mt-2 text-sm text-muted-foreground">
+            The board needs an active workspace before it can load tasks and columns.
+          </p>
+          <div className="mt-5 flex flex-wrap justify-center gap-2">
+            <Button variant="outline" onClick={() => router.refresh()}>
+              Reload workspace
+            </Button>
+            <Button onClick={() => router.push("/meetings")}>Go to Home</Button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+function PriorityBadge({
+  priority,
+  reason,
+}: {
+  priority: TaskPriorityLabel;
+  reason?: string | null;
+}) {
   return (
     <span
+      title={reason || undefined}
       className={cn(
         "text-xs font-medium px-2 py-0.5 rounded-full border",
         priorityStyles[priority]
       )}
     >
       {priorityLabel[priority]}
+    </span>
+  );
+}
+
+const getCleanupBadgeMeta = (
+  task: Pick<Task, "cleanupStatus" | "cleanupCategory">
+): { label: string; className: string } | null => {
+  switch (task.cleanupStatus) {
+    case "suggested_expire":
+      return task.cleanupCategory === "stale_follow_up" ||
+        task.cleanupCategory === "expired_event"
+        ? {
+            label: "Stale?",
+            className:
+              "bg-slate-500/15 text-slate-600 border-slate-500/30 dark:text-slate-400",
+          }
+        : {
+            label: "Vanity?",
+            className:
+              "bg-amber-500/15 text-amber-700 border-amber-500/30 dark:text-amber-400",
+          };
+    case "duplicate_suggested":
+      return {
+        label: "Duplicate?",
+        className:
+          "bg-violet-500/15 text-violet-600 border-violet-500/30 dark:text-violet-400",
+      };
+    case "completed_suggested":
+      return {
+        label: "Done?",
+        className:
+          "bg-emerald-500/15 text-emerald-600 border-emerald-500/30 dark:text-emerald-400",
+      };
+    default:
+      return null;
+  }
+};
+
+function CleanupBadge({ task }: { task: Task }) {
+  const meta = getCleanupBadgeMeta(task);
+  if (!meta) return null;
+  return (
+    <span
+      title={task.cleanupReason || undefined}
+      className={cn(
+        "text-xs font-medium px-2 py-0.5 rounded-full border",
+        meta.className
+      )}
+    >
+      {meta.label}
     </span>
   );
 }
@@ -253,7 +340,7 @@ function AssigneeAvatar({
     }
     return (
       <div className={cn(frameClass, "bg-muted")} title="Unassigned">
-        <img src="/logo.svg" alt="TaskWiseAI" className="h-4 w-4" />
+        <img src="/logo.svg" alt="TaskWiseAI" className="h-4 w-4" width={16} height={16} />
       </div>
     );
   }
@@ -408,7 +495,11 @@ function AssigneeDropdown({
               aria-label={`Select ${task.title}`}
               className="h-4 w-4"
             />
-            <PriorityBadge priority={priority} />
+            <PriorityBadge
+              priority={task.priorityLabel || priority}
+              reason={task.priorityReason}
+            />
+            <CleanupBadge task={task} />
           </div>
           <TaskActionsMenu onEdit={onEdit} onDelete={onDelete} />
         </div>
@@ -456,7 +547,7 @@ function AssigneeDropdown({
     </div>
   );
 }
-  export default function BoardPageContent({
+function BoardWorkspaceContent({
     workspaceId: _workspaceId,
   }: BoardPageContentProps) {
   const { toast } = useToast();
@@ -2303,7 +2394,7 @@ function AssigneeDropdown({
     [toast]
   );
   const renderBoardView = () => (
-    <div className="flex-1 overflow-x-auto overflow-y-hidden">
+    <div className="flex-1 min-h-0 overflow-x-auto">
       <div className="flex h-full gap-6 px-6 pb-6 min-w-[1000px]">
         {orderedStatuses.map((status: any) => {
           const columnTasks = tasksByStatus.get(status.id) || [];
@@ -2438,8 +2529,8 @@ function AssigneeDropdown({
   );
 
   const renderListView = () => (
-    <div className="flex-1 px-6 pb-6 overflow-hidden flex flex-col">
-      <div className="bg-card rounded-xl border border-border/50 shadow-sm overflow-hidden flex flex-col flex-1">
+    <div className="flex-1 px-6 pb-6 min-h-0 flex flex-col">
+      <div className="bg-card rounded-xl border border-border/50 shadow-sm flex flex-col flex-1 min-h-0">
         <div className="grid grid-cols-12 gap-4 p-4 border-b border-border/50 bg-muted/40 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
           <div className="col-span-1 flex items-center">
             <Checkbox
@@ -2507,7 +2598,10 @@ function AssigneeDropdown({
                   </div>
 
                   <div className="col-span-2">
-                    <PriorityBadge priority={task.priority || "medium"} />
+                    <PriorityBadge
+                      priority={task.priorityLabel || task.priority || "medium"}
+                      reason={task.priorityReason}
+                    />
                   </div>
 
                   <div className="col-span-2 text-sm text-muted-foreground">{dueLabel}</div>
@@ -2547,12 +2641,8 @@ function AssigneeDropdown({
   return (
     <div className="flex h-full flex-col bg-background">
       <DashboardHeader
-        pageIcon={LayoutGrid}
-        pageTitle={
-          <h1 className="text-2xl font-bold font-headline">
-            {activeBoard?.name || "Board"}
-          </h1>
-        }
+        pageIcon={null}
+        pageTitle={null}
       >
         <div className="flex flex-wrap items-center gap-3">
           <div className="flex items-center gap-2">
@@ -2734,7 +2824,7 @@ function AssigneeDropdown({
         </div>
       </DashboardHeader>
 
-      <main className="flex-1 overflow-hidden pt-6 flex flex-col">
+      <main className="flex-1 min-h-0 pt-6 flex flex-col">
         {viewMode === "board" ? renderBoardView() : renderListView()}
       </main>
 
@@ -3182,6 +3272,14 @@ function AssigneeDropdown({
       </Dialog>
     </div>
   );
+}
+
+export default function BoardPageContent({ workspaceId }: BoardPageContentProps) {
+  if (!workspaceId || workspaceId === "unknown") {
+    return <BoardUnavailableState />;
+  }
+
+  return <BoardWorkspaceContent workspaceId={workspaceId} />;
 }
 
 

@@ -185,7 +185,7 @@ export const IntegrationsProvider = ({ children }: { children: ReactNode }) => {
     }
     try {
       let endpoint = "/api/google/revoke";
-      let payload: Record<string, unknown> = {};
+      const payload: Record<string, unknown> = {};
       if (activeWorkspaceId) {
         endpoint = `/api/workspaces/${encodeURIComponent(activeWorkspaceId)}/google/revoke`;
         if (

@@ -9,14 +9,24 @@ import {
 import {
   executeMcpTool,
   listMcpTools,
-  McpToolCallError,
   resolveMcpToolScopeRequirement,
 } from "@/lib/mcp-tools";
+import { McpToolCallError } from "@/lib/mcp-read-tools";
+import { registerAllMcpDefinitions } from "@/lib/mcp-register-all";
+import {
+  getMcpPromptDefinition,
+  listRegisteredMcpPrompts,
+  listRegisteredMcpResources,
+  readRegisteredMcpResource,
+} from "@/lib/mcp-registry";
 import { logMcpAuditEvent } from "@/lib/mcp-audit-logs";
 import { enforceMcpApiKeyRateLimit, type McpRateLimitResult } from "@/lib/mcp-rate-limit";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+
+// Populate the MCP registry (tools/resources/prompts) exactly once per process.
+registerAllMcpDefinitions();
 
 type JsonRpcRequestId = string | number | null | undefined;
 
@@ -35,9 +45,21 @@ const mcpToolCallParamsSchema = z.object({
   arguments: z.record(z.unknown()).optional(),
 });
 
+const mcpResourceReadParamsSchema = z.object({
+  uri: z.string().trim().min(1).max(2000),
+});
+
+const mcpPromptGetParamsSchema = z.object({
+  name: z.string().trim().min(1).max(200),
+  arguments: z.record(z.string().max(4000)).optional(),
+});
+
 const METHOD_SCOPE_REQUIREMENTS: Record<string, string | null> = {
   "tools/list": "mcp:read",
   "resources/list": "mcp:read",
+  "resources/read": "mcp:read",
+  "prompts/list": "mcp:read",
+  "prompts/get": "mcp:read",
 };
 
 const toJsonRpcResult = (id: JsonRpcRequestId, result: unknown) => ({
@@ -165,6 +187,34 @@ const toSseJsonRpcResponse = (
   });
 };
 
+// Generalized audit-resource extraction so every write-scope tool (not just task
+// writes) gets a meaningful resourceType/resourceId in mcpAuditLogs.
+const AUDIT_RESOURCE_CANDIDATES: Array<{ dataKey: string; resourceType: string }> = [
+  { dataKey: "task", resourceType: "task" },
+  { dataKey: "reminder", resourceType: "reminder" },
+  { dataKey: "meeting", resourceType: "meeting" },
+  { dataKey: "person", resourceType: "person" },
+  { dataKey: "board", resourceType: "board" },
+];
+
+const resolveAuditResource = (
+  resultData: Record<string, unknown> | undefined,
+  toolArguments: Record<string, unknown>
+) => {
+  for (const candidate of AUDIT_RESOURCE_CANDIDATES) {
+    const value = (resultData as any)?.[candidate.dataKey];
+    const id = value && typeof value === "object" ? (value as any).id : null;
+    if (id) {
+      return { resourceType: candidate.resourceType, resourceId: String(id) };
+    }
+  }
+  const argTaskId = (toolArguments as any)?.taskId;
+  if (argTaskId) {
+    return { resourceType: "task", resourceId: String(argTaskId) };
+  }
+  return { resourceType: "workspace", resourceId: "" };
+};
+
 const createMethodResponse = async (
   db: any,
   requestBody: z.infer<typeof mcpJsonRpcRequestSchema>,
@@ -179,6 +229,7 @@ const createMethodResponse = async (
         capabilities: {
           tools: { listChanged: false },
           resources: { listChanged: false },
+          prompts: { listChanged: false },
         },
         serverInfo: {
           name: "taskwise-mcp",
@@ -214,14 +265,18 @@ const createMethodResponse = async (
           toolArguments
         );
         if (isWriteTool) {
+          const auditResource = resolveAuditResource(
+            (toolResult as any)?.data,
+            toolArguments
+          );
           await logMcpAuditEvent(db as any, {
             workspaceId,
             actorType: "api_key",
             apiKeyId: keyDoc._id,
             apiKeyName: keyDoc.name,
             action: "mcp.tool.call",
-            resourceType: "task",
-            resourceId: String((toolResult as any)?.data?.task?.id || ""),
+            resourceType: auditResource.resourceType,
+            resourceId: auditResource.resourceId,
             status: "success",
             message: `Executed ${toolCallParams.name}`,
             metadata: {
@@ -238,14 +293,15 @@ const createMethodResponse = async (
         });
       } catch (error) {
         if (isWriteTool) {
+          const auditResource = resolveAuditResource(undefined, toolArguments);
           await logMcpAuditEvent(db as any, {
             workspaceId,
             actorType: "api_key",
             apiKeyId: keyDoc._id,
             apiKeyName: keyDoc.name,
             action: "mcp.tool.call",
-            resourceType: "task",
-            resourceId: String((toolArguments as any)?.taskId || ""),
+            resourceType: auditResource.resourceType,
+            resourceId: auditResource.resourceId,
             status: "error",
             message:
               error instanceof Error
@@ -274,8 +330,113 @@ const createMethodResponse = async (
     }
     case "resources/list":
       return toJsonRpcResult(requestBody.id, {
-        resources: [],
+        resources: listRegisteredMcpResources().map((resource) => ({
+          uri: resource.uri,
+          name: resource.name,
+          description: resource.description,
+          mimeType: resource.mimeType,
+        })),
       });
+    case "resources/read": {
+      const parsedParams = mcpResourceReadParamsSchema.safeParse(
+        requestBody.params || {}
+      );
+      if (!parsedParams.success) {
+        return toJsonRpcError(
+          requestBody.id,
+          -32602,
+          "Invalid params for resources/read.",
+          parsedParams.error.flatten()
+        );
+      }
+
+      try {
+        const contents = await readRegisteredMcpResource(
+          { db, workspaceId },
+          parsedParams.data.uri
+        );
+        if (!contents) {
+          return toJsonRpcError(
+            requestBody.id,
+            -32002,
+            `Resource not found: ${parsedParams.data.uri}`,
+            { uri: parsedParams.data.uri }
+          );
+        }
+        return toJsonRpcResult(requestBody.id, {
+          contents: [contents],
+        });
+      } catch (error) {
+        if (error instanceof McpToolCallError) {
+          return toJsonRpcError(requestBody.id, -32602, error.message, error.details);
+        }
+        throw error;
+      }
+    }
+    case "prompts/list":
+      return toJsonRpcResult(requestBody.id, {
+        prompts: listRegisteredMcpPrompts().map((prompt) => ({
+          name: prompt.name,
+          description: prompt.description,
+          arguments: (prompt.arguments || []).map((argument) => ({
+            name: argument.name,
+            ...(argument.description ? { description: argument.description } : {}),
+            required: Boolean(argument.required),
+          })),
+        })),
+      });
+    case "prompts/get": {
+      const parsedParams = mcpPromptGetParamsSchema.safeParse(requestBody.params || {});
+      if (!parsedParams.success) {
+        return toJsonRpcError(
+          requestBody.id,
+          -32602,
+          "Invalid params for prompts/get.",
+          parsedParams.error.flatten()
+        );
+      }
+
+      const promptDefinition = getMcpPromptDefinition(parsedParams.data.name);
+      if (!promptDefinition) {
+        return toJsonRpcError(
+          requestBody.id,
+          -32602,
+          `Prompt not found: ${parsedParams.data.name}`
+        );
+      }
+
+      const promptArguments = parsedParams.data.arguments || {};
+      const missingArguments = (promptDefinition.arguments || [])
+        .filter(
+          (argument) =>
+            argument.required && !String(promptArguments[argument.name] || "").trim()
+        )
+        .map((argument) => argument.name);
+      if (missingArguments.length) {
+        return toJsonRpcError(
+          requestBody.id,
+          -32602,
+          `Missing required prompt arguments: ${missingArguments.join(", ")}`,
+          { missing: missingArguments }
+        );
+      }
+
+      try {
+        const prompt = await promptDefinition.handler(
+          { db, workspaceId },
+          promptArguments
+        );
+        return toJsonRpcResult(requestBody.id, {
+          description: prompt.description,
+          messages: prompt.messages,
+        });
+      } catch (error) {
+        if (error instanceof McpToolCallError) {
+          return toJsonRpcError(requestBody.id, -32602, error.message, error.details);
+        }
+        throw error;
+      }
+    }
     default:
       return toJsonRpcError(
         requestBody.id,

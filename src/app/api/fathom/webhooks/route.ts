@@ -1,10 +1,8 @@
 import { NextResponse } from "next/server";
 import { apiError } from "@/lib/api-route";
 import { getDb } from "@/lib/db";
-import {
-  deleteFathomWebhook,
-  getValidFathomAccessTokenForConnection,
-} from "@/lib/fathom";
+import { deleteFathomWebhook } from "@/lib/fathom-webhooks";
+import { getValidFathomAccessTokenForConnection } from "@/lib/fathom-auth";
 import {
   findPreferredFathomConnectionForWorkspace,
   updateFathomConnectionById,
@@ -97,7 +95,7 @@ export async function DELETE(request: Request) {
             ]
           : [];
     const targets = Array.isArray(ids) ? ids : [];
-    const webhookIds: any[] = Boolean(deleteAll) ? configuredWebhooks : targets;
+    const webhookIds: any[] = deleteAll ? configuredWebhooks : targets;
 
     if (!webhookIds.length) {
       return apiError(400, "request_error", "No webhook IDs provided.");

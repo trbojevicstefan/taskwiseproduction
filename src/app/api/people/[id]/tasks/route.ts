@@ -76,7 +76,7 @@ const toTime = (value: unknown): number => {
   return Number.isNaN(time) ? 0 : time;
 };
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+ 
 type AnyTask = Record<string, any>;
 
 const buildTaskKey = (task: AnyTask): string => {

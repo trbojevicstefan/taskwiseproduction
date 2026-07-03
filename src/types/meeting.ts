@@ -22,7 +22,7 @@ export interface Meeting extends BaseSession {
 
   // Ingestion & Processing State
   state?: 'raw_data_in' | 'processing' | 'tasks_ready' | 'error';
-  ingestSource?: 'fathom' | 'manual' | 'google' | 'import';
+  ingestSource?: 'fathom' | 'fireflies' | 'grain' | 'manual' | 'google' | 'import';
   fathomNotificationReadAt?: string | null;
   recordingIdHash?: string | null;
   isHidden?: boolean;

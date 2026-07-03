@@ -18,7 +18,7 @@ export default function LegalPageLayout({ children, title }: LegalPageLayoutProp
         </header>
         <main className="max-w-3xl mx-auto py-8 sm:py-12 px-4 sm:px-6 lg:px-8">
             <h1 className="text-3xl sm:text-4xl font-bold font-headline mb-6">{title}</h1>
-            <div className="prose prose-invert max-w-none text-muted-foreground">
+            <div className="text-muted-foreground [&_h2]:mt-8 [&_h2]:mb-3 [&_h2]:text-xl [&_h2]:font-semibold [&_h2]:text-foreground [&_p]:mb-4 [&_p]:leading-7 [&_ul]:mb-4 [&_ul]:list-disc [&_ul]:pl-6 [&_li]:mb-2 [&_li]:leading-7 [&_strong]:font-semibold [&_strong]:text-foreground">
                 {children}
             </div>
         </main>

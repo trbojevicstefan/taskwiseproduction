@@ -34,7 +34,7 @@ const getNextRank = async (
 };
 
 export async function GET(
-  _request: Request,
+  request: Request,
   {
     params,
   }: {
@@ -53,6 +53,9 @@ export async function GET(
   }
   const { db } = access;
 
+  const { searchParams } = new URL(request.url);
+  const includeExpired = searchParams.get("includeExpired") === "1";
+
   const pipeline = [
     { $match: { workspaceId, boardId } },
     {
@@ -65,6 +68,9 @@ export async function GET(
               $expr: { $eq: ["$_id", "$$lookupTaskId"] },
               workspaceId,
               taskState: { $ne: "archived" },
+              // Expired cleanup tasks are hidden from the board by default;
+              // ?includeExpired=1 opts back in (restore flow).
+              ...(includeExpired ? {} : { cleanupStatus: { $ne: "expired" } }),
             },
           },
           { $project: TASK_LIST_PROJECTION },
@@ -198,6 +204,8 @@ export async function POST(
       sourceSessionType: body.sourceSessionType ?? "task",
       sourceTaskId: body.sourceTaskId ?? null,
       taskState: "active",
+      reviewStatus: "confirmed",
+      reviewedAt: now,
       createdAt: now,
       lastUpdated: now,
     };
@@ -217,6 +225,8 @@ export async function POST(
         $set: {
           status: status.category || task.status || "todo",
           taskState: "active",
+          reviewStatus: "confirmed",
+          reviewedAt: now,
           workspaceId,
           lastUpdated: now,
         },

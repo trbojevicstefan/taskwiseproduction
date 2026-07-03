@@ -187,7 +187,7 @@ const run = async () => {
     .project({ _id: 1, id: 1, uid: 1, email: 1 })
     .toArray();
 
-  let totals = {
+  const totals = {
     users: 0,
     meetings: 0,
     chats: 0,

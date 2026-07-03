@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { z } from "zod";
 import { apiError } from "@/lib/api-route";
 import { getDb } from "@/lib/db";
 import { getSessionUserId } from "@/lib/server-auth";
@@ -11,7 +12,68 @@ const serializePerson = (person: any) => ({
   _id: undefined,
   createdAt: person.createdAt?.toISOString?.() || person.createdAt,
   lastSeenAt: person.lastSeenAt?.toISOString?.() || person.lastSeenAt,
+  personType: person.personType || "unknown",
+  personTypeSource: person.personTypeSource ?? null,
+  personTypeReason: person.personTypeReason ?? null,
+  company: person.company ?? null,
+  nextFollowUpAt:
+    person.nextFollowUpAt?.toISOString?.() || person.nextFollowUpAt || null,
 });
+
+const patchPersonSchema = z
+  .object({
+    // Editable fields (whitelisted; anything else is rejected).
+    name: z.string().optional(),
+    email: z.string().nullable().optional(),
+    title: z.string().nullable().optional(),
+    avatarUrl: z.string().nullable().optional(),
+    slackId: z.string().nullable().optional(),
+    firefliesId: z.string().nullable().optional(),
+    phantomBusterId: z.string().nullable().optional(),
+    aliases: z.array(z.string()).optional(),
+    isBlocked: z.boolean().nullable().optional(),
+    sourceSessionIds: z.array(z.string()).optional(),
+    personType: z.enum(["teammate", "client", "unknown"]).optional(),
+    company: z.string().nullable().optional(),
+    nextFollowUpAt: z
+      .string()
+      .refine((value) => !Number.isNaN(Date.parse(value)), {
+        message: "nextFollowUpAt must be an ISO date string.",
+      })
+      .nullable()
+      .optional(),
+    // Read-only fields that existing clients round-trip when saving a full
+    // person object (e.g. the person detail page). Accepted, never persisted.
+    id: z.unknown().optional(),
+    _id: z.unknown().optional(),
+    userId: z.unknown().optional(),
+    workspaceId: z.unknown().optional(),
+    createdAt: z.unknown().optional(),
+    lastSeenAt: z.unknown().optional(),
+    taskCount: z.unknown().optional(),
+    taskCounts: z.unknown().optional(),
+    personTypeSource: z.unknown().optional(),
+    personTypeReason: z.unknown().optional(),
+    lastMeetingAt: z.unknown().optional(),
+    overdueTaskCount: z.unknown().optional(),
+  })
+  .strict();
+
+const EDITABLE_PERSON_FIELDS = [
+  "name",
+  "email",
+  "title",
+  "avatarUrl",
+  "slackId",
+  "firefliesId",
+  "phantomBusterId",
+  "aliases",
+  "isBlocked",
+  "sourceSessionIds",
+  "personType",
+  "company",
+  "nextFollowUpAt",
+] as const;
 
 export async function GET(
   _request: Request,
@@ -151,7 +213,28 @@ export async function PATCH(
   }
 
   const body = await request.json().catch(() => ({}));
-  const update = { ...body, lastSeenAt: new Date() };
+  const parsed = patchPersonSchema.safeParse(body);
+  if (!parsed.success) {
+    return apiError(
+      400,
+      "request_error",
+      "Invalid person payload.",
+      parsed.error.flatten()
+    );
+  }
+
+  const update: Record<string, any> = { lastSeenAt: new Date() };
+  for (const field of EDITABLE_PERSON_FIELDS) {
+    const value = (parsed.data as Record<string, unknown>)[field];
+    if (value !== undefined) {
+      update[field] = value;
+    }
+  }
+  if (update.personType !== undefined) {
+    // Person type set through the API is always a user action.
+    update.personTypeSource = "manual";
+    update.personTypeReason = "Set manually";
+  }
 
   const db = await getDb();
   const { workspaceId, workspaceMemberUserIds } = await resolveWorkspaceScopeForUser(db, userId, {

@@ -1,6 +1,10 @@
 import { randomUUID } from "crypto";
 import type { Db } from "mongodb";
 import { normalizePersonNameKey } from "@/lib/transcript-utils";
+import {
+  classifyPersonHeuristic,
+  resolveInternalDomains,
+} from "@/lib/person-classification";
 
 type AttendeeInput = {
   name?: string | null;
@@ -65,6 +69,19 @@ export const upsertPeopleFromAttendees = async ({
 
   people.forEach(attachToMaps);
 
+  // Internal domains for auto-classification. Kept cheap: derived lazily from
+  // the ingesting user's own email domain only (a single users lookup per
+  // ingestion batch) — full workspace member ids are not available here.
+  let internalDomainsPromise: Promise<Set<string>> | null = null;
+  const getInternalDomains = () => {
+    if (!internalDomainsPromise) {
+      internalDomainsPromise = resolveInternalDomains(db, {
+        userIds: [userId],
+      }).catch(() => new Set<string>());
+    }
+    return internalDomainsPromise;
+  };
+
   let created = 0;
   let updated = 0;
   const now = new Date();
@@ -102,6 +119,25 @@ export const upsertPeopleFromAttendees = async ({
         update.aliases = Array.from(nextAliases);
       }
 
+      // Auto-(re)classify only when it cannot clobber a manual choice and the
+      // doc is unclassified or just gained an email — avoid churning docs.
+      const gainedEmail = Boolean(!existing.email && email);
+      if (
+        existing.personTypeSource !== "manual" &&
+        (gainedEmail || !existing.personType)
+      ) {
+        const classification = classifyPersonHeuristic(
+          {
+            email: update.email ?? existing.email ?? null,
+            slackId: existing.slackId ?? null,
+          },
+          await getInternalDomains()
+        );
+        update.personType = classification.personType;
+        update.personTypeSource = "auto";
+        update.personTypeReason = classification.reason;
+      }
+
       await db.collection("people").updateOne(
         { _id: existing._id, userId },
         { $set: update }
@@ -119,6 +155,11 @@ export const upsertPeopleFromAttendees = async ({
       continue;
     }
 
+    const classification = classifyPersonHeuristic(
+      { email: email || null, slackId: null },
+      await getInternalDomains()
+    );
+
     const person = {
       _id: randomUUID(),
       userId,
@@ -132,6 +173,9 @@ export const upsertPeopleFromAttendees = async ({
       aliases: [],
       isBlocked: false,
       sourceSessionIds: sourceSessionId ? [sourceSessionId] : [],
+      personType: classification.personType,
+      personTypeSource: "auto",
+      personTypeReason: classification.reason,
       createdAt: now,
       lastSeenAt: now,
     };

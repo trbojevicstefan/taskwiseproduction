@@ -12,6 +12,12 @@
 # Next.js build output
 /.next/
 /out/
+tsconfig.tsbuildinfo
+*.tsbuildinfo
+
+# Git worktrees
+.worktrees/
+worktrees/
 
 # Production
 /build
@@ -44,3 +50,6 @@ yarn-error.log*
 *.njsproj
 *.sln
 *.sw?
+/env.development.local
+/env.example
+/env.local

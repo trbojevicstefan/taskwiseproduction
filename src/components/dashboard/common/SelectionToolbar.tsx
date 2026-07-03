@@ -3,7 +3,7 @@ import React from 'react';
 import ReactDOM from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Button } from '@/components/ui/button';
-import { CheckCircle2, Copy, UserPlus, Trash2, X, Send, Slack, CalendarDays, Brain, FileDown, Eye, Edit3, Mail } from 'lucide-react';
+import { CheckCircle2, Copy, UserPlus, Trash2, X, Send, Slack, CalendarDays, Brain, FileDown, Eye, Edit3, Mail, Loader2 } from 'lucide-react';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
 import { SiTrello } from '@icons-pack/react-simple-icons';
 import { cn } from '@/lib/utils';
@@ -28,6 +28,9 @@ interface SelectionToolbarProps {
   onClear: () => void;
   onView?: () => void;
   onEdit?: () => void;
+  onConfirmToBoard?: () => void;
+  isConfirmingToBoard?: boolean;
+  confirmToBoardLabel?: string;
   onGenerateBriefs?: () => void; 
   onShareToSlack?: () => void;
   onShareToEmail?: () => void;
@@ -51,6 +54,9 @@ const SelectionToolbar: React.FC<SelectionToolbarProps> = ({
   onClear,
   onView,
   onEdit,
+  onConfirmToBoard,
+  isConfirmingToBoard,
+  confirmToBoardLabel = "Approve to Board",
   onGenerateBriefs,
   onShareToSlack,
   onShareToEmail,
@@ -103,6 +109,22 @@ const SelectionToolbar: React.FC<SelectionToolbarProps> = ({
                 {onEdit && (
                     <Button variant="ghost" size="sm" onClick={onEdit} className="rounded-full">
                         <Edit3 size={16} className="mr-2" /> Edit
+                    </Button>
+                )}
+                {onConfirmToBoard && (
+                    <Button
+                      variant="default"
+                      size="sm"
+                      onClick={onConfirmToBoard}
+                      disabled={isConfirmingToBoard}
+                      className="rounded-full"
+                    >
+                        {isConfirmingToBoard ? (
+                          <Loader2 size={16} className="mr-2 animate-spin" />
+                        ) : (
+                          <CheckCircle2 size={16} className="mr-2" />
+                        )}
+                        {confirmToBoardLabel}
                     </Button>
                 )}
                  {onGenerateBriefs && (
