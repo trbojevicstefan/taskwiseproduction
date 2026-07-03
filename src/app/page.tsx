@@ -14,8 +14,11 @@ import {
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { BrandIcon } from "@/components/landing/BrandIcon";
+import { MainBranchHero } from "@/components/landing/MainBranchHero";
 import { MarketingPageShell } from "@/components/landing/MarketingPageShell";
 import { MarketingSection } from "@/components/landing/MarketingSection";
+import TaskwiseGsapSection from "@/components/landing/TaskwiseGsapSection";
 import { integrationCards, productFlowSteps } from "@/components/landing/marketing-content";
 
 export const metadata: Metadata = {
@@ -83,141 +86,45 @@ const operatorCards = [
 export default function HomePage() {
   return (
     <MarketingPageShell>
-      <section className="relative overflow-hidden">
-        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(900px_420px_at_15%_15%,rgba(255,120,80,0.20),transparent_60%),radial-gradient(820px_380px_at_85%_20%,rgba(255,170,60,0.18),transparent_60%),linear-gradient(180deg,rgba(255,255,255,0.03),transparent_30%)]" />
-        <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-white/10" />
+      <MainBranchHero />
 
-        <div className="relative mx-auto grid w-full max-w-7xl gap-10 px-4 py-16 sm:px-6 sm:py-20 lg:grid-cols-[1.1fr_0.9fr] lg:items-center lg:px-8 lg:py-24">
-          <div className="space-y-8">
-            <div className="flex flex-wrap items-center gap-2">
-              <Badge className="border-white/10 bg-white/10 text-white/90">Launch page</Badge>
-              <Badge className="border-white/10 bg-white/5 text-white/70">Meetings in, reviewed work out</Badge>
+      <MarketingSection
+        id="signal"
+        title={
+          <>
+            Shared understanding. <span className="text-white/90">Faster execution.</span>
+          </>
+        }
+        subtitle="A tighter public story, with Taskwise bringing meetings, tasks, and reminders into one execution surface."
+      >
+        <div className="grid gap-4 md:grid-cols-3">
+          {[
+            {
+              title: "Capture the meeting",
+              text: "Pull in transcripts, notes, and recordings from the tools your team already uses.",
+            },
+            {
+              title: "Shape the work",
+              text: "Clean up draft tasks, score what matters, and surface the next move with context.",
+            },
+            {
+              title: "Keep it moving",
+              text: "Plan the week, route reminders to Slack, and keep the work from stalling out.",
+            },
+          ].map((item, index) => (
+            <div
+              key={item.title}
+              className="rounded-[1.5rem] border border-white/10 bg-gradient-to-br from-white/[0.05] via-white/[0.03] to-white/[0.02] p-6 shadow-lg shadow-black/20"
+            >
+              <p className="text-xs uppercase tracking-[0.22em] text-white/45">0{index + 1}</p>
+              <h3 className="mt-3 text-xl font-medium text-white">{item.title}</h3>
+              <p className="mt-3 text-sm leading-7 text-white/68">{item.text}</p>
             </div>
-
-            <div className="space-y-5">
-              <h1 className="max-w-4xl text-4xl font-semibold leading-[1.02] tracking-tight text-white sm:text-5xl lg:text-6xl">
-                Turn meetings into prioritized, reviewed execution.
-              </h1>
-              <p className="max-w-3xl text-base leading-7 text-white/72 sm:text-lg">
-                Bring in Fathom, Fireflies, Grain, or pasted notes. Use AI chat over the
-                source material, clean up noisy tasks, prioritize the next steps, plan
-                the work, and keep reminders moving in Slack.
-              </p>
-            </div>
-
-            <div className="flex flex-wrap items-center gap-3">
-              <Button
-                size="lg"
-                className="gem-button bg-gradient-to-r from-[#FF4D4D] via-[#FF9900] to-[#FF2E97] text-white"
-                asChild
-              >
-                <Link href="/signup">
-                  Get started
-                </Link>
-              </Button>
-              <Button
-                size="lg"
-                variant="secondary"
-                className="border border-white/10 bg-white/10 text-white hover:bg-white/20"
-                asChild
-              >
-                <Link href="#flow">
-                  See how it works
-                </Link>
-              </Button>
-              <Link href="/login" className="text-sm font-medium text-white/65 transition hover:text-white">
-                Sign in
-              </Link>
-            </div>
-
-            <div className="flex flex-wrap gap-2 text-sm text-white/65">
-              {[
-                "AI chat",
-                "AI task cleanup",
-                "Deterministic prioritization",
-                "Planning workspace",
-                "Slack reminders",
-              ].map((item) => (
-                <span
-                  key={item}
-                  className="rounded-full border border-white/10 bg-white/5 px-3 py-1.5"
-                >
-                  {item}
-                </span>
-              ))}
-            </div>
-          </div>
-
-          <div className="relative">
-            <div className="absolute -inset-6 rounded-[2rem] bg-gradient-to-br from-[#FF4D4D]/20 via-[#FF9900]/15 to-[#FF2E97]/20 blur-3xl" />
-            <div className="relative overflow-hidden rounded-[2rem] border border-white/10 bg-white/[0.04] p-5 shadow-2xl shadow-black/40 backdrop-blur">
-              <div className="mb-4 flex items-center justify-between">
-                <div>
-                  <p className="text-xs uppercase tracking-[0.24em] text-white/45">
-                    Execution surface
-                  </p>
-                  <p className="mt-1 text-lg font-medium text-white">Review before board</p>
-                </div>
-                <Badge className="border-white/10 bg-white/10 text-white/80">Live workflow</Badge>
-              </div>
-
-              <div className="space-y-3">
-                <div className="rounded-2xl border border-white/10 bg-black/25 p-4">
-                  <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <p className="text-sm font-medium text-white">Source-grounded chat</p>
-                      <p className="text-sm text-white/60">
-                        Meeting, task, people, and client context
-                      </p>
-                    </div>
-                    <div className="rounded-full bg-white/10 px-3 py-1 text-xs text-white/70">
-                      Ask Taskwise
-                    </div>
-                  </div>
-                </div>
-
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <div className="rounded-2xl border border-white/10 bg-black/25 p-4">
-                    <p className="text-xs uppercase tracking-[0.18em] text-white/45">
-                      Cleanup
-                    </p>
-                    <p className="mt-2 text-sm text-white/75">
-                      Remove noise and make suggested tasks review-ready.
-                    </p>
-                  </div>
-                  <div className="rounded-2xl border border-white/10 bg-black/25 p-4">
-                    <p className="text-xs uppercase tracking-[0.18em] text-white/45">
-                      Prioritize
-                    </p>
-                    <p className="mt-2 text-sm text-white/75">
-                      Keep the board stable with deterministic prioritization.
-                    </p>
-                  </div>
-                </div>
-
-                <div className="rounded-2xl border border-white/10 bg-gradient-to-br from-white/10 to-white/[0.03] p-4">
-                  <div className="flex items-center justify-between">
-                    <p className="text-sm font-medium text-white">Reviewed work out</p>
-                    <Badge className="border-white/10 bg-white/10 text-white/75">
-                      Slack reminders
-                    </Badge>
-                  </div>
-                  <div className="mt-3 grid gap-2 text-sm text-white/70">
-                    <div className="flex items-center justify-between rounded-xl bg-black/20 px-3 py-2">
-                      <span>Capture</span>
-                      <span>Understand</span>
-                    </div>
-                    <div className="flex items-center justify-between rounded-xl bg-black/20 px-3 py-2">
-                      <span>Review</span>
-                      <span>Execute</span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
+          ))}
         </div>
-      </section>
+      </MarketingSection>
+
+      <TaskwiseGsapSection />
 
       <MarketingSection
         id="flow"
@@ -235,9 +142,7 @@ export default function HomePage() {
               className="rounded-2xl border border-white/10 bg-white/[0.04] p-5 shadow-lg shadow-black/20"
             >
               <div className="mb-4 flex items-center justify-between">
-                <span className="text-xs uppercase tracking-[0.18em] text-white/45">
-                  Step {index + 1}
-                </span>
+                <span className="text-xs uppercase tracking-[0.18em] text-white/45">Step {index + 1}</span>
                 <span className="text-sm text-white/50">{step.title}</span>
               </div>
               <h3 className="text-lg font-medium text-white">{step.title}</h3>
@@ -292,20 +197,25 @@ export default function HomePage() {
               className="rounded-2xl border border-white/10 bg-white/[0.04] p-5 shadow-lg shadow-black/20"
             >
               <div className="mb-4 flex items-start justify-between gap-3">
-                <div>
-                  <p className="text-xs uppercase tracking-[0.2em] text-white/45">{card.name}</p>
-                  <h3 className="mt-2 text-lg font-medium text-white">{card.title}</h3>
+                <div className="space-y-3">
+                  <BrandIcon src={card.iconSrc} alt={card.iconAlt} />
+                  <div>
+                    <p className="text-xs uppercase tracking-[0.2em] text-white/45">{card.name}</p>
+                    <h3 className="mt-2 text-lg font-medium text-white">{card.title}</h3>
+                  </div>
                 </div>
-                {card.name === "Trello" ? (
-                  <Badge className="border-white/10 bg-white/10 text-white/80">
-                    Currently disabled
-                  </Badge>
-                ) : null}
+                <Badge
+                  className={
+                    card.isDisabled
+                      ? "border-white/10 bg-white/10 text-white/80"
+                      : "border-emerald-500/20 bg-emerald-500/10 text-emerald-100"
+                  }
+                >
+                  {card.isDisabled ? "Currently disabled" : "Live"}
+                </Badge>
               </div>
               <p className="text-sm leading-6 text-white/68">
-                {card.name === "Trello"
-                  ? "Trello is currently disabled and not live yet."
-                  : card.description}
+                {card.isDisabled ? "Trello is currently disabled and not live yet." : card.description}
               </p>
             </div>
           ))}
@@ -354,8 +264,8 @@ export default function HomePage() {
                 Explore the product surfaces, integrations, and operator layer in one place.
               </h2>
               <p className="text-base leading-7 text-white/68">
-                Taskwise gives teams one place to capture work, clean it up, prioritize it, and
-                keep it moving with reminders and operator-grade controls.
+                Taskwise gives teams one place to capture work, clean it up, prioritize it, and keep
+                it moving with reminders and operator-grade controls.
               </p>
             </div>
 
@@ -365,9 +275,7 @@ export default function HomePage() {
                 className="gem-button bg-gradient-to-r from-[#FF4D4D] via-[#FF9900] to-[#FF2E97] text-white"
                 asChild
               >
-                <Link href="/signup">
-                  Get started
-                </Link>
+                <Link href="/signup">Get started</Link>
               </Button>
               <Button
                 size="lg"
@@ -375,9 +283,7 @@ export default function HomePage() {
                 className="border border-white/10 bg-white/10 text-white hover:bg-white/20"
                 asChild
               >
-                <Link href="/features">
-                  Features
-                </Link>
+                <Link href="/features">Features</Link>
               </Button>
               <Button
                 size="lg"
@@ -385,9 +291,7 @@ export default function HomePage() {
                 className="border border-white/10 bg-white/10 text-white hover:bg-white/20"
                 asChild
               >
-                <Link href="/integrations">
-                  Integrations
-                </Link>
+                <Link href="/integrations">Integrations</Link>
               </Button>
               <Button
                 size="lg"
@@ -395,9 +299,7 @@ export default function HomePage() {
                 className="border border-white/10 bg-white/10 text-white hover:bg-white/20"
                 asChild
               >
-                <Link href="/mcp">
-                  MCP
-                </Link>
+                <Link href="/mcp">MCP</Link>
               </Button>
             </div>
           </div>

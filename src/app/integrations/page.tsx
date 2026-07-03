@@ -1,8 +1,9 @@
 import Link from "next/link";
-import { ArrowRight, Bot, FileText, Globe, Link2, Filter, Database, CheckCircle2 } from "lucide-react";
+import { ArrowRight } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { BrandIcon } from "@/components/landing/BrandIcon";
 import { MarketingPageShell } from "@/components/landing/MarketingPageShell";
 import { MarketingSection } from "@/components/landing/MarketingSection";
 import { integrationCards } from "@/components/landing/marketing-content";
@@ -56,38 +57,25 @@ export default function IntegrationsPage() {
       >
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
           {visibleIntegrations.map((card) => {
-            const icons = {
-              Fathom: Bot,
-              Fireflies: ArrowRight,
-              Grain: FileText,
-              Slack: Link2,
-              "Google Workspace": Globe,
-              "Manual paste": Filter,
-              "Board sync": Database,
-              Trello: CheckCircle2,
-            } as const;
-            const Icon = icons[card.name as keyof typeof icons] || Database;
-
             return (
               <div
                 key={card.name}
                 className="rounded-2xl border border-white/10 bg-white/[0.04] p-5 shadow-lg shadow-black/20"
               >
-                <div className="mb-4 inline-flex rounded-xl border border-white/10 bg-white/10 p-3 text-white">
-                  <Icon className="h-5 w-5" />
-                </div>
-                <div className="flex items-center gap-2">
-                  <h2 className="text-lg font-medium text-white">{card.name}</h2>
-                  {card.name === "Trello" ? (
-                    <span className="rounded-full bg-white/10 px-2 py-0.5 text-[10px] uppercase tracking-[0.18em] text-white/60">
+                <div className="mb-4 flex items-center justify-between gap-3">
+                  <BrandIcon src={card.iconSrc} alt={card.iconAlt} />
+                  {card.isDisabled ? (
+                    <span className="rounded-full border border-white/10 bg-white/10 px-2 py-0.5 text-[10px] uppercase tracking-[0.18em] text-white/60">
                       Disabled
                     </span>
                   ) : (
-                    <span className="rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] uppercase tracking-[0.18em] text-emerald-200">
+                    <span className="rounded-full border border-emerald-500/20 bg-emerald-500/10 px-2 py-0.5 text-[10px] uppercase tracking-[0.18em] text-emerald-100">
                       Live
                     </span>
                   )}
                 </div>
+                <p className="text-xs uppercase tracking-[0.2em] text-white/45">{card.name}</p>
+                <h2 className="mt-2 text-lg font-medium text-white">{card.title}</h2>
                 <p className="mt-2 text-sm leading-6 text-white/68">{card.description}</p>
               </div>
             );

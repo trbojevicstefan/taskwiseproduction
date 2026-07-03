@@ -13,4 +13,7 @@ export type MarketingCard = {
   title: string;
   description: string;
   href?: string;
+  iconSrc: string;
+  iconAlt: string;
+  isDisabled?: boolean;
 };

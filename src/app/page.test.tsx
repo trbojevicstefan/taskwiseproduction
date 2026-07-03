@@ -19,7 +19,8 @@ describe("homepage marketing refresh", () => {
     const html = renderToStaticMarkup(React.createElement(HomePage));
     consoleError.mockRestore();
 
-    expect(html).toContain("Turn meetings into prioritized, reviewed execution");
+    expect(html).toContain("Turn meetings into");
+    expect(html).toContain("reviewed task lists");
     expect(html).toContain("Fathom");
     expect(html).toContain("Fireflies");
     expect(html).toContain("Grain");

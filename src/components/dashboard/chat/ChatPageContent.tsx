@@ -95,6 +95,10 @@ import type { Meeting } from '@/types/meeting';
 import { buildBriefContext } from "@/lib/brief-context";
 import { generateBriefsForTasks } from "@/lib/task-briefs";
 
+let chatMessageIdCounter = 0;
+
+export const createChatMessageId = (prefix: string) =>
+  `${prefix}-${Date.now()}-${chatMessageIdCounter++}`;
 
 const findTaskById = (tasks: ExtractedTaskSchema[], taskId: string): ExtractedTaskSchema | null => {
   for (const task of tasks) {
@@ -1267,7 +1271,7 @@ export default function ChatPageContent() {
         : currentInput;
     const shouldAttach = currentInput.trim().length > 500;
     const userMessage: ChatMessageType = {
-        id: `msg-${Date.now()}`,
+        id: createChatMessageId('msg'),
         text: shouldAttach
           ? "Pasted text"
           : promptText.trim().length === 0
@@ -1398,10 +1402,10 @@ export default function ChatPageContent() {
               requestedDetailLevel,
             };
 
-          const result: OrchestratorOutput = await extractTasksFromChat(orchestratorInput);
+      const result: OrchestratorOutput = await extractTasksFromChat(orchestratorInput);
         
         if (activeSessionId) {
-            const messagePayload: Omit<ChatMessageType, 'sender' | 'timestamp' | 'name'> = { id: `ai-msg-${Date.now()}`, text: '' };
+            const messagePayload: Omit<ChatMessageType, 'sender' | 'timestamp' | 'name'> = { id: createChatMessageId('ai-msg'), text: '' };
 
             if (result.qaAnswer) {
                 messagePayload.text = result.qaAnswer.answerText;
@@ -1489,7 +1493,7 @@ export default function ChatPageContent() {
         const aiErrorResponse = "Sorry, I encountered an error processing your request. Please try again.";
         if(activeSessionId) {
             await addMessageToActiveSession({
-                id: `ai-msg-${Date.now()}`,
+                id: createChatMessageId('ai-msg'),
                 text: aiErrorResponse,
                 sender: 'ai',
                 timestamp: Date.now(),
@@ -1514,7 +1518,7 @@ export default function ChatPageContent() {
         return;
       }
       const userMessage: ChatMessageType = {
-        id: `msg-${Date.now()}`,
+        id: createChatMessageId('msg'),
         text: question,
         sender: 'user',
         timestamp: Date.now(),
@@ -1535,7 +1539,7 @@ export default function ChatPageContent() {
         return;
       }
       const userMessage: ChatMessageType = {
-        id: `msg-${Date.now()}`,
+        id: createChatMessageId('msg'),
         text: confirmation,
         sender: 'user',
         timestamp: Date.now(),
@@ -1551,7 +1555,7 @@ export default function ChatPageContent() {
   const handleCancelDeleteFromChat = useCallback(async () => {
     if (!activeSessionId) return;
     await addMessageToActiveSession({
-      id: `msg-${Date.now()}`,
+      id: createChatMessageId('msg'),
       text: "Cancel deletion.",
       sender: 'user',
       timestamp: Date.now(),
@@ -1559,7 +1563,7 @@ export default function ChatPageContent() {
       name: userName,
     });
     await addMessageToActiveSession({
-      id: `ai-msg-${Date.now()}`,
+      id: createChatMessageId('ai-msg'),
       text: "Okay, I won't delete anything.",
       sender: 'ai',
       timestamp: Date.now(),
@@ -2898,6 +2902,5 @@ export default function ChatPageContent() {
     </>
   );
 }
-
 
 

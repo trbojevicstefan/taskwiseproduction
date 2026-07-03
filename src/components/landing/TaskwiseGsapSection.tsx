@@ -155,15 +155,13 @@ const SHOWCASE_SECTIONS: ShowcaseSection[] = [
   },
 ];
 
-const STAR_COUNT = 200;
-
 export default function TaskwiseGsapSection() {
   const containerRef = useRef<HTMLDivElement | null>(null);
-  const starsRef = useRef<HTMLDivElement | null>(null);
+  const clarityStarsRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     const container = containerRef.current;
-    const starContainer = starsRef.current;
+    const starContainer = clarityStarsRef.current;
     if (!container || !starContainer) {
       return;
     }
@@ -171,16 +169,19 @@ export default function TaskwiseGsapSection() {
     gsap.registerPlugin(ScrollTrigger);
     starContainer.innerHTML = "";
 
-    for (let i = 0; i < STAR_COUNT; i += 1) {
+    for (let index = 0; index < 140; index += 1) {
       const star = document.createElement("div");
+      const size = Math.random() * 2.2 + 1;
+      const opacity = Math.random() * 0.5 + 0.35;
+
       star.className = "absolute rounded-full bg-white";
-      const size = Math.random() * 2 + 1;
       star.style.width = `${size}px`;
       star.style.height = `${size}px`;
       star.style.left = `${Math.random() * 100}%`;
       star.style.top = `${Math.random() * 100}%`;
-      star.style.opacity = `${Math.random() * 0.6 + 0.4}`;
-      star.style.boxShadow = "0 0 3px rgba(255,255,255,0.8)";
+      star.style.opacity = `${opacity}`;
+      star.style.boxShadow = "0 0 5px rgba(255,255,255,0.85)";
+
       starContainer.appendChild(star);
     }
 
@@ -201,7 +202,9 @@ export default function TaskwiseGsapSection() {
       });
 
       gsap.to(starContainer, {
-        yPercent: -60,
+        xPercent: 6,
+        yPercent: -18,
+        rotation: -2,
         ease: "none",
         scrollTrigger: {
           trigger: container,
@@ -265,7 +268,12 @@ export default function TaskwiseGsapSection() {
   return (
     <section id="workflow" className="relative overflow-x-hidden bg-[#020202] py-6">
       <div ref={containerRef} className="relative flex h-screen w-full items-center justify-center overflow-hidden">
-        <div ref={starsRef} className="pointer-events-none absolute inset-0 z-0 scale-125 opacity-80" />
+        <div className="pointer-events-none absolute inset-0 z-0 bg-[radial-gradient(circle_at_50%_18%,rgba(255,106,61,0.12),transparent_28%),radial-gradient(circle_at_82%_78%,rgba(255,46,151,0.08),transparent_24%),linear-gradient(180deg,rgba(255,255,255,0.015),transparent_18%)]" />
+        <div
+          ref={clarityStarsRef}
+          className="pointer-events-none absolute inset-0 z-0 opacity-85"
+          style={{ mixBlendMode: "screen" }}
+        />
 
         <div className="relative z-10 mx-auto grid w-full max-w-[1400px] grid-cols-1 items-center gap-12 px-6 md:grid-cols-[1fr_auto] md:gap-24 md:px-12">
           <div className="max-w-xl space-y-2">
@@ -326,4 +334,3 @@ export default function TaskwiseGsapSection() {
     </section>
   );
 }
-

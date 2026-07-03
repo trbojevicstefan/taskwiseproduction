@@ -1,0 +1,368 @@
+# Review package: c4fc72a..90458f5
+
+## Commits
+90458f5 feat: add features page
+d06eb73 docs: add task 3 report
+0320a5e feat: add features page
+7286b2c fix: restore homepage sign-in link
+
+## Files changed
+ .superpowers/sdd/task-2-report.md |   3 +-
+ .superpowers/sdd/task-3-report.md |  31 ++++++
+ src/app/features/page.test.tsx    |  30 ++++++
+ src/app/features/page.tsx         | 202 ++++++++++++++++++++++++++++++++++++++
+ src/app/page.test.tsx             |   1 +
+ src/app/page.tsx                  |   3 +
+ 6 files changed, 269 insertions(+), 1 deletion(-)
+
+## Diff
+diff --git a/.superpowers/sdd/task-2-report.md b/.superpowers/sdd/task-2-report.md
+index b86b402..4d46a8e 100644
+--- a/.superpowers/sdd/task-2-report.md
++++ b/.superpowers/sdd/task-2-report.md
+@@ -37,13 +37,14 @@
+ - `src/app/page.tsx`
+ - `src/app/page.test.tsx`
+ - `.superpowers/sdd/task-2-report.md`
+ 
+ ## Self-review findings
+ - The homepage now uses the shared marketing scaffolding instead of the old mixed marketing layout.
+ - Trello is clearly labeled as currently disabled / not live yet.
+ - The public copy stays focused on features that are actually shipped or documented in the current platform story.
+ - I did not touch the unrelated dashboard chat task work in this worktree.
+ - The CTA block was revised after review to remove docs-first language and keep the homepage product-led.
++- A visible `/login` sign-in link was added back into the hero CTA cluster to preserve the auth affordance on the marketing page.
+ 
+ ## Concerns
+-- None. The homepage test harness is stable after the `console.error` suppression in the test file.
++- None. The homepage test harness is stable after the `console.error` suppression in the test file, and the sign-in assertion now passes.
+diff --git a/.superpowers/sdd/task-3-report.md b/.superpowers/sdd/task-3-report.md
+new file mode 100644
+index 0000000..3b60223
+--- /dev/null
++++ b/.superpowers/sdd/task-3-report.md
+@@ -0,0 +1,31 @@
++# Task 3 Report
++
++## What I implemented
++- Added the public `/features` page in `src/app/features/page.tsx`.
++- Added a dedicated features test in `src/app/features/page.test.tsx`.
++- Kept the page aligned with the shared launch story from Task 1 and the homepage navigation from Task 2.
++- Reworded the Slack reminders copy so it describes scheduled reminders instead of chat-style pings.
++- Tightened the test to cover the calendar/people-client copy and CTA destinations.
++
++## What I tested and test results
++- `npx jest src/app/features/page.test.tsx --runInBand`
++  - Pass
++- `npx eslint src/app/features/page.tsx src/app/features/page.test.tsx`
++  - Pass
++
++## TDD evidence
++- The route test was written before implementation.
++- The test failed when the page did not exist.
++- The page implementation was added and the same test passed afterward.
++
++## Files changed
++- `src/app/features/page.tsx`
++- `src/app/features/page.test.tsx`
++- `.superpowers/sdd/task-3-report.md`
++
++## Self-review findings
++- The page is intentionally focused on the major public features called out in the plan.
++- The CTA links stay consistent with the public marketing shell.
++
++## Concerns
++- None.
+diff --git a/src/app/features/page.test.tsx b/src/app/features/page.test.tsx
+new file mode 100644
+index 0000000..dbf409d
+--- /dev/null
++++ b/src/app/features/page.test.tsx
+@@ -0,0 +1,30 @@
++import React from "react";
++import { renderToStaticMarkup } from "react-dom/server";
++import FeaturesPage from "@/app/features/page";
++
++jest.mock("next/link", () => ({
++  __esModule: true,
++  default: ({ href, children, ...props }: any) => {
++    delete props.prefetch;
++    return React.createElement("a", { href, ...props }, children);
++  },
++}));
++
++jest.mock("@/components/ui/logo", () => ({
++  Logo: () => React.createElement("span", null, "logo"),
++}));
++
++describe("features page", () => {
++  it("describes the major product capabilities", () => {
++    const html = renderToStaticMarkup(React.createElement(FeaturesPage));
++
++    expect(html).toContain("AI chat");
++    expect(html).toContain("task cleanup");
++    expect(html).toContain("Deterministic prioritization");
++    expect(html).toContain("Planning workspace");
++    expect(html).toContain("Calendar and people/client views");
++    expect(html).toContain("Slack reminders");
++    expect(html).toContain('href="/signup"');
++    expect(html).toContain('href="/"');
++  });
++});
+diff --git a/src/app/features/page.tsx b/src/app/features/page.tsx
+new file mode 100644
+index 0000000..c18d6e7
+--- /dev/null
++++ b/src/app/features/page.tsx
+@@ -0,0 +1,202 @@
++import type { Metadata } from "next";
++import Link from "next/link";
++import {
++  ArrowRight,
++  CalendarDays,
++  MessagesSquare,
++  NotebookPen,
++  Sparkles,
++  Wand2,
++} from "lucide-react";
++
++import { Badge } from "@/components/ui/badge";
++import { Button } from "@/components/ui/button";
++import { MarketingPageShell } from "@/components/landing/MarketingPageShell";
++import { MarketingSection } from "@/components/landing/MarketingSection";
++import { productFlowSteps } from "@/components/landing/marketing-content";
++
++export const metadata: Metadata = {
++  title: "Features | TaskwiseAI",
++  description:
++    "Explore AI chat, cleanup tasks, prioritization, planning, calendar, people, and reminders in TaskwiseAI.",
++};
++
++const featureCards = [
++  {
++    icon: MessagesSquare,
++    title: "AI chat",
++    body:
++      "Ask grounded questions over meetings, tasks, people, and clients with answers tied to workspace sources.",
++  },
++  {
++    icon: Wand2,
++    title: "task cleanup",
++    body:
++      "Clean up noisy drafts, remove duplicates, and turn messy outputs into reviewed work the team can trust.",
++  },
++  {
++    icon: ArrowRight,
++    title: "Deterministic prioritization",
++    body:
++      "Keep board ordering stable and explainable so the team can review priorities without guesswork.",
++  },
++  {
++    icon: NotebookPen,
++    title: "Planning workspace",
++    body:
++      "Use the planning workspace to turn reviewed work into a clear next-step plan for the team.",
++  },
++  {
++    icon: CalendarDays,
++    title: "Calendar and people/client views",
++    body:
++      "Move between calendar context, people surfaces, and client views without leaving the execution flow.",
++  },
++  {
++    icon: Sparkles,
++    title: "Slack reminders",
++    body:
++      "Keep follow-through alive with scheduled Slack reminders that keep reviewed work visible and stateful.",
++  },
++];
++
++export default function FeaturesPage() {
++  return (
++    <MarketingPageShell>
++      <section className="relative overflow-hidden">
++        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(900px_420px_at_15%_15%,rgba(255,120,80,0.20),transparent_60%),radial-gradient(820px_380px_at_85%_20%,rgba(255,170,60,0.18),transparent_60%),linear-gradient(180deg,rgba(255,255,255,0.03),transparent_30%)]" />
++        <div className="relative mx-auto w-full max-w-7xl px-4 py-16 sm:px-6 sm:py-20 lg:px-8 lg:py-24">
++          <div className="max-w-3xl space-y-6">
++            <div className="flex flex-wrap items-center gap-2">
++              <Badge className="border-white/10 bg-white/10 text-white/90">Product tour</Badge>
++              <Badge className="border-white/10 bg-white/5 text-white/70">Public features page</Badge>
++            </div>
++            <div className="space-y-4">
++              <h1 className="text-4xl font-semibold leading-[1.02] tracking-tight text-white sm:text-5xl lg:text-6xl">
++                The feature set behind TaskwiseAI.
++              </h1>
++              <p className="max-w-3xl text-base leading-7 text-white/72 sm:text-lg">
++                TaskwiseAI turns meetings into reviewed work with grounded AI chat, cleanup,
++                deterministic prioritization, planning, calendar context, people and client views,
++                and Slack reminders that keep execution moving.
++              </p>
++            </div>
++            <div className="flex flex-wrap items-center gap-3">
++              <Button
++                size="lg"
++                className="gem-button bg-gradient-to-r from-[#FF4D4D] via-[#FF9900] to-[#FF2E97] text-white"
++                asChild
++              >
++                <Link href="/signup">Get started</Link>
++              </Button>
++              <Button
++                size="lg"
++                variant="secondary"
++                className="border border-white/10 bg-white/10 text-white hover:bg-white/20"
++                asChild
++              >
++                <Link href="/">Back to home</Link>
++              </Button>
++            </div>
++          </div>
++        </div>
++      </section>
++
++      <MarketingSection
++        id="capabilities"
++        title={
++          <>
++            Core capabilities for <span className="text-white/90">reviewed execution</span>
++          </>
++        }
++        subtitle="These are the surfaces the public story should emphasize: chat, cleanup, prioritization, planning, calendar context, people and client views, and reminders."
++      >
++        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
++          {featureCards.map((card) => {
++            const Icon = card.icon;
++
++            return (
++              <div
++                key={card.title}
++                className="rounded-2xl border border-white/10 bg-white/[0.04] p-5 shadow-lg shadow-black/20"
++              >
++                <div className="mb-4 inline-flex rounded-xl border border-white/10 bg-white/10 p-3 text-white">
++                  <Icon className="h-5 w-5" />
++                </div>
++                <h2 className="text-lg font-medium text-white">{card.title}</h2>
++                <p className="mt-2 text-sm leading-6 text-white/68">{card.body}</p>
++              </div>
++            );
++          })}
++        </div>
++      </MarketingSection>
++
++      <MarketingSection
++        id="flow"
++        title={
++          <>
++            The launch story in <span className="text-white/90">four steps</span>
++          </>
++        }
++        subtitle="This page reuses the shared launch-copy flow so the public navigation stays aligned with the homepage."
++      >
++        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
++          {productFlowSteps.map((step, index) => (
++            <div
++              key={step.title}
++              className="rounded-2xl border border-white/10 bg-white/[0.04] p-5 shadow-lg shadow-black/20"
++            >
++              <div className="mb-4 flex items-center justify-between">
++                <span className="text-xs uppercase tracking-[0.18em] text-white/45">
++                  Step {index + 1}
++                </span>
++                <span className="text-sm text-white/50">{step.title}</span>
++              </div>
++              <h3 className="text-lg font-medium text-white">{step.title}</h3>
++              <p className="mt-2 text-sm leading-6 text-white/68">{step.description}</p>
++            </div>
++          ))}
++        </div>
++      </MarketingSection>
++
++      <MarketingSection
++        id="cta"
++        title="Ready to see the workflow in action?"
++        subtitle="Use the launch page, explore the feature story, or move on to integrations and MCP when you want the deeper platform surfaces."
++      >
++        <div className="rounded-[2rem] border border-white/10 bg-gradient-to-br from-white/10 via-white/[0.06] to-white/[0.03] p-6 shadow-2xl shadow-black/30 sm:p-8">
++          <div className="flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between">
++            <div className="max-w-2xl space-y-3">
++              <p className="text-xs uppercase tracking-[0.22em] text-white/45">Launch CTA</p>
++              <h2 className="text-3xl font-semibold tracking-tight text-white sm:text-4xl">
++                Start with the features page, then move into the rest of the product story.
++              </h2>
++              <p className="text-base leading-7 text-white/68">
++                TaskwiseAI gives teams one place to capture work, clean it up, prioritize it, and
++                keep it moving with reminders and operator-grade controls.
++              </p>
++            </div>
++
++            <div className="flex flex-wrap gap-3">
++              <Button
++                size="lg"
++                className="gem-button bg-gradient-to-r from-[#FF4D4D] via-[#FF9900] to-[#FF2E97] text-white"
++                asChild
++              >
++                <Link href="/signup">Get started</Link>
++              </Button>
++              <Button
++                size="lg"
++                variant="secondary"
++                className="border border-white/10 bg-white/10 text-white hover:bg-white/20"
++                asChild
++              >
++                <Link href="/">Home</Link>
++              </Button>
++            </div>
++          </div>
++        </div>
++      </MarketingSection>
++    </MarketingPageShell>
++  );
++}
+diff --git a/src/app/page.test.tsx b/src/app/page.test.tsx
+index 6df3ec7..11ae2ac 100644
+--- a/src/app/page.test.tsx
++++ b/src/app/page.test.tsx
+@@ -33,15 +33,16 @@ describe("homepage marketing refresh", () => {
+     expect(html).toContain("Understand");
+     expect(html).toContain("Review");
+     expect(html).toContain("Execute");
+     expect(html).toContain("MCP keys");
+     expect(html).toContain("audit logs");
+     expect(html).toContain("workflow replay");
+     expect(html).toContain("workflow delivery");
+     expect(html).toContain("currently disabled");
+ 
+     expect(html).toContain('href="/signup"');
++    expect(html).toContain('href="/login"');
+     expect(html).toContain('href="/features"');
+     expect(html).toContain('href="/integrations"');
+     expect(html).toContain('href="/mcp"');
+   });
+ });
+diff --git a/src/app/page.tsx b/src/app/page.tsx
+index 8680be1..46d1ed7 100644
+--- a/src/app/page.tsx
++++ b/src/app/page.tsx
+@@ -118,20 +118,23 @@ export default function HomePage() {
+               <Button
+                 size="lg"
+                 variant="secondary"
+                 className="border border-white/10 bg-white/10 text-white hover:bg-white/20"
+                 asChild
+               >
+                 <Link href="#flow">
+                   See how it works
+                 </Link>
+               </Button>
++              <Link href="/login" className="text-sm font-medium text-white/65 transition hover:text-white">
++                Sign in
++              </Link>
+             </div>
+ 
+             <div className="flex flex-wrap gap-2 text-sm text-white/65">
+               {[
+                 "AI chat",
+                 "AI task cleanup",
+                 "Deterministic prioritization",
+                 "Planning workspace",
+                 "Slack reminders",
+               ].map((item) => (
