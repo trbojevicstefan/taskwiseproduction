@@ -1,169 +1,69 @@
 "use client";
-// src/app/page.tsx
 
-import React from "react";
-import { motion } from "framer-motion";
 import Link from "next/link";
-import {
-  Brain,
-  MessageSquare,
-  GitBranch,
-  CalendarCheck,
-  Upload,
-  FileText,
-  ChevronRight,
-  Zap,
-  Layers,
-  CheckCircle2,
-} from "lucide-react";
-import { useTheme } from "next-themes";
+import { motion } from "framer-motion";
+import { ArrowRight, ShieldCheck, Sparkles } from "lucide-react";
+import type { ReactNode } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Input } from "@/components/ui/input";
-import { Card, CardContent } from "@/components/ui/card";
-import {
-  Tabs,
-  TabsList,
-  TabsTrigger,
-  TabsContent,
-} from "@/components/ui/tabs";
 import { Logo } from "@/components/ui/logo";
 import AnimatedTaskHero from "@/components/landing/AnimatedTaskHero";
 import HeroParticles from "@/components/landing/HeroParticles";
 import TaskwiseGsapSection from "@/components/landing/TaskwiseGsapSection";
+import { MarketingSection } from "@/components/landing/MarketingSection";
+import {
+  capabilityCards,
+  integrationCards,
+  marketingNavItems,
+  productFlowSteps,
+} from "@/components/landing/marketing-content";
 
 const brandGradient =
   "bg-[radial-gradient(1200px_600px_at_10%_10%,rgba(255,86,48,0.25),transparent_60%),radial-gradient(1200px_600px_at_90%_20%,rgba(255,175,0,0.25),transparent_60%),radial-gradient(1200px_600px_at_50%_90%,rgba(255,0,128,0.25),transparent_60%)]";
 
-const GradientText = ({ children }: { children: React.ReactNode }) => (
-  <span className="bg-gradient-to-r from-[#FF4D4D] via-[#FF9900] to-[#FF2E97] bg-clip-text text-transparent">
+const GradientText = ({ children }: { children: ReactNode }) => (
+  <span className="bg-gradient-to-r from-[#FF5C4D] via-[#FF9900] to-[#FF2E97] bg-clip-text text-transparent">
     {children}
   </span>
 );
 
-const Section = ({
-  id,
-  title,
-  subtitle,
-  children,
-}: {
-  id?: string;
-  title: string | React.ReactNode;
-  subtitle?: string;
-  children: React.ReactNode;
-}) => (
-  <section id={id} className="relative mx-auto w-full max-w-7xl px-4 py-16 sm:px-6 sm:py-20 lg:px-8">
-    <div className="mb-8 flex flex-col items-start gap-3 sm:mb-10">
-      <h2 className="text-3xl font-semibold tracking-tight text-white sm:text-4xl">
-        {title}
-      </h2>
-      {subtitle && (
-        <p className="max-w-3xl text-base text-white/70">{subtitle}</p>
-      )}
-    </div>
-    {children}
-  </section>
-);
-
-function ExploreTabs() {
-  return (
-    <Tabs defaultValue="explore" className="w-full">
-      <TabsList className="mb-6 grid w-full grid-cols-2 bg-white/10 text-white">
-        <TabsTrigger value="explore">Explore</TabsTrigger>
-        <TabsTrigger value="chat">Chat</TabsTrigger>
-      </TabsList>
-      <TabsContent value="explore">
-        <Card className="border-white/10 bg-white/5 backdrop-blur">
-          <CardContent className="p-4 sm:p-6">
-            <div className="grid gap-4 sm:grid-cols-3">
-              {[
-                { icon: FileText, title: "Themes", text: "AI groups key themes across your transcript." },
-                { icon: Layers, title: "Clusters", text: "Ideas clustered by similarity and outcomes." },
-                { icon: CalendarCheck, title: "Timeline", text: "Milestones auto-drafted with dates." },
-              ].map(({ icon: Icon, title, text }) => (
-                <div key={title} className="rounded-xl border border-white/10 bg-black/30 p-5">
-                  <div className="mb-3 inline-flex rounded-lg bg-white/10 p-2">
-                    <Icon className="h-5 w-5 text-white" />
-                  </div>
-                  <div className="text-white">
-                    <h4 className="mb-1 font-medium">{title}</h4>
-                    <p className="text-sm text-white/70">{text}</p>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
-      </TabsContent>
-
-      <TabsContent value="chat">
-        <Card className="border-white/10 bg-white/5 backdrop-blur">
-          <CardContent className="p-4 sm:p-6">
-            <div className="grid gap-4 md:grid-cols-[1fr_280px]">
-              <div className="rounded-xl border border-white/10 bg-black/30 p-4 text-white/90">
-                <div className="mb-3 flex items-center gap-2 text-xs text-white/60">
-                  <MessageSquare className="h-3.5 w-3.5" /> Chat with AI
-                </div>
-                <div className="mb-4 space-y-2 text-sm">
-                  <p className="rounded-md bg-white/5 p-3">Summarize our brainstorm and draft the top 5 tasks.</p>
-                  <p className="rounded-md bg-white/5 p-3">Also add deadlines for anything time-sensitive.</p>
-                </div>
-                <Input placeholder="Type a message..." className="border-white/10 bg-black/30 text-white placeholder:text-white/40" />
-              </div>
-              <div className="rounded-xl border border-white/10 bg-black/30 p-4 text-white">
-                <div className="mb-2 text-sm font-medium">Proposed Tasks</div>
-                <ul className="space-y-2 text-sm text-white/90">
-                  {[
-                    "Record kickoff on Monday",
-                    "Invite Legal to DPA review",
-                    "Ship public beta by Jul 20",
-                    "Draft investor follow-up deck",
-                    "Create Q3 timeline",
-                  ].map((t: any) => (
-                    <li key={t} className="flex items-center gap-2">
-                      <span className="h-2 w-2 rounded-full bg-gradient-to-r from-[#FF4D4D] via-[#FF9900] to-[#FF2E97]" />
-                      {t}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      </TabsContent>
-    </Tabs>
-  );
-}
-
 export default function TaskwiseAIPage() {
-  const { setTheme } = useTheme();
-
-  React.useEffect(() => {
-    setTheme("dark");
-  }, [setTheme]);
-
   return (
-    <main className={`relative min-h-screen bg-[#0B0B0F] text-white font-body ${brandGradient}`}>
-      <header className="sticky top-0 z-40 border-b border-white/10 bg-black/20 backdrop-blur">
-        <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-3 sm:px-6 lg:px-8">
+    <main className={`relative min-h-screen overflow-hidden bg-[#090A0F] text-white ${brandGradient}`}>
+      <div className="pointer-events-none fixed inset-0 -z-20 bg-[linear-gradient(to_bottom,rgba(255,255,255,0.03),transparent_18%),radial-gradient(circle_at_top,_rgba(255,255,255,0.08),transparent_30%)]" />
+
+      <header className="sticky top-0 z-40 border-b border-white/10 bg-black/25 backdrop-blur-xl">
+        <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-4 sm:px-6 lg:px-8">
           <div className="flex items-center gap-3">
-             <Logo size="md" />
-            <Badge className="hidden sm:inline-flex bg-white/10 text-white">Beta</Badge>
+            <Logo size="md" />
+            <Badge className="hidden border-white/10 bg-white/10 text-white sm:inline-flex">
+              Beta
+            </Badge>
           </div>
-          <nav className="hidden items-center gap-6 text-sm text-white/70 md:flex">
-            <a href="#features" className="hover:text-white">Features</a>
-            <a href="#workflow" className="hover:text-white">Workflow</a>
-            <a href="#demo" className="hover:text-white">Live Demo</a>
-            <a href="#integrations" className="hover:text-white">Integrations</a>
-            <a href="#pricing" className="hover:text-white">Beta</a>
+          <nav className="hidden items-center gap-6 text-sm text-white/65 lg:flex">
+            {marketingNavItems.slice(0, 4).map((item) => (
+              <Link key={item.href} href={item.href} className="transition hover:text-white">
+                {item.label}
+              </Link>
+            ))}
           </nav>
           <div className="flex items-center gap-3">
-            <Button variant="secondary" className="hidden sm:inline-flex bg-white/10 text-white hover:bg-white/20" asChild>
-                <Link href="/login" prefetch={false}>Sign in</Link>
+            <Button
+              variant="secondary"
+              className="hidden border-white/10 bg-white/10 text-white hover:bg-white/20 sm:inline-flex"
+              asChild
+            >
+              <Link href="/login">Sign in</Link>
             </Button>
-            <Button className="gem-button bg-gradient-to-r from-[#FF4D4D] via-[#FF9900] to-[#FF2E97] text-white" asChild>
-              <Link href="/signup" prefetch={false}>Get started</Link>
+            <Button
+              className="bg-gradient-to-r from-[#FF5C4D] via-[#FF9900] to-[#FF2E97] text-white shadow-[0_20px_60px_rgba(255,92,77,0.25)]"
+              asChild
+            >
+              <Link href="/signup">
+                Get started
+                <ArrowRight className="ml-1 h-4 w-4" />
+              </Link>
             </Button>
           </div>
         </div>
@@ -171,142 +71,173 @@ export default function TaskwiseAIPage() {
 
       <section className="relative overflow-hidden">
         <HeroParticles className="-z-10" />
-        <div className="pointer-events-none absolute inset-0 -z-20 bg-[radial-gradient(800px_400px_at_50%_-10%,rgba(255,255,255,0.12),transparent)]" />
-        <div className="mx-auto grid max-w-7xl grid-cols-1 items-center gap-10 px-4 py-16 sm:px-6 lg:grid-cols-2 lg:py-24 lg:px-8">
-          <div className="text-center lg:text-left">
+        <div className="mx-auto grid max-w-7xl grid-cols-1 items-center gap-12 px-4 py-16 sm:px-6 lg:grid-cols-[1.05fr_0.95fr] lg:px-8 lg:py-24">
+          <div className="max-w-3xl">
+            <Badge className="mb-6 border-white/10 bg-white/10 text-white">
+              New: Fathom, Fireflies, Grain, cleanup, prioritization, planning
+            </Badge>
             <motion.h1
-              initial={{ opacity: 0, y: 10 }}
+              initial={{ opacity: 0, y: 12 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.5 }}
-              className="mb-4 text-4xl font-semibold leading-tight text-white sm:text-5xl"
+              className="text-4xl font-semibold leading-tight tracking-tight text-white sm:text-5xl lg:text-7xl"
             >
-              Turn meetings into <GradientText>reviewed task lists</GradientText>
+              Turn meetings into <GradientText>prioritized, reviewed execution.</GradientText>
             </motion.h1>
-            <p className="mb-6 max-w-xl mx-auto lg:mx-0 text-base text-white/70 sm:text-lg">
-              TaskwiseAI turns pasted notes, transcripts, and Fathom meetings into suggested tasks your team can review, assign, and track on a board.
+            <p className="mt-6 max-w-2xl text-lg leading-8 text-white/70">
+              TaskwiseAI brings together Fathom, Fireflies, Grain, pasted notes, AI chat,
+              cleanup, prioritization, planning, and Slack reminders so your team can move
+              from raw conversation to confident action.
             </p>
-            <div className="flex flex-wrap items-center justify-center lg:justify-start gap-3">
-              <Button size="lg" className="gem-button bg-gradient-to-r from-[#FF4D4D] via-[#FF9900] to-[#FF2E97] text-white" asChild>
-                <Link href="/signup" prefetch={false}>Try it free</Link>
+            <div className="mt-8 flex flex-wrap gap-3">
+              <Button className="bg-gradient-to-r from-[#FF5C4D] via-[#FF9900] to-[#FF2E97] text-white" asChild>
+                <Link href="/signup">
+                  Try it free
+                  <ArrowRight className="ml-1 h-4 w-4" />
+                </Link>
               </Button>
-              <Button size="lg" variant="secondary" className="bg-white/10 text-white hover:bg-white/20">
-                Watch demo <ChevronRight className="ml-1 h-4 w-4" />
+              <Button variant="secondary" className="border-white/10 bg-white/10 text-white hover:bg-white/20" asChild>
+                <Link href="/features">See features</Link>
               </Button>
             </div>
-             <div className="mt-6 flex flex-wrap items-center justify-center lg:justify-start gap-x-4 gap-y-2 text-sm text-white/60">
-              <span className="inline-flex items-center gap-2"><Zap className="h-4 w-4" /> No credit card</span>
-              <span className="inline-flex items-center gap-2"><Brain className="h-4 w-4" /> GPT-powered</span>
-              <span className="inline-flex items-center gap-2"><GitBranch className="h-4 w-4" /> Clear dependencies</span>
+            <div className="mt-6 flex flex-wrap gap-x-4 gap-y-2 text-sm text-white/60">
+              <span className="inline-flex items-center gap-2">
+                <ShieldCheck className="h-4 w-4" />
+                Review-first workflow
+              </span>
+              <span className="inline-flex items-center gap-2">
+                <Sparkles className="h-4 w-4" />
+                Deterministic prioritization
+              </span>
+              <span className="inline-flex items-center gap-2">
+                <Sparkles className="h-4 w-4" />
+                MCP operator layer
+              </span>
             </div>
           </div>
 
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.6 }}
-            className="relative mt-8 lg:mt-0 perspective-container-hero overflow-hidden"
-          >
-            <AnimatedTaskHero />
-          </motion.div>
+          <div className="relative">
+            <div className="absolute inset-0 rounded-[2rem] bg-gradient-to-br from-[#FF5C4D]/15 via-transparent to-[#FF2E97]/15 blur-3xl" />
+            <div className="relative overflow-hidden rounded-[2rem] border border-white/10 bg-white/5 p-4 shadow-2xl shadow-black/30 backdrop-blur">
+              <AnimatedTaskHero />
+            </div>
+          </div>
         </div>
       </section>
 
-      <Section
-        id="features"
-        title={<><GradientText>One inbox</GradientText> for your ideas</>}
-        subtitle="Drop in recordings, transcripts, or raw notes. TaskwiseAI turns chaos into clarity."
+      <MarketingSection
+        eyebrow="Workflow"
+        title={
+          <>
+            Capture, <GradientText>understand</GradientText>, review, execute.
+          </>
+        }
+        subtitle="The homepage shows the loop at a glance: bring in a meeting, turn it into tasks, clean it up, prioritize it, and keep the team moving."
       >
-        <div className="grid gap-6 md:grid-cols-3">
-          {[
-            {
-              icon: Upload,
-              title: "Ingest anything",
-              text: "Paste transcripts or notes, try sample data, or sync Fathom meetings.",
-            },
-            {
-              icon: Brain,
-              title: "Breakdown with AI",
-              text: "Create suggested tasks with summaries, owners, due dates, and review signals.",
-            },
-            {
-              icon: GitBranch,
-              title: "Plan & prioritize",
-              text: "Review tasks, assign responsibility, then track completion on the board.",
-            },
-          ].map(({ icon: Icon, title, text }) => (
-            <div
-              key={title}
-              className="rounded-2xl border border-white/10 bg-white/5 p-6 text-white backdrop-blur"
-            >
-              <div className="mb-4 inline-flex rounded-xl bg-white/10 p-3">
-                <Icon className="h-5 w-5" />
+        <div className="grid gap-4 lg:grid-cols-4">
+          {productFlowSteps.map((step, index) => (
+            <article key={step.title} className="rounded-[1.5rem] border border-white/10 bg-black/25 p-5">
+              <div className="mb-4 flex items-center justify-between text-xs uppercase tracking-[0.3em] text-white/45">
+                <span>{step.eyebrow}</span>
+                <span>0{index + 1}</span>
               </div>
-              <h3 className="mb-1 text-lg font-medium">{title}</h3>
-              <p className="text-sm text-white/70">{text}</p>
-            </div>
+              <h3 className="text-lg font-medium text-white">{step.title}</h3>
+              <p className="mt-3 text-sm leading-7 text-white/70">{step.description}</p>
+            </article>
           ))}
         </div>
-      </Section>
+      </MarketingSection>
+
+      <MarketingSection
+        eyebrow="Capabilities"
+        title="Big enough to impress. Clear enough to trust."
+        subtitle="Each block on the homepage maps to a real product capability users can try right away."
+      >
+        <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-3">
+          {capabilityCards.map((card) => {
+            const Icon = card.icon;
+            return (
+              <article key={card.title} className="rounded-[1.75rem] border border-white/10 bg-white/5 p-6 backdrop-blur">
+                <div className="mb-4 inline-flex rounded-2xl bg-white/10 p-3">
+                  <Icon className="h-5 w-5 text-white" />
+                </div>
+                <h3 className="text-lg font-medium text-white">{card.title}</h3>
+                <p className="mt-2 text-sm leading-7 text-white/70">{card.description}</p>
+              </article>
+            );
+          })}
+        </div>
+      </MarketingSection>
 
       <TaskwiseGsapSection />
 
-      <Section id="demo" title={<><GradientText>Explore</GradientText> or just <GradientText>Chat</GradientText></>}>
-        <ExploreTabs />
-      </Section>
-
-      <Section
-        id="integrations"
-        title={<><GradientText>Supported integrations</GradientText></>}
-        subtitle="Taskwise currently supports Fathom meeting sync, Google Workspace flows, Slack sharing, Trello export, and advanced MCP access for operator use."
+      <MarketingSection
+        eyebrow="Integrations"
+        title="Meeting providers, calendar signals, and the rest of the stack."
+        subtitle="Fathom, Fireflies, Grain, Slack, Google Workspace, manual paste, and the operator layer are all visible from the first screen."
       >
-        <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-          {["Fathom","Google Workspace","Slack","Trello","MCP API","Manual paste","Sample meetings","Board sync"].map((name: any) => (
-            <div key={name} className="flex items-center justify-center rounded-xl border border-white/10 bg-white/5 px-3 py-4 text-sm text-white/70 backdrop-blur">
-              {name}
-            </div>
-          ))}
+        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          {integrationCards.map((card) => {
+            const Icon = card.icon;
+            return (
+              <Link
+                key={card.title}
+                href="/integrations"
+                className="group rounded-[1.5rem] border border-white/10 bg-white/5 p-5 transition hover:border-white/20 hover:bg-white/10"
+              >
+                <div className="mb-4 flex items-center justify-between">
+                  <div className="rounded-xl bg-white/10 p-2">
+                    <Icon className="h-4 w-4 text-white" />
+                  </div>
+                  {card.badge && (
+                    <span className={`rounded-full px-2 py-0.5 text-[10px] uppercase tracking-[0.25em] ${card.badge === "Live" ? "bg-emerald-500/15 text-emerald-200" : "bg-white/10 text-white/60"}`}>
+                      {card.badge}
+                    </span>
+                  )}
+                </div>
+                <h3 className="text-sm font-medium text-white">{card.title}</h3>
+                <p className="mt-2 text-sm leading-6 text-white/65">{card.description}</p>
+              </Link>
+            );
+          })}
         </div>
-      </Section>
+      </MarketingSection>
 
-      <Section id="pricing" title="Beta access">
-        <div className="grid gap-6 md:grid-cols-3">
+      <MarketingSection
+        eyebrow="Operator layer"
+        title="Workflow replay, audit logs, and MCP keys live behind a dedicated page."
+        subtitle="This keeps the advanced surfaces easy to find without burying them inside the integrations story."
+      >
+        <div className="grid gap-6 lg:grid-cols-3">
           {[
-            { tier: "Core loop", price: "Included", blurb: "Paste notes, review tasks, and track work on the board" },
-            { tier: "Team setup", price: "Included", blurb: "Workspace members, Fathom, Slack, Google, and Trello" },
-            { tier: "Advanced", price: "Operator", blurb: "Workflow delivery, MCP keys, audit logs, and replay tools" },
-          ].map((p: any) => (
-            <div key={p.tier} className="rounded-2xl border border-white/10 bg-white/5 p-6 text-white backdrop-blur flex flex-col">
-              <div className="mb-2 text-sm text-white/60">{p.tier}</div>
-              <div className="mb-1 text-3xl font-semibold">{p.price}</div>
-              <p className="mb-4 text-sm text-white/70">{p.blurb}</p>
-              <ul className="mb-5 space-y-2 text-sm text-white/80">
-                <li className="flex items-center gap-2"><CheckCircle2 className="h-4 w-4"/> AI task extraction</li>
-                <li className="flex items-center gap-2"><CheckCircle2 className="h-4 w-4"/> Review Tasks queue</li>
-                <li className="flex items-center gap-2"><CheckCircle2 className="h-4 w-4"/> Board and people tracking</li>
-              </ul>
-              <Button className="w-full mt-auto bg-gradient-to-r from-[#FF4D4D] via-[#FF9900] to-[#FF2E97] text-white" asChild>
-                <Link href="/signup" prefetch={false}>Get started</Link>
-              </Button>
+            "Audit logs explain what changed and why.",
+            "Workflow replay helps operators inspect deliveries.",
+            "MCP keys keep operator access scoped and explicit.",
+          ].map((item) => (
+            <div key={item} className="rounded-[1.5rem] border border-white/10 bg-white/5 p-6 text-sm leading-7 text-white/75">
+              {item}
             </div>
           ))}
         </div>
-      </Section>
+      </MarketingSection>
 
-      <footer className="border-t border-white/10 bg-black/30">
-        <div className="mx-auto grid max-w-7xl grid-cols-1 items-center gap-y-4 gap-x-6 px-4 py-8 sm:px-6 md:grid-cols-2 lg:px-8">
-          <div className="flex items-center justify-center md:justify-start gap-3 text-white/80">
-            <Logo size="sm" isIconOnly={true}/>
-            <span className="text-sm">TaskwiseAI</span>
-            <span className="text-white/40">(c) {new Date().getFullYear()}</span>
-          </div>
-          <div className="flex items-center justify-center md:justify-end gap-4">
-            <Link href="/privacy" className="text-sm text-white/60 hover:text-white">Privacy Policy</Link>
-            <Link href="/terms" className="text-sm text-white/60 hover:text-white">Terms of Service</Link>
-            <Link href="/contact" className="text-sm text-white/60 hover:text-white">Contact</Link>
-          </div>
+      <MarketingSection
+        eyebrow="Call to action"
+        title="See the product, then put it to work."
+        subtitle="The homepage links out to the feature story, the integrations story, and the operator surface so the branch feels complete."
+      >
+        <div className="flex flex-wrap gap-3">
+          <Button className="bg-gradient-to-r from-[#FF5C4D] via-[#FF9900] to-[#FF2E97] text-white" asChild>
+            <Link href="/signup">Get started</Link>
+          </Button>
+          <Button variant="secondary" className="border-white/10 bg-white/10 text-white hover:bg-white/20" asChild>
+            <Link href="/login">Sign in</Link>
+          </Button>
+          <Button variant="secondary" className="border-white/10 bg-white/10 text-white hover:bg-white/20" asChild>
+            <Link href="/features">Open features</Link>
+          </Button>
         </div>
-      </footer>
+      </MarketingSection>
     </main>
   );
 }
-
