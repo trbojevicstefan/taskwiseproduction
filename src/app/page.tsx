@@ -341,14 +341,14 @@ export default function HomePage() {
       <MarketingSection
         id="cta"
         title="Ready to turn meetings into reviewed work?"
-        subtitle="Start with the launch flow, explore the platform surfaces, or jump straight into the operator docs."
+        subtitle="Start with the launch flow, explore the platform surfaces, or go deeper into MCP and integrations."
       >
         <div className="rounded-[2rem] border border-white/10 bg-gradient-to-br from-white/10 via-white/[0.06] to-white/[0.03] p-6 shadow-2xl shadow-black/30 sm:p-8">
           <div className="flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between">
             <div className="max-w-2xl space-y-3">
               <p className="text-xs uppercase tracking-[0.22em] text-white/45">Launch CTA</p>
               <h2 className="text-3xl font-semibold tracking-tight text-white sm:text-4xl">
-                Get the meeting story out of the docs and into execution.
+                Explore the product surfaces, integrations, and operator layer in one place.
               </h2>
               <p className="text-base leading-7 text-white/68">
                 Taskwise gives teams one place to capture work, clean it up, prioritize it, and

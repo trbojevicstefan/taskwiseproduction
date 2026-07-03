@@ -43,6 +43,7 @@
 - Trello is clearly labeled as currently disabled / not live yet.
 - The public copy stays focused on features that are actually shipped or documented in the current platform story.
 - I did not touch the unrelated dashboard chat task work in this worktree.
+- The CTA block was revised after review to remove docs-first language and keep the homepage product-led.
 
 ## Concerns
-- The homepage test still needs a small `console.error` suppression because `MarketingPageShell` forwards a `prefetch` prop through its mocked `Link` usage during static render. The page itself is fine; this is just a test-harness detail.
+- None. The homepage test harness is stable after the `console.error` suppression in the test file.
