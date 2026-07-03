@@ -12,13 +12,13 @@ jest.mock("next/link", () => ({
 }));
 
 describe("TaskwiseGsapSection", () => {
-  it("includes a mobile fallback for the showcase", () => {
+  it("renders the stacked three-panel showcase", () => {
     const html = renderToStaticMarkup(React.createElement(TaskwiseGsapSection));
 
     expect(html).toContain("Clarity");
     expect(html).toContain("Momentum");
     expect(html).toContain("Ease");
-    expect(html).toContain("md:hidden");
-    expect(html).toContain("Mobile clarity");
+    expect(html).toContain("data-gsap-panel");
+    expect(html).toContain("A calmer story that still feels alive.");
   });
 });

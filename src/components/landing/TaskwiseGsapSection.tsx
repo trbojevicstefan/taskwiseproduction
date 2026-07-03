@@ -1,8 +1,8 @@
 "use client";
 
-import React, { useEffect, useRef } from "react";
 import Link from "next/link";
-import { Sparkles, MessageSquare, Layers, Share2, Rocket } from "lucide-react";
+import React, { useEffect, useRef } from "react";
+import { Layers, MessageSquare, Rocket, Share2, Sparkles } from "lucide-react";
 import { gsap } from "gsap";
 import { ScrollTrigger } from "gsap/dist/ScrollTrigger";
 
@@ -11,10 +11,10 @@ type ShowcaseSection = {
   title: string;
   subtitle: string;
   description: string;
-  colorClass: string;
-  buttonClass: string;
-  ringColors: [string, string, string, string, string];
-  content: React.ReactNode;
+  accent: string;
+  badge: string;
+  icon: React.ReactNode;
+  panel: React.ReactNode;
 };
 
 const SHOWCASE_SECTIONS: ShowcaseSection[] = [
@@ -24,46 +24,45 @@ const SHOWCASE_SECTIONS: ShowcaseSection[] = [
     subtitle: "From meeting noise to decision-ready context",
     description:
       "Taskwise creates dependable transcripts, concise summaries, and owner-based action items so every meeting ends with clear next steps.",
-    colorClass: "text-[#4CC9F0]",
-    buttonClass: "bg-[#4CC9F0] text-black",
-    ringColors: ["bg-[#002f4a]", "bg-[#005a8f]", "bg-[#0089d1]", "bg-[#00abff]", "bg-[#48e5ff]"],
-    content: (
-      <div className="space-y-4 font-sans text-slate-300">
-        <div className="mb-2 flex items-center justify-between border-b border-white/10 pb-4">
-          <h4 className="text-lg font-bold text-white">
-            Summary
-            <span className="ml-2 cursor-pointer text-xs font-normal text-slate-500 underline">
-              Template: Weekly Execution Sync
+    accent: "from-[#4CC9F0]/18 via-[#00abff]/10 to-white/[0.03]",
+    badge: "Summary",
+    icon: <Sparkles size={16} fill="currentColor" />,
+    panel: (
+      <div className="space-y-4 rounded-[1.6rem] border border-white/10 bg-[#191a1e]/95 p-5 shadow-[0_20px_50px_rgba(0,0,0,0.55)] backdrop-blur-md sm:p-6">
+        <div className="flex items-center justify-between border-b border-white/10 pb-4">
+          <h4 className="text-base font-bold text-white">
+            Weekly Execution Sync
+            <span className="ml-2 block text-xs font-normal text-slate-500 sm:inline">
+              Template summary
             </span>
           </h4>
+          <div className="rounded-full border border-cyan-400/20 bg-cyan-400/10 px-3 py-1 text-[10px] uppercase tracking-[0.2em] text-cyan-200">
+            Clarity
+          </div>
         </div>
-        <div className="space-y-5 pt-2">
+        <div className="space-y-4 pt-1">
           <div>
-            <p className="mb-1 text-sm font-bold text-white">Meeting Purpose</p>
-            <p className="text-sm text-slate-400">
-              - Align product, sales, and delivery owners on this week&apos;s launch blockers.
+            <p className="mb-1 text-xs font-bold uppercase tracking-[0.2em] text-white/55">
+              Meeting purpose
+            </p>
+            <p className="text-sm leading-6 text-slate-300">
+              Align product, sales, and delivery owners on this week&apos;s launch blockers.
             </p>
           </div>
-          <div>
-            <p className="mb-2 text-sm font-bold text-white">Highlights</p>
-            <div className="space-y-3">
-              <div className="space-y-1">
-                <p className="text-sm font-bold text-white">Launch readiness:</p>
-                <div className="flex gap-2">
-                  <div className="mt-1 flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-cyan-500">
-                    {">"}
-                  </div>
-                  <p className="text-sm font-medium leading-relaxed text-cyan-400">
-                    Taskwise flagged two unresolved blockers and attached owners before the meeting ended.
-                  </p>
-                </div>
-                <div className="flex gap-2 pl-6">
-                  <div className="mt-2 h-1 w-1 shrink-0 rounded-full bg-slate-500" />
-                  <p className="text-sm text-slate-400">
-                    Follow-ups were synced with due dates and surfaced in the workspace board automatically.
-                  </p>
-                </div>
+          <div className="rounded-2xl border border-white/8 bg-white/[0.03] p-4">
+            <p className="text-xs font-bold uppercase tracking-[0.2em] text-white/55">
+              Highlights
+            </p>
+            <div className="mt-3 space-y-3">
+              <div className="rounded-xl border border-cyan-400/15 bg-cyan-400/8 p-3">
+                <p className="text-sm font-semibold text-cyan-200">Launch readiness</p>
+                <p className="mt-1 text-sm leading-6 text-slate-300">
+                  Two blockers were flagged and attached to owners before the meeting ended.
+                </p>
               </div>
+              <p className="text-sm leading-6 text-slate-400">
+                Follow-ups were synced with due dates and surfaced in the workspace board automatically.
+              </p>
             </div>
           </div>
         </div>
@@ -76,47 +75,52 @@ const SHOWCASE_SECTIONS: ShowcaseSection[] = [
     subtitle: "Search fast, automate follow-through",
     description:
       "\"Ask Taskwise\" lets your team query meetings, decisions, and open actions in seconds, then push updates into the tools everyone already uses.",
-    colorClass: "text-[#F4E285]",
-    buttonClass: "bg-[#F4E285] text-black",
-    ringColors: ["bg-[#783600]", "bg-[#ad5000]", "bg-[#e06b00]", "bg-[#ff8f1a]", "bg-[#ffc66b]"],
-    content: (
-      <div className="space-y-6">
-        <h4 className="mb-4 text-sm font-bold uppercase tracking-widest text-slate-400">Integrations</h4>
-        <div className="space-y-2">
-          {[
-            {
-              name: "Slack",
-              desc: "Send summaries, decisions, and owner reminders to channels instantly.",
-              icon: <MessageSquare size={18} />,
-              iconColor: "text-green-400",
-            },
-            {
-              name: "Salesforce",
-              desc: "Attach meeting context and follow-up tasks to accounts and opportunities.",
-              icon: <Layers size={18} />,
-              iconColor: "text-blue-400",
-            },
-            {
-              name: "HubSpot",
-              desc: "Sync next steps and notes back to contacts without manual copy-paste.",
-              icon: <Share2 size={18} />,
-              iconColor: "text-orange-400",
-            },
-          ].map((item: any) => (
-            <div
-              key={item.name}
-              className="flex items-center gap-4 rounded-xl border border-white/5 bg-white/5 p-4 transition-colors hover:bg-white/10"
-            >
-              <div className={`flex h-10 w-10 items-center justify-center rounded-lg bg-white/10 ${item.iconColor}`}>
-                {item.icon}
-              </div>
-              <div>
-                <p className="text-base font-bold text-white">{item.name}</p>
-                <p className="mt-0.5 text-[11px] text-slate-400">{item.desc}</p>
-              </div>
-            </div>
-          ))}
+    accent: "from-[#F4E285]/18 via-[#ff8f1a]/12 to-white/[0.03]",
+    badge: "Integrations",
+    icon: <MessageSquare size={16} fill="currentColor" />,
+    panel: (
+      <div className="space-y-3 rounded-[1.6rem] border border-white/10 bg-[#191a1e]/95 p-5 shadow-[0_20px_50px_rgba(0,0,0,0.55)] backdrop-blur-md sm:p-6">
+        <div className="flex items-center justify-between border-b border-white/10 pb-4">
+          <h4 className="text-sm font-bold uppercase tracking-[0.2em] text-slate-400">
+            Integrations
+          </h4>
+          <div className="rounded-full border border-amber-300/20 bg-amber-300/10 px-3 py-1 text-[10px] uppercase tracking-[0.2em] text-amber-100">
+            Momentum
+          </div>
         </div>
+        {[
+          {
+            name: "Slack",
+            desc: "Send summaries, decisions, and owner reminders to channels instantly.",
+            icon: <MessageSquare size={18} />,
+            iconColor: "text-green-300",
+          },
+          {
+            name: "Salesforce",
+            desc: "Attach meeting context and follow-up tasks to accounts and opportunities.",
+            icon: <Layers size={18} />,
+            iconColor: "text-blue-300",
+          },
+          {
+            name: "HubSpot",
+            desc: "Sync next steps and notes back to contacts without manual copy-paste.",
+            icon: <Share2 size={18} />,
+            iconColor: "text-orange-300",
+          },
+        ].map((item) => (
+          <div
+            key={item.name}
+            className="flex items-center gap-4 rounded-2xl border border-white/8 bg-white/[0.04] p-4 transition-colors hover:bg-white/[0.08]"
+          >
+            <div className={`flex h-11 w-11 items-center justify-center rounded-xl bg-white/10 ${item.iconColor}`}>
+              {item.icon}
+            </div>
+            <div>
+              <p className="text-base font-bold text-white">{item.name}</p>
+              <p className="mt-0.5 text-[11px] leading-5 text-slate-400">{item.desc}</p>
+            </div>
+          </div>
+        ))}
       </div>
     ),
   },
@@ -126,22 +130,22 @@ const SHOWCASE_SECTIONS: ShowcaseSection[] = [
     subtitle: "Enterprise-grade operations, zero setup",
     description:
       "Taskwise handles ingestion, processing, and secure delivery so your team can focus on execution while the platform scales in the background.",
-    colorClass: "text-[#FF9F8A]",
-    buttonClass: "bg-[#FF9F8A] text-black",
-    ringColors: ["bg-[#3f0d12]", "bg-[#6d1a20]", "bg-[#9b2530]", "bg-[#d94b4b]", "bg-[#ff8a65]"],
-    content: (
-      <div className="flex h-full flex-col items-center justify-center py-8 text-center">
-        <div className="relative mb-10 mt-4">
-          <div className="absolute -inset-10 rounded-full bg-[#ff6a3d]/40 blur-[40px] animate-pulse" />
+    accent: "from-[#ff6a3d]/18 via-[#ff8a65]/12 to-white/[0.03]",
+    badge: "Delivery",
+    icon: <Rocket size={16} fill="currentColor" />,
+    panel: (
+      <div className="flex flex-col items-center rounded-[1.6rem] border border-white/10 bg-[#191a1e]/95 p-6 text-center shadow-[0_20px_50px_rgba(0,0,0,0.55)] backdrop-blur-md sm:p-8">
+        <div className="relative mb-8 mt-1">
+          <div className="absolute -inset-10 rounded-full bg-[#ff6a3d]/35 blur-[40px]" />
           <div className="relative flex h-28 w-28 items-center justify-center rounded-full border border-white/20 bg-white/10 backdrop-blur-md">
             <Rocket size={48} className="text-[#ff8a65]" />
           </div>
         </div>
         <h4 className="text-2xl font-bold text-white">Autonomous Delivery Layer</h4>
-        <p className="mx-auto mt-3 max-w-[250px] text-sm text-slate-400">
+        <p className="mx-auto mt-3 max-w-[280px] text-sm leading-6 text-slate-400">
           Built for always-on teams that need fast answers and reliable execution.
         </p>
-        <div className="mt-10 w-full rounded-2xl border border-white/10 bg-white/5 p-5">
+        <div className="mt-8 w-full rounded-2xl border border-white/10 bg-white/5 p-5 text-left">
           <div className="mb-3 flex justify-between font-mono text-xs text-slate-400">
             <span>TASKWISE_RESPONSE_TIME</span>
             <span className="font-bold text-green-400">12ms</span>
@@ -157,28 +161,22 @@ const SHOWCASE_SECTIONS: ShowcaseSection[] = [
 
 export default function TaskwiseGsapSection() {
   const containerRef = useRef<HTMLDivElement | null>(null);
-  const clarityStarsRef = useRef<HTMLDivElement | null>(null);
+  const starContainerRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     const container = containerRef.current;
-    const starContainer = clarityStarsRef.current;
+    const starContainer = starContainerRef.current;
     if (!container || !starContainer) {
-      return;
-    }
-
-    const isMobile = window.matchMedia("(max-width: 767px)").matches || window.matchMedia("(pointer: coarse)").matches;
-    const prefersReducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    if (isMobile || prefersReducedMotion) {
-      return;
+      return undefined;
     }
 
     gsap.registerPlugin(ScrollTrigger);
     starContainer.innerHTML = "";
 
-    for (let index = 0; index < 140; index += 1) {
+    for (let index = 0; index < 120; index += 1) {
       const star = document.createElement("div");
       const size = Math.random() * 2.2 + 1;
-      const opacity = Math.random() * 0.5 + 0.35;
+      const opacity = Math.random() * 0.55 + 0.25;
 
       star.className = "absolute rounded-full bg-white";
       star.style.width = `${size}px`;
@@ -192,72 +190,35 @@ export default function TaskwiseGsapSection() {
     }
 
     const ctx = gsap.context(() => {
-      SHOWCASE_SECTIONS.forEach((section, index) => {
-        if (index === 0) {
-          gsap.set(`#nav-${section.id}`, { color: "#ffffff", scale: 1 });
-          gsap.set(`#section-${section.id}`, { height: "auto", opacity: 1, marginTop: "1rem" });
-          gsap.set(`#rings-${section.id}`, { opacity: 1 });
-          gsap.set(`#card-${section.id}`, { opacity: 1, y: 0 });
-          return;
-        }
-
-        gsap.set(`#nav-${section.id}`, { color: "rgba(255,255,255,0.3)", scale: 0.85 });
-        gsap.set(`#section-${section.id}`, { height: 0, opacity: 0, marginTop: 0 });
-        gsap.set(`#rings-${section.id}`, { opacity: 0 });
-        gsap.set(`#card-${section.id}`, { opacity: 0, y: 50 });
-      });
-
       gsap.to(starContainer, {
-        yPercent: -28,
+        yPercent: -12,
         ease: "none",
         scrollTrigger: {
           trigger: container,
-          start: "top top",
-          end: "+=5000",
+          start: "top bottom",
+          end: "bottom top",
           scrub: 1,
         },
       });
 
-      const tl = gsap.timeline({
-        scrollTrigger: {
-          trigger: container,
-          start: "top top",
-          end: "+=5000",
-          pin: true,
-          scrub: 1,
-          anticipatePin: 1,
-        },
-      });
-
-      tl.to({}, { duration: 1.5 });
-
-      SHOWCASE_SECTIONS.forEach((_, index) => {
-        if (index === 0) {
-          return;
-        }
-
-        const previous = SHOWCASE_SECTIONS[index - 1];
-        const current = SHOWCASE_SECTIONS[index];
-        const stepLabel = `step-${index}`;
-
-        tl.to(`#nav-${previous.id}`, { color: "rgba(255,255,255,0.3)", scale: 0.85, duration: 1 }, stepLabel)
-          .to(
-            `#section-${previous.id}`,
-            { height: 0, opacity: 0, marginTop: 0, duration: 1, ease: "power2.inOut" },
-            stepLabel
-          )
-          .to(`#card-${previous.id}`, { opacity: 0, y: -50, duration: 1 }, stepLabel)
-          .to(`#rings-${previous.id}`, { opacity: 0, duration: 1 }, stepLabel)
-          .to(`#nav-${current.id}`, { color: "#ffffff", scale: 1, duration: 1 }, stepLabel)
-          .to(
-            `#section-${current.id}`,
-            { height: "auto", opacity: 1, marginTop: "1rem", duration: 1, ease: "power2.inOut" },
-            stepLabel
-          )
-          .to(`#card-${current.id}`, { opacity: 1, y: 0, duration: 1 }, stepLabel)
-          .to(`#rings-${current.id}`, { opacity: 1, duration: 1 }, stepLabel);
-
-        tl.to({}, { duration: 1.5 });
+      const panels = gsap.utils.toArray<HTMLElement>("[data-gsap-panel]", container);
+      panels.forEach((panel) => {
+        gsap.fromTo(
+          panel,
+          { opacity: 0, y: 48, scale: 0.98 },
+          {
+            opacity: 1,
+            y: 0,
+            scale: 1,
+            ease: "power2.out",
+            scrollTrigger: {
+              trigger: panel,
+              start: "top 78%",
+              end: "top 45%",
+              scrub: 0.6,
+            },
+          },
+        );
       });
     }, container);
 
@@ -270,100 +231,60 @@ export default function TaskwiseGsapSection() {
   }, []);
 
   return (
-    <section id="workflow" className="relative overflow-x-hidden bg-[#020202] py-6">
-      <div className="md:hidden">
-        <div className="relative mx-auto flex w-full max-w-7xl flex-col gap-4 px-4 py-10 sm:px-6">
-          <div className="pointer-events-none absolute inset-x-0 top-0 h-40 bg-[radial-gradient(circle_at_30%_20%,rgba(76,201,240,0.14),transparent_25%),radial-gradient(circle_at_70%_30%,rgba(255,215,120,0.12),transparent_28%),radial-gradient(circle_at_50%_80%,rgba(255,46,151,0.08),transparent_26%)]" />
-          <div className="relative overflow-hidden rounded-[2rem] border border-white/10 bg-white/[0.04] p-5 shadow-[0_20px_50px_rgba(0,0,0,0.35)]">
-            <p className="text-xs uppercase tracking-[0.24em] text-white/45">Mobile clarity</p>
-            <h2 className="mt-3 text-3xl font-semibold tracking-tight text-white">Clarity</h2>
-            <p className="mt-2 text-sm leading-6 text-slate-300">
-              From meeting noise to decision-ready context. Taskwise creates dependable transcripts,
-              concise summaries, and owner-based action items so every meeting ends with clear next steps.
-            </p>
-          </div>
+    <section id="workflow" className="relative overflow-hidden bg-[#020202] py-16 sm:py-24">
+      <div className="pointer-events-none absolute inset-0 z-0 bg-[radial-gradient(circle_at_50%_18%,rgba(255,106,61,0.12),transparent_28%),radial-gradient(circle_at_82%_78%,rgba(255,46,151,0.08),transparent_24%),linear-gradient(180deg,rgba(255,255,255,0.015),transparent_18%)]" />
+      <div
+        ref={starContainerRef}
+        className="pointer-events-none absolute inset-0 z-0 opacity-85"
+        style={{ mixBlendMode: "screen" }}
+      />
 
-          <div className="grid gap-4 sm:grid-cols-2">
-            <div className="rounded-[1.5rem] border border-white/10 bg-white/[0.04] p-5">
-              <p className="text-xs uppercase tracking-[0.2em] text-white/45">Momentum</p>
-              <h3 className="mt-3 text-2xl font-semibold text-white">Search fast, automate follow-through</h3>
-              <p className="mt-2 text-sm leading-6 text-slate-300">
-                Ask Taskwise about meetings, decisions, and open actions, then push updates into Slack and the tools everyone already uses.
-              </p>
-            </div>
-            <div className="rounded-[1.5rem] border border-white/10 bg-white/[0.04] p-5">
-              <p className="text-xs uppercase tracking-[0.2em] text-white/45">Ease</p>
-              <h3 className="mt-3 text-2xl font-semibold text-white">Enterprise-grade operations</h3>
-              <p className="mt-2 text-sm leading-6 text-slate-300">
-                Ingestion, processing, and secure delivery stay out of the way so the team can focus on execution.
-              </p>
-            </div>
-          </div>
+      <div className="relative z-10 mx-auto w-full max-w-[1400px] px-4 sm:px-6 lg:px-10">
+        <div className="mx-auto mb-12 max-w-3xl text-center">
+          <p className="text-xs uppercase tracking-[0.28em] text-white/45">Clarity, momentum, ease</p>
+          <h2 className="mt-4 text-4xl font-semibold tracking-tight text-white sm:text-5xl lg:text-6xl">
+            A calmer story that still feels alive.
+          </h2>
+          <p className="mt-4 text-base leading-7 text-slate-300 sm:text-lg">
+            Scroll through the three sections without pinning the page or fighting mobile scroll.
+            The motion stays subtle, readable, and stable.
+          </p>
         </div>
-      </div>
 
-      <div ref={containerRef} className="relative hidden h-screen w-full items-center justify-center overflow-hidden md:flex">
-        <div className="pointer-events-none absolute inset-0 z-0 bg-[radial-gradient(circle_at_50%_18%,rgba(255,106,61,0.12),transparent_28%),radial-gradient(circle_at_82%_78%,rgba(255,46,151,0.08),transparent_24%),linear-gradient(180deg,rgba(255,255,255,0.015),transparent_18%)]" />
-        <div
-          ref={clarityStarsRef}
-          className="pointer-events-none absolute inset-0 z-0 opacity-85"
-          style={{ mixBlendMode: "screen" }}
-        />
-
-        <div className="relative z-10 mx-auto grid w-full max-w-[1400px] grid-cols-1 items-center gap-12 px-6 md:grid-cols-[1fr_auto] md:gap-24 md:px-12">
-          <div className="max-w-xl space-y-2">
-            {SHOWCASE_SECTIONS.map((section: any) => (
-              <div key={section.id} className="relative flex flex-col items-start justify-center">
-                <h2
-                  id={`nav-${section.id}`}
-                  className="origin-left cursor-default text-[3rem] font-medium leading-tight sm:text-[3.5rem] md:text-[4.5rem]"
-                >
-                  {section.title}
-                </h2>
-                <div id={`section-${section.id}`} className="w-full overflow-hidden">
-                  <div className="space-y-6 pb-8">
-                    <div className={`flex items-center gap-2 text-sm font-semibold tracking-wide ${section.colorClass}`}>
-                      <Sparkles size={14} fill="currentColor" />
-                      {section.subtitle}
-                    </div>
-                    <p className="text-lg font-normal leading-relaxed text-slate-300">{section.description}</p>
-                    <Link
-                      href="/signup"
-                      prefetch={false}
-                      className={`inline-flex rounded-full px-8 py-3.5 text-xs font-bold uppercase tracking-widest transition-all hover:brightness-110 active:scale-95 ${section.buttonClass}`}
-                    >
-                      Start with Taskwise
-                    </Link>
-                  </div>
+        <div ref={containerRef} className="space-y-8 sm:space-y-10">
+          {SHOWCASE_SECTIONS.map((section) => (
+            <div
+              key={section.id}
+              data-gsap-panel
+              className={`grid gap-6 rounded-[2rem] border border-white/10 bg-gradient-to-br ${section.accent} p-5 shadow-[0_20px_60px_rgba(0,0,0,0.35)] backdrop-blur-sm sm:p-6 lg:grid-cols-[1.1fr_0.9fr] lg:items-center lg:p-8`}
+            >
+              <div className="max-w-xl space-y-4">
+                <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-black/20 px-3 py-1 text-xs uppercase tracking-[0.24em] text-white/65">
+                  <span className="text-[#FFB257]">{section.icon}</span>
+                  {section.badge}
                 </div>
+                <h3 className="text-3xl font-semibold tracking-tight text-white sm:text-4xl">
+                  {section.title}
+                </h3>
+                <p className={`text-sm font-semibold tracking-wide ${section.id === "clarity" ? "text-[#4CC9F0]" : section.id === "momentum" ? "text-[#F4E285]" : "text-[#FF9F8A]"}`}>
+                  {section.subtitle}
+                </p>
+                <p className="text-base leading-7 text-slate-300">{section.description}</p>
+                <Link
+                  href="/signup"
+                  prefetch={false}
+                  className="inline-flex rounded-full bg-gradient-to-r from-[#FF5C4D] via-[#FF9900] to-[#FF2E97] px-6 py-3 text-sm font-semibold text-white shadow-[0_14px_30px_rgba(255,120,60,0.18)] transition-transform hover:-translate-y-0.5"
+                >
+                  Start with Taskwise
+                </Link>
               </div>
-            ))}
-          </div>
 
-          <div className="relative flex h-[320px] w-[320px] items-center justify-center sm:h-[450px] sm:w-[450px] md:h-[550px] md:w-[550px] lg:h-[650px] lg:w-[650px]">
-            <div className="absolute bottom-0 left-[50%] right-[-100vw] top-0 z-0 bg-gradient-to-r from-[#FF7A59] via-[#FF5C8D] to-[#FF3F3F]" />
-
-            <div className="absolute inset-0 z-10 overflow-hidden rounded-full border-[10px] border-white bg-black shadow-[0_0_80px_rgba(0,0,0,0.5)] sm:border-[12px] md:border-[16px]">
-              {SHOWCASE_SECTIONS.map((section: any) => (
-                <React.Fragment key={`rings-${section.id}`}>
-                  <div id={`rings-${section.id}`} className="absolute inset-0 flex items-center justify-center">
-                    <div className={`absolute h-[100%] w-[100%] rounded-full ${section.ringColors[0]}`} />
-                    <div className={`absolute h-[82%] w-[82%] rounded-full ${section.ringColors[1]}`} />
-                    <div className={`absolute h-[64%] w-[64%] rounded-full ${section.ringColors[2]}`} />
-                    <div className={`absolute h-[46%] w-[46%] rounded-full ${section.ringColors[3]}`} />
-                    <div className={`absolute h-[28%] w-[28%] rounded-full ${section.ringColors[4]}`} />
-                  </div>
-
-                  <div
-                    id={`card-${section.id}`}
-                    className="absolute bottom-[12%] right-[-2%] top-[12%] z-20 flex w-[85%] flex-col overflow-hidden rounded-[1.5rem] border border-white/10 bg-[#191a1e]/95 shadow-[0_20px_50px_rgba(0,0,0,0.8)] backdrop-blur-md"
-                  >
-                    <div className="relative h-full flex-1 p-6 md:p-8">{section.content}</div>
-                  </div>
-                </React.Fragment>
-              ))}
+              <div className="relative flex min-h-[280px] items-center justify-center overflow-hidden rounded-[1.6rem] border border-white/10 bg-black/30 p-3 sm:min-h-[320px] sm:p-5">
+                <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_50%_30%,rgba(255,255,255,0.08),transparent_42%)]" />
+                <div className="relative w-full">{section.panel}</div>
+              </div>
             </div>
-          </div>
+          ))}
         </div>
       </div>
     </section>
