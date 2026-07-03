@@ -1,313 +1,405 @@
-"use client";
-// src/app/page.tsx
-
-import React from "react";
-import { motion } from "framer-motion";
+import type { Metadata } from "next";
 import Link from "next/link";
 import {
-  Brain,
-  MessageSquare,
-  GitBranch,
-  CalendarCheck,
-  Upload,
-  FileText,
-  ChevronRight,
-  Zap,
-  Layers,
+  ArrowRight,
+  CalendarDays,
   CheckCircle2,
+  MessagesSquare,
+  NotebookPen,
+  Settings2,
+  ShieldCheck,
+  Sparkles,
+  Wand2,
 } from "lucide-react";
-import { Button } from "@/components/ui/button";
+
 import { Badge } from "@/components/ui/badge";
-import { Input } from "@/components/ui/input";
-import { Card, CardContent } from "@/components/ui/card";
-import {
-  Tabs,
-  TabsList,
-  TabsTrigger,
-  TabsContent,
-} from "@/components/ui/tabs";
-import { Logo } from "@/components/ui/logo";
-import AnimatedTaskHero from "@/components/landing/AnimatedTaskHero";
-import HeroParticles from "@/components/landing/HeroParticles";
-import TaskwiseGsapSection from "@/components/landing/TaskwiseGsapSection";
+import { Button } from "@/components/ui/button";
+import { MarketingPageShell } from "@/components/landing/MarketingPageShell";
+import { MarketingSection } from "@/components/landing/MarketingSection";
+import { integrationCards, productFlowSteps } from "@/components/landing/marketing-content";
 
-const brandGradient =
-  "bg-[radial-gradient(1200px_600px_at_10%_10%,rgba(255,86,48,0.25),transparent_60%),radial-gradient(1200px_600px_at_90%_20%,rgba(255,175,0,0.25),transparent_60%),radial-gradient(1200px_600px_at_50%_90%,rgba(255,0,128,0.25),transparent_60%)]";
+export const metadata: Metadata = {
+  title: "TaskwiseAI | Meetings to execution",
+  description:
+    "Turn meetings, notes, and recordings into reviewed tasks, priority, reminders, and MCP-ready workflows.",
+};
 
-const GradientText = ({ children }: { children: React.ReactNode }) => (
-  <span className="bg-gradient-to-r from-[#FF4D4D] via-[#FF9900] to-[#FF2E97] bg-clip-text text-transparent">
-    {children}
-  </span>
-);
+const capabilityCards = [
+  {
+    icon: MessagesSquare,
+    title: "Source-grounded AI chat",
+    body: "Ask questions over meetings, tasks, people, and clients with answers grounded in workspace sources instead of generic summaries.",
+  },
+  {
+    icon: Wand2,
+    title: "AI task cleanup",
+    body: "Clean up noisy task drafts, remove duplicates, and turn messy output into reviewed work the team can trust.",
+  },
+  {
+    icon: CheckCircle2,
+    title: "Deterministic prioritization",
+    body: "Use deterministic prioritization so the board stays stable and execution decisions stay explainable.",
+  },
+  {
+    icon: NotebookPen,
+    title: "Planning workspace",
+    body: "Use the planning workspace to organize reviewed work into the next steps your team can actually ship.",
+  },
+  {
+    icon: CalendarDays,
+    title: "Calendar, people, and clients",
+    body: "Move between calendar context, people surfaces, and client views without leaving the execution loop.",
+  },
+  {
+    icon: Sparkles,
+    title: "Slack reminders",
+    body: "Keep follow-through alive with Slack reminders that keep reviewed work visible after the meeting ends.",
+  },
+];
 
-const Section = ({
-  id,
-  title,
-  subtitle,
-  children,
-}: {
-  id?: string;
-  title: string | React.ReactNode;
-  subtitle?: string;
-  children: React.ReactNode;
-}) => (
-  <section id={id} className="relative mx-auto w-full max-w-7xl px-4 py-16 sm:px-6 sm:py-20 lg:px-8">
-    <div className="mb-8 flex flex-col items-start gap-3 sm:mb-10">
-      <h2 className="text-3xl font-semibold tracking-tight text-white sm:text-4xl">
-        {title}
-      </h2>
-      {subtitle && (
-        <p className="max-w-3xl text-base text-white/70">{subtitle}</p>
-      )}
-    </div>
-    {children}
-  </section>
-);
+const operatorCards = [
+  {
+    icon: ShieldCheck,
+    title: "MCP keys",
+    body: "Issue and manage workspace-scoped MCP keys for approved operator workflows.",
+  },
+  {
+    icon: NotebookPen,
+    title: "Audit logs",
+    body: "Track operator activity with audit logs that make advanced access easier to review.",
+  },
+  {
+    icon: ArrowRight,
+    title: "Workflow replay / delivery",
+    body: "Use workflow replay and workflow delivery when you need reliable automation over repeated meeting work.",
+  },
+  {
+    icon: Settings2,
+    title: "Advanced settings",
+    body: "Expose the controls advanced teams need without cluttering the main execution experience.",
+  },
+];
 
-function ExploreTabs() {
+export default function HomePage() {
   return (
-    <Tabs defaultValue="explore" className="w-full">
-      <TabsList className="mb-6 grid w-full grid-cols-2 bg-white/10 text-white">
-        <TabsTrigger value="explore">Explore</TabsTrigger>
-        <TabsTrigger value="chat">Chat</TabsTrigger>
-      </TabsList>
-      <TabsContent value="explore">
-        <Card className="border-white/10 bg-white/5 backdrop-blur">
-          <CardContent className="p-4 sm:p-6">
-            <div className="grid gap-4 sm:grid-cols-3">
-              {[
-                { icon: FileText, title: "Themes", text: "AI groups key themes across your transcript." },
-                { icon: Layers, title: "Clusters", text: "Ideas clustered by similarity and outcomes." },
-                { icon: CalendarCheck, title: "Timeline", text: "Milestones auto-drafted with dates." },
-              ].map(({ icon: Icon, title, text }) => (
-                <div key={title} className="rounded-xl border border-white/10 bg-black/30 p-5">
-                  <div className="mb-3 inline-flex rounded-lg bg-white/10 p-2">
-                    <Icon className="h-5 w-5 text-white" />
-                  </div>
-                  <div className="text-white">
-                    <h4 className="mb-1 font-medium">{title}</h4>
-                    <p className="text-sm text-white/70">{text}</p>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
-      </TabsContent>
-
-      <TabsContent value="chat">
-        <Card className="border-white/10 bg-white/5 backdrop-blur">
-          <CardContent className="p-4 sm:p-6">
-            <div className="grid gap-4 md:grid-cols-[1fr_280px]">
-              <div className="rounded-xl border border-white/10 bg-black/30 p-4 text-white/90">
-                <div className="mb-3 flex items-center gap-2 text-xs text-white/60">
-                  <MessageSquare className="h-3.5 w-3.5" /> Chat with AI
-                </div>
-                <div className="mb-4 space-y-2 text-sm">
-                  <p className="rounded-md bg-white/5 p-3">Summarize our brainstorm and draft the top 5 tasks.</p>
-                  <p className="rounded-md bg-white/5 p-3">Also add deadlines for anything time-sensitive.</p>
-                </div>
-                <Input placeholder="Type a message..." className="border-white/10 bg-black/30 text-white placeholder:text-white/40" />
-              </div>
-              <div className="rounded-xl border border-white/10 bg-black/30 p-4 text-white">
-                <div className="mb-2 text-sm font-medium">Proposed Tasks</div>
-                <ul className="space-y-2 text-sm text-white/90">
-                  {[
-                    "Record kickoff on Monday",
-                    "Invite Legal to DPA review",
-                    "Ship public beta by Jul 20",
-                    "Draft investor follow-up deck",
-                    "Create Q3 timeline",
-                  ].map((t: any) => (
-                    <li key={t} className="flex items-center gap-2">
-                      <span className="h-2 w-2 rounded-full bg-gradient-to-r from-[#FF4D4D] via-[#FF9900] to-[#FF2E97]" />
-                      {t}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      </TabsContent>
-    </Tabs>
-  );
-}
-
-export default function TaskwiseAIPage() {
-  return (
-    // The landing page is always dark; scoping the .dark class here keeps the
-    // user's app theme (html-level, managed by next-themes) untouched.
-    <div className="dark">
-    <main className={`relative min-h-screen bg-[#0B0B0F] text-white font-body ${brandGradient}`}>
-      <header className="sticky top-0 z-40 border-b border-white/10 bg-black/20 backdrop-blur">
-        <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-3 sm:px-6 lg:px-8">
-          <div className="flex items-center gap-3">
-             <Logo size="md" />
-            <Badge className="hidden sm:inline-flex bg-white/10 text-white">Beta</Badge>
-          </div>
-          <nav className="hidden items-center gap-6 text-sm text-white/70 md:flex">
-            <a href="#features" className="hover:text-white">Features</a>
-            <a href="#workflow" className="hover:text-white">Workflow</a>
-            <a href="#demo" className="hover:text-white">Live Demo</a>
-            <a href="#integrations" className="hover:text-white">Integrations</a>
-            <a href="#pricing" className="hover:text-white">Beta</a>
-          </nav>
-          <div className="flex items-center gap-3">
-            <Button variant="secondary" className="hidden sm:inline-flex bg-white/10 text-white hover:bg-white/20" asChild>
-                <Link href="/login" prefetch={false}>Sign in</Link>
-            </Button>
-            <Button className="gem-button bg-gradient-to-r from-[#FF4D4D] via-[#FF9900] to-[#FF2E97] text-white" asChild>
-              <Link href="/signup" prefetch={false}>Get started</Link>
-            </Button>
-          </div>
-        </div>
-      </header>
-
+    <MarketingPageShell>
       <section className="relative overflow-hidden">
-        <HeroParticles className="-z-10" />
-        <div className="pointer-events-none absolute inset-0 -z-20 bg-[radial-gradient(800px_400px_at_50%_-10%,rgba(255,255,255,0.12),transparent)]" />
-        <div className="mx-auto grid max-w-7xl grid-cols-1 items-center gap-10 px-4 py-16 sm:px-6 lg:grid-cols-2 lg:py-24 lg:px-8">
-          <div className="text-center lg:text-left">
-            <motion.h1
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.5 }}
-              className="mb-4 text-4xl font-semibold leading-tight text-white sm:text-5xl"
-            >
-              Turn meetings into <GradientText>reviewed task lists</GradientText>
-            </motion.h1>
-            <p className="mb-6 max-w-xl mx-auto lg:mx-0 text-base text-white/70 sm:text-lg">
-              TaskwiseAI turns pasted notes, transcripts, and Fathom meetings into suggested tasks your team can review, assign, and track on a board.
-            </p>
-            <div className="flex flex-wrap items-center justify-center lg:justify-start gap-3">
-              <Button size="lg" className="gem-button bg-gradient-to-r from-[#FF4D4D] via-[#FF9900] to-[#FF2E97] text-white" asChild>
-                <Link href="/signup" prefetch={false}>Try it free</Link>
+        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(900px_420px_at_15%_15%,rgba(255,120,80,0.20),transparent_60%),radial-gradient(820px_380px_at_85%_20%,rgba(255,170,60,0.18),transparent_60%),linear-gradient(180deg,rgba(255,255,255,0.03),transparent_30%)]" />
+        <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-white/10" />
+
+        <div className="relative mx-auto grid w-full max-w-7xl gap-10 px-4 py-16 sm:px-6 sm:py-20 lg:grid-cols-[1.1fr_0.9fr] lg:items-center lg:px-8 lg:py-24">
+          <div className="space-y-8">
+            <div className="flex flex-wrap items-center gap-2">
+              <Badge className="border-white/10 bg-white/10 text-white/90">Launch page</Badge>
+              <Badge className="border-white/10 bg-white/5 text-white/70">Meetings in, reviewed work out</Badge>
+            </div>
+
+            <div className="space-y-5">
+              <h1 className="max-w-4xl text-4xl font-semibold leading-[1.02] tracking-tight text-white sm:text-5xl lg:text-6xl">
+                Turn meetings into prioritized, reviewed execution.
+              </h1>
+              <p className="max-w-3xl text-base leading-7 text-white/72 sm:text-lg">
+                Bring in Fathom, Fireflies, Grain, or pasted notes. Use AI chat over the
+                source material, clean up noisy tasks, prioritize the next steps, plan
+                the work, and keep reminders moving in Slack.
+              </p>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-3">
+              <Button
+                size="lg"
+                className="gem-button bg-gradient-to-r from-[#FF4D4D] via-[#FF9900] to-[#FF2E97] text-white"
+                asChild
+              >
+                <Link href="/signup">
+                  Get started
+                </Link>
               </Button>
               <Button
                 size="lg"
                 variant="secondary"
-                className="bg-white/10 text-white hover:bg-white/20"
-                onClick={() => document.getElementById("demo")?.scrollIntoView({ behavior: "smooth" })}
+                className="border border-white/10 bg-white/10 text-white hover:bg-white/20"
+                asChild
               >
-                Watch demo <ChevronRight className="ml-1 h-4 w-4" />
+                <Link href="#flow">
+                  See how it works
+                </Link>
               </Button>
             </div>
-             <div className="mt-6 flex flex-wrap items-center justify-center lg:justify-start gap-x-4 gap-y-2 text-sm text-white/60">
-              <span className="inline-flex items-center gap-2"><Zap className="h-4 w-4" /> No credit card</span>
-              <span className="inline-flex items-center gap-2"><Brain className="h-4 w-4" /> GPT-powered</span>
-              <span className="inline-flex items-center gap-2"><GitBranch className="h-4 w-4" /> Clear dependencies</span>
+
+            <div className="flex flex-wrap gap-2 text-sm text-white/65">
+              {[
+                "AI chat",
+                "AI task cleanup",
+                "Deterministic prioritization",
+                "Planning workspace",
+                "Slack reminders",
+              ].map((item) => (
+                <span
+                  key={item}
+                  className="rounded-full border border-white/10 bg-white/5 px-3 py-1.5"
+                >
+                  {item}
+                </span>
+              ))}
             </div>
           </div>
 
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.6 }}
-            className="relative mt-8 lg:mt-0 perspective-container-hero overflow-hidden"
-          >
-            <AnimatedTaskHero />
-          </motion.div>
+          <div className="relative">
+            <div className="absolute -inset-6 rounded-[2rem] bg-gradient-to-br from-[#FF4D4D]/20 via-[#FF9900]/15 to-[#FF2E97]/20 blur-3xl" />
+            <div className="relative overflow-hidden rounded-[2rem] border border-white/10 bg-white/[0.04] p-5 shadow-2xl shadow-black/40 backdrop-blur">
+              <div className="mb-4 flex items-center justify-between">
+                <div>
+                  <p className="text-xs uppercase tracking-[0.24em] text-white/45">
+                    Execution surface
+                  </p>
+                  <p className="mt-1 text-lg font-medium text-white">Review before board</p>
+                </div>
+                <Badge className="border-white/10 bg-white/10 text-white/80">Live workflow</Badge>
+              </div>
+
+              <div className="space-y-3">
+                <div className="rounded-2xl border border-white/10 bg-black/25 p-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-medium text-white">Source-grounded chat</p>
+                      <p className="text-sm text-white/60">
+                        Meeting, task, people, and client context
+                      </p>
+                    </div>
+                    <div className="rounded-full bg-white/10 px-3 py-1 text-xs text-white/70">
+                      Ask Taskwise
+                    </div>
+                  </div>
+                </div>
+
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="rounded-2xl border border-white/10 bg-black/25 p-4">
+                    <p className="text-xs uppercase tracking-[0.18em] text-white/45">
+                      Cleanup
+                    </p>
+                    <p className="mt-2 text-sm text-white/75">
+                      Remove noise and make suggested tasks review-ready.
+                    </p>
+                  </div>
+                  <div className="rounded-2xl border border-white/10 bg-black/25 p-4">
+                    <p className="text-xs uppercase tracking-[0.18em] text-white/45">
+                      Prioritize
+                    </p>
+                    <p className="mt-2 text-sm text-white/75">
+                      Keep the board stable with deterministic prioritization.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="rounded-2xl border border-white/10 bg-gradient-to-br from-white/10 to-white/[0.03] p-4">
+                  <div className="flex items-center justify-between">
+                    <p className="text-sm font-medium text-white">Reviewed work out</p>
+                    <Badge className="border-white/10 bg-white/10 text-white/75">
+                      Slack reminders
+                    </Badge>
+                  </div>
+                  <div className="mt-3 grid gap-2 text-sm text-white/70">
+                    <div className="flex items-center justify-between rounded-xl bg-black/20 px-3 py-2">
+                      <span>Capture</span>
+                      <span>Understand</span>
+                    </div>
+                    <div className="flex items-center justify-between rounded-xl bg-black/20 px-3 py-2">
+                      <span>Review</span>
+                      <span>Execute</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
       </section>
 
-      <Section
-        id="features"
-        title={<><GradientText>One inbox</GradientText> for your ideas</>}
-        subtitle="Drop in recordings, transcripts, or raw notes. TaskwiseAI turns chaos into clarity."
+      <MarketingSection
+        id="flow"
+        title={
+          <>
+            The four-step <span className="text-white/90">meeting-to-execution flow</span>
+          </>
+        }
+        subtitle="Taskwise keeps the public story simple: capture work, understand it, review it, then execute without losing the source context."
       >
-        <div className="grid gap-6 md:grid-cols-3">
-          {[
-            {
-              icon: Upload,
-              title: "Ingest anything",
-              text: "Paste transcripts or notes, try sample data, or sync Fathom meetings.",
-            },
-            {
-              icon: Brain,
-              title: "Breakdown with AI",
-              text: "Create suggested tasks with summaries, owners, due dates, and review signals.",
-            },
-            {
-              icon: GitBranch,
-              title: "Plan & prioritize",
-              text: "Review tasks, assign responsibility, then track completion on the board.",
-            },
-          ].map(({ icon: Icon, title, text }) => (
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+          {productFlowSteps.map((step, index) => (
             <div
-              key={title}
-              className="rounded-2xl border border-white/10 bg-white/5 p-6 text-white backdrop-blur"
+              key={step.title}
+              className="rounded-2xl border border-white/10 bg-white/[0.04] p-5 shadow-lg shadow-black/20"
             >
-              <div className="mb-4 inline-flex rounded-xl bg-white/10 p-3">
-                <Icon className="h-5 w-5" />
+              <div className="mb-4 flex items-center justify-between">
+                <span className="text-xs uppercase tracking-[0.18em] text-white/45">
+                  Step {index + 1}
+                </span>
+                <span className="text-sm text-white/50">{step.title}</span>
               </div>
-              <h3 className="mb-1 text-lg font-medium">{title}</h3>
-              <p className="text-sm text-white/70">{text}</p>
+              <h3 className="text-lg font-medium text-white">{step.title}</h3>
+              <p className="mt-2 text-sm leading-6 text-white/68">{step.description}</p>
             </div>
           ))}
         </div>
-      </Section>
+      </MarketingSection>
 
-      <TaskwiseGsapSection />
-
-      <Section id="demo" title={<><GradientText>Explore</GradientText> or just <GradientText>Chat</GradientText></>}>
-        <ExploreTabs />
-      </Section>
-
-      <Section
-        id="integrations"
-        title={<><GradientText>Supported integrations</GradientText></>}
-        subtitle="Taskwise currently supports Fathom meeting sync, Google Workspace flows, Slack sharing, Trello export, and advanced MCP access for operator use."
+      <MarketingSection
+        id="features"
+        title={
+          <>
+            Core capabilities for <span className="text-white/90">reviewed execution</span>
+          </>
+        }
+        subtitle="These are the surfaces the homepage should advertise: grounded chat, cleanup, prioritization, planning, calendar context, and reminder follow-through."
       >
-        <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-          {["Fathom","Google Workspace","Slack","Trello","MCP API","Manual paste","Sample meetings","Board sync"].map((name: any) => (
-            <div key={name} className="flex items-center justify-center rounded-xl border border-white/10 bg-white/5 px-3 py-4 text-sm text-white/70 backdrop-blur">
-              {name}
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+          {capabilityCards.map((card) => {
+            const Icon = card.icon;
+
+            return (
+              <div
+                key={card.title}
+                className="rounded-2xl border border-white/10 bg-white/[0.04] p-5 shadow-lg shadow-black/20"
+              >
+                <div className="mb-4 inline-flex rounded-xl border border-white/10 bg-white/10 p-3 text-white">
+                  <Icon className="h-5 w-5" />
+                </div>
+                <h3 className="text-lg font-medium text-white">{card.title}</h3>
+                <p className="mt-2 text-sm leading-6 text-white/68">{card.body}</p>
+              </div>
+            );
+          })}
+        </div>
+      </MarketingSection>
+
+      <MarketingSection
+        id="integrations"
+        title={
+          <>
+            Integrations that match <span className="text-white/90">how people already work</span>
+          </>
+        }
+        subtitle="The launch page should name the real sources and surfaces, while clearly marking Trello as disabled / not live yet."
+      >
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+          {integrationCards.map((card) => (
+            <div
+              key={card.name}
+              className="rounded-2xl border border-white/10 bg-white/[0.04] p-5 shadow-lg shadow-black/20"
+            >
+              <div className="mb-4 flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-xs uppercase tracking-[0.2em] text-white/45">{card.name}</p>
+                  <h3 className="mt-2 text-lg font-medium text-white">{card.title}</h3>
+                </div>
+                {card.name === "Trello" ? (
+                  <Badge className="border-white/10 bg-white/10 text-white/80">
+                    Currently disabled
+                  </Badge>
+                ) : null}
+              </div>
+              <p className="text-sm leading-6 text-white/68">
+                {card.name === "Trello"
+                  ? "Trello is currently disabled and not live yet."
+                  : card.description}
+              </p>
             </div>
           ))}
         </div>
-      </Section>
+      </MarketingSection>
 
-      <Section id="pricing" title="Beta access">
-        <div className="grid gap-6 md:grid-cols-3">
-          {[
-            { tier: "Core loop", price: "Included", blurb: "Paste notes, review tasks, and track work on the board" },
-            { tier: "Team setup", price: "Included", blurb: "Workspace members, Fathom, Slack, Google, and Trello" },
-            { tier: "Advanced", price: "Operator", blurb: "Workflow delivery, MCP keys, audit logs, and replay tools" },
-          ].map((p: any) => (
-            <div key={p.tier} className="rounded-2xl border border-white/10 bg-white/5 p-6 text-white backdrop-blur flex flex-col">
-              <div className="mb-2 text-sm text-white/60">{p.tier}</div>
-              <div className="mb-1 text-3xl font-semibold">{p.price}</div>
-              <p className="mb-4 text-sm text-white/70">{p.blurb}</p>
-              <ul className="mb-5 space-y-2 text-sm text-white/80">
-                <li className="flex items-center gap-2"><CheckCircle2 className="h-4 w-4"/> AI task extraction</li>
-                <li className="flex items-center gap-2"><CheckCircle2 className="h-4 w-4"/> Review Tasks queue</li>
-                <li className="flex items-center gap-2"><CheckCircle2 className="h-4 w-4"/> Board and people tracking</li>
-              </ul>
-              <Button className="w-full mt-auto bg-gradient-to-r from-[#FF4D4D] via-[#FF9900] to-[#FF2E97] text-white" asChild>
-                <Link href="/signup" prefetch={false}>Get started</Link>
+      <MarketingSection
+        id="mcp"
+        title={
+          <>
+            Operator layer with <span className="text-white/90">safe advanced controls</span>
+          </>
+        }
+        subtitle="MCP is part of the public platform story, but it should read like an operator surface, not a consumer feature."
+      >
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+          {operatorCards.map((card) => {
+            const Icon = card.icon;
+
+            return (
+              <div
+                key={card.title}
+                className="rounded-2xl border border-white/10 bg-white/[0.04] p-5 shadow-lg shadow-black/20"
+              >
+                <div className="mb-4 inline-flex rounded-xl border border-white/10 bg-white/10 p-3 text-white">
+                  <Icon className="h-5 w-5" />
+                </div>
+                <h3 className="text-lg font-medium text-white">{card.title}</h3>
+                <p className="mt-2 text-sm leading-6 text-white/68">{card.body}</p>
+              </div>
+            );
+          })}
+        </div>
+      </MarketingSection>
+
+      <MarketingSection
+        id="cta"
+        title="Ready to turn meetings into reviewed work?"
+        subtitle="Start with the launch flow, explore the platform surfaces, or jump straight into the operator docs."
+      >
+        <div className="rounded-[2rem] border border-white/10 bg-gradient-to-br from-white/10 via-white/[0.06] to-white/[0.03] p-6 shadow-2xl shadow-black/30 sm:p-8">
+          <div className="flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between">
+            <div className="max-w-2xl space-y-3">
+              <p className="text-xs uppercase tracking-[0.22em] text-white/45">Launch CTA</p>
+              <h2 className="text-3xl font-semibold tracking-tight text-white sm:text-4xl">
+                Get the meeting story out of the docs and into execution.
+              </h2>
+              <p className="text-base leading-7 text-white/68">
+                Taskwise gives teams one place to capture work, clean it up, prioritize it, and
+                keep it moving with reminders and operator-grade controls.
+              </p>
+            </div>
+
+            <div className="flex flex-wrap gap-3">
+              <Button
+                size="lg"
+                className="gem-button bg-gradient-to-r from-[#FF4D4D] via-[#FF9900] to-[#FF2E97] text-white"
+                asChild
+              >
+                <Link href="/signup">
+                  Get started
+                </Link>
+              </Button>
+              <Button
+                size="lg"
+                variant="secondary"
+                className="border border-white/10 bg-white/10 text-white hover:bg-white/20"
+                asChild
+              >
+                <Link href="/features">
+                  Features
+                </Link>
+              </Button>
+              <Button
+                size="lg"
+                variant="secondary"
+                className="border border-white/10 bg-white/10 text-white hover:bg-white/20"
+                asChild
+              >
+                <Link href="/integrations">
+                  Integrations
+                </Link>
+              </Button>
+              <Button
+                size="lg"
+                variant="secondary"
+                className="border border-white/10 bg-white/10 text-white hover:bg-white/20"
+                asChild
+              >
+                <Link href="/mcp">
+                  MCP
+                </Link>
               </Button>
             </div>
-          ))}
-        </div>
-      </Section>
-
-      <footer className="border-t border-white/10 bg-black/30">
-        <div className="mx-auto grid max-w-7xl grid-cols-1 items-center gap-y-4 gap-x-6 px-4 py-8 sm:px-6 md:grid-cols-2 lg:px-8">
-          <div className="flex items-center justify-center md:justify-start gap-3 text-white/80">
-            <Logo size="sm" isIconOnly={true}/>
-            <span className="text-sm">TaskwiseAI</span>
-            <span className="text-white/40">(c) {new Date().getFullYear()}</span>
-          </div>
-          <div className="flex items-center justify-center md:justify-end gap-4">
-            <Link href="/privacy" className="text-sm text-white/60 hover:text-white">Privacy Policy</Link>
-            <Link href="/terms" className="text-sm text-white/60 hover:text-white">Terms of Service</Link>
-            <a href="mailto:hello@taskwise.ai" className="text-sm text-white/60 hover:text-white">Contact</a>
           </div>
         </div>
-      </footer>
-    </main>
-    </div>
+      </MarketingSection>
+    </MarketingPageShell>
   );
 }
-
