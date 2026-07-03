@@ -60,7 +60,7 @@ export function MarketingPageShell({
           <div className="relative mx-auto flex w-full max-w-none flex-col items-center gap-6 px-4 py-12 text-center sm:px-6 lg:px-10 lg:py-16">
             <p className="text-xs uppercase tracking-[0.26em] text-white/45">TaskwiseAI</p>
             <div className="w-full overflow-hidden">
-              <pre className="mx-auto max-w-full select-none whitespace-pre text-center font-mono text-[clamp(0.62rem,1.25vw,1.7rem)] leading-[0.98] tracking-[0.06em] text-[#FFB257] drop-shadow-[0_0_18px_rgba(255,145,60,0.42),0_2px_0_rgba(0,0,0,0.82)]">
+              <pre className="hidden select-none whitespace-pre text-center font-mono text-[clamp(0.62rem,1.25vw,1.7rem)] leading-[0.98] tracking-[0.06em] text-[#FFB257] drop-shadow-[0_0_18px_rgba(255,145,60,0.42),0_2px_0_rgba(0,0,0,0.82)] sm:block">
 {`  ███████████   █████████    █████████  █████   ████ █████   ███   █████ █████  █████████  ██████████
   ▒█▒▒▒███▒▒▒█  ███▒▒▒▒▒███  ███▒▒▒▒▒███▒███   ███▒ ▒▒███   ▒███  ▒▒███ ▒▒███  ███▒▒▒▒▒███▒███▒▒▒▒▒█
   ▒   ▒███  ▒  ▒███    ▒███ ▒███    ▒▒▒  ▒███  ███    ▒███   ▒███   ▒███  ▒███ ▒███    ▒▒▒  ▒███  █ ▒ 
@@ -72,6 +72,11 @@ export function MarketingPageShell({
                                                                                                     
                                                                                                     
                                                                                                      `}
+              </pre>
+              <pre className="mx-auto select-none whitespace-pre text-center font-mono text-[clamp(0.56rem,3.1vw,0.9rem)] leading-[0.95] tracking-[0.08em] text-[#FFB257] drop-shadow-[0_0_12px_rgba(255,145,60,0.34),0_1px_0_rgba(0,0,0,0.82)] sm:hidden">
+{`██████████████████████
+█   TASKWISEAI     █
+██████████████████████`}
               </pre>
             </div>
             <div className="flex w-full flex-col items-center gap-3 border-t border-white/10 pt-5">

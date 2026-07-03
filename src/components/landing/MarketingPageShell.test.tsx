@@ -29,4 +29,18 @@ describe("MarketingPageShell", () => {
     expect(html).toContain('target="_blank"');
     expect(html).toContain('rel="noopener noreferrer"');
   });
+
+  it("renders a compact mobile footer mark", () => {
+    const html = renderToStaticMarkup(
+      React.createElement(
+        MarketingPageShell,
+        null,
+        React.createElement("div", null, "content"),
+      ),
+    );
+
+    expect(html).toContain("sm:hidden");
+    expect(html).toContain("sm:block");
+    expect(html).toContain("TASKWISEAI");
+  });
 });

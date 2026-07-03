@@ -166,6 +166,12 @@ export default function TaskwiseGsapSection() {
       return;
     }
 
+    const isMobile = window.matchMedia("(max-width: 767px)").matches || window.matchMedia("(pointer: coarse)").matches;
+    const prefersReducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (isMobile || prefersReducedMotion) {
+      return;
+    }
+
     gsap.registerPlugin(ScrollTrigger);
     starContainer.innerHTML = "";
 
@@ -265,7 +271,38 @@ export default function TaskwiseGsapSection() {
 
   return (
     <section id="workflow" className="relative overflow-x-hidden bg-[#020202] py-6">
-      <div ref={containerRef} className="relative flex h-screen w-full items-center justify-center overflow-hidden">
+      <div className="md:hidden">
+        <div className="relative mx-auto flex w-full max-w-7xl flex-col gap-4 px-4 py-10 sm:px-6">
+          <div className="pointer-events-none absolute inset-x-0 top-0 h-40 bg-[radial-gradient(circle_at_30%_20%,rgba(76,201,240,0.14),transparent_25%),radial-gradient(circle_at_70%_30%,rgba(255,215,120,0.12),transparent_28%),radial-gradient(circle_at_50%_80%,rgba(255,46,151,0.08),transparent_26%)]" />
+          <div className="relative overflow-hidden rounded-[2rem] border border-white/10 bg-white/[0.04] p-5 shadow-[0_20px_50px_rgba(0,0,0,0.35)]">
+            <p className="text-xs uppercase tracking-[0.24em] text-white/45">Mobile clarity</p>
+            <h2 className="mt-3 text-3xl font-semibold tracking-tight text-white">Clarity</h2>
+            <p className="mt-2 text-sm leading-6 text-slate-300">
+              From meeting noise to decision-ready context. Taskwise creates dependable transcripts,
+              concise summaries, and owner-based action items so every meeting ends with clear next steps.
+            </p>
+          </div>
+
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div className="rounded-[1.5rem] border border-white/10 bg-white/[0.04] p-5">
+              <p className="text-xs uppercase tracking-[0.2em] text-white/45">Momentum</p>
+              <h3 className="mt-3 text-2xl font-semibold text-white">Search fast, automate follow-through</h3>
+              <p className="mt-2 text-sm leading-6 text-slate-300">
+                Ask Taskwise about meetings, decisions, and open actions, then push updates into Slack and the tools everyone already uses.
+              </p>
+            </div>
+            <div className="rounded-[1.5rem] border border-white/10 bg-white/[0.04] p-5">
+              <p className="text-xs uppercase tracking-[0.2em] text-white/45">Ease</p>
+              <h3 className="mt-3 text-2xl font-semibold text-white">Enterprise-grade operations</h3>
+              <p className="mt-2 text-sm leading-6 text-slate-300">
+                Ingestion, processing, and secure delivery stay out of the way so the team can focus on execution.
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div ref={containerRef} className="relative hidden h-screen w-full items-center justify-center overflow-hidden md:flex">
         <div className="pointer-events-none absolute inset-0 z-0 bg-[radial-gradient(circle_at_50%_18%,rgba(255,106,61,0.12),transparent_28%),radial-gradient(circle_at_82%_78%,rgba(255,46,151,0.08),transparent_24%),linear-gradient(180deg,rgba(255,255,255,0.015),transparent_18%)]" />
         <div
           ref={clarityStarsRef}
