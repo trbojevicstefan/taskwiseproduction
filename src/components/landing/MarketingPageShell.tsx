@@ -24,7 +24,13 @@ export function MarketingPageShell({
             {showSectionNav ? (
               <nav className="hidden items-center gap-6 text-sm text-white/70 md:flex">
                 {marketingNavItems.map((item) => (
-                  <Link key={item.href} href={item.href} className="hover:text-white">
+                  <Link
+                    key={item.href}
+                    href={item.href}
+                    className="hover:text-white"
+                    target={item.label === "Docs" ? "_blank" : undefined}
+                    rel={item.label === "Docs" ? "noopener noreferrer" : undefined}
+                  >
                     {item.label}
                   </Link>
                 ))}
@@ -49,6 +55,36 @@ export function MarketingPageShell({
           </div>
         </header>
         {children}
+        <footer className="relative w-full overflow-hidden border-t border-white/10 bg-black">
+          <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(900px_420px_at_50%_0%,rgba(255,120,80,0.22),transparent_55%),radial-gradient(600px_280px_at_50%_55%,rgba(255,255,255,0.05),transparent_60%),linear-gradient(180deg,rgba(255,255,255,0.03),transparent_30%)]" />
+          <div className="relative mx-auto flex w-full max-w-none flex-col items-center gap-6 px-4 py-12 text-center sm:px-6 lg:px-10 lg:py-16">
+            <p className="text-xs uppercase tracking-[0.26em] text-white/45">TaskwiseAI</p>
+            <div className="w-full overflow-hidden">
+              <pre className="mx-auto max-w-full select-none whitespace-pre text-center font-mono text-[clamp(0.62rem,1.25vw,1.7rem)] leading-[0.98] tracking-[0.06em] text-[#FFB257] drop-shadow-[0_0_18px_rgba(255,145,60,0.42),0_2px_0_rgba(0,0,0,0.82)]">
+{`  ███████████   █████████    █████████  █████   ████ █████   ███   █████ █████  █████████  ██████████
+  ▒█▒▒▒███▒▒▒█  ███▒▒▒▒▒███  ███▒▒▒▒▒███▒███   ███▒ ▒▒███   ▒███  ▒▒███ ▒▒███  ███▒▒▒▒▒███▒███▒▒▒▒▒█
+  ▒   ▒███  ▒  ▒███    ▒███ ▒███    ▒▒▒  ▒███  ███    ▒███   ▒███   ▒███  ▒███ ▒███    ▒▒▒  ▒███  █ ▒ 
+      ▒███     ▒███████████ ▒▒█████████  ▒███████     ▒███   ▒███   ▒███  ▒███ ▒▒█████████  ▒██████   
+      ▒███     ▒███▒▒▒▒▒███  ▒▒▒▒▒▒▒▒███ ▒███▒▒███    ▒▒███  █████  ███   ▒███  ▒▒▒▒▒▒▒▒███ ▒███▒▒█   
+      ▒███     ▒███    ▒███  ███    ▒███ ▒███ ▒▒███    ▒▒▒█████▒█████▒    ▒███  ███    ▒███ ▒███ ▒   █
+      █████    █████   █████▒▒█████████  █████ ▒▒████    ▒▒███ ▒▒███      █████▒▒█████████  ██████████
+     ▒▒▒▒▒    ▒▒▒▒▒   ▒▒▒▒▒  ▒▒▒▒▒▒▒▒▒  ▒▒▒▒▒   ▒▒▒▒      ▒▒▒   ▒▒▒      ▒▒▒▒▒  ▒▒▒▒▒▒▒▒▒  ▒▒▒▒▒▒▒▒▒▒
+                                                                                                    
+                                                                                                    
+                                                                                                     `}
+              </pre>
+            </div>
+            <div className="flex w-full flex-col items-center gap-3 border-t border-white/10 pt-5">
+              <p className="max-w-2xl text-sm leading-6 text-white/55">
+                Turn meetings into reviewed execution with grounded AI, clear prioritization, and
+                operator-grade workflow.
+              </p>
+              <p className="text-xs uppercase tracking-[0.22em] text-white/35">
+                Meetings to execution
+              </p>
+            </div>
+          </div>
+        </footer>
       </main>
     </div>
   );

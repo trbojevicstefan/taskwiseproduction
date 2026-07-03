@@ -9,6 +9,7 @@ export const marketingNavItems: MarketingNavItem[] = [
   { label: "Features", href: "/features" },
   { label: "Integrations", href: "/integrations" },
   { label: "MCP", href: "/mcp" },
+  { label: "Docs", href: "/docs" },
   { label: "Get started", href: "/signup" },
 ];
 
@@ -24,7 +25,7 @@ export const integrationCards: MarketingCard[] = [
     name: "Fathom",
     title: "Primary meeting sync",
     description: "Ingest meeting transcripts and notes from the existing Fathom flow.",
-    iconSrc: "/brand-logos/fathom.png",
+    iconSrc: "/brand-logos/fathom-official.png",
     iconAlt: "Fathom logo",
   },
   {
@@ -45,23 +46,22 @@ export const integrationCards: MarketingCard[] = [
     name: "Slack",
     title: "Scheduled reminders",
     description: "Keep task follow-through alive with persistent reminders and pings.",
-    iconSrc: "/brand-logos/slack.svg",
+    iconSrc: "/brand-logos/slack-favicon.png",
     iconAlt: "Slack logo",
   },
   {
     name: "Google Workspace",
     title: "Calendar and task flows",
     description: "Support calendar-linked workflows and planning surfaces.",
-    iconSrc: "/brand-logos/google-g.svg",
+    iconSrc: "/brand-logos/google-favicon.ico",
     iconAlt: "Google logo",
   },
   {
     name: "Trello",
-    title: "Disabled integration",
-    description: "Trello appears in the platform story, but the live integration is currently disabled.",
+    title: "Board sync",
+    description: "Trello appears in the platform story as an active board sync option.",
     iconSrc: "/brand-logos/trello.svg",
     iconAlt: "Trello logo",
-    isDisabled: true,
   },
   {
     name: "Manual paste",

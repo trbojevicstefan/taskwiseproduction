@@ -11,6 +11,7 @@ describe("marketing content", () => {
       "/features",
       "/integrations",
       "/mcp",
+      "/docs",
       "/signup",
     ]);
     expect(productFlowSteps.map((step) => step.title)).toEqual([

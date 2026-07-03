@@ -202,9 +202,7 @@ export default function TaskwiseGsapSection() {
       });
 
       gsap.to(starContainer, {
-        xPercent: 6,
-        yPercent: -18,
-        rotation: -2,
+        yPercent: -28,
         ease: "none",
         scrollTrigger: {
           trigger: container,

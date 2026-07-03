@@ -9,9 +9,9 @@ import {
   Wand2,
 } from "lucide-react";
 
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { MarketingPageShell } from "@/components/landing/MarketingPageShell";
+import { PanoramicHero } from "@/components/landing/PanoramicHero";
 import { MarketingSection } from "@/components/landing/MarketingSection";
 import { productFlowSteps } from "@/components/landing/marketing-content";
 
@@ -63,53 +63,45 @@ const featureCards = [
 export default function FeaturesPage() {
   return (
     <MarketingPageShell>
-      <section className="relative overflow-hidden">
-        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(900px_420px_at_15%_15%,rgba(255,120,80,0.20),transparent_60%),radial-gradient(820px_380px_at_85%_20%,rgba(255,170,60,0.18),transparent_60%),linear-gradient(180deg,rgba(255,255,255,0.03),transparent_30%)]" />
-        <div className="relative mx-auto w-full max-w-7xl px-4 py-16 sm:px-6 sm:py-20 lg:px-8 lg:py-24">
-          <div className="max-w-3xl space-y-6">
-            <div className="flex flex-wrap items-center gap-2">
-              <Badge className="border-white/10 bg-white/10 text-white/90">Product tour</Badge>
-              <Badge className="border-white/10 bg-white/5 text-white/70">Public features page</Badge>
-            </div>
-            <div className="space-y-4">
-              <h1 className="text-4xl font-semibold leading-[1.02] tracking-tight text-white sm:text-5xl lg:text-6xl">
-                The feature set behind TaskwiseAI.
-              </h1>
-              <p className="max-w-3xl text-base leading-7 text-white/72 sm:text-lg">
-                TaskwiseAI turns meetings into reviewed work with grounded AI chat, cleanup,
-                deterministic prioritization, planning, calendar context, people and client views,
-                and Slack reminders that keep execution moving.
-              </p>
-            </div>
-            <div className="flex flex-wrap items-center gap-3">
-              <Button
-                size="lg"
-                className="gem-button bg-gradient-to-r from-[#FF4D4D] via-[#FF9900] to-[#FF2E97] text-white"
-                asChild
-              >
-                <Link href="/signup">Get started</Link>
-              </Button>
-              <Button
-                size="lg"
-                variant="secondary"
-                className="border border-white/10 bg-white/10 text-white hover:bg-white/20"
-                asChild
-              >
-                <Link href="/">Back to home</Link>
-              </Button>
-            </div>
-          </div>
-        </div>
-      </section>
+      <PanoramicHero
+        label="Product tour"
+        title={
+          <>
+            The feature set behind <span className="text-white/90">TaskwiseAI</span>
+          </>
+        }
+        subtitle={
+          <>
+            TaskwiseAI turns meetings into reviewed work with grounded AI chat, cleanup,
+            deterministic prioritization, planning, calendar context, people and client views, and
+            Slack reminders that keep execution moving.
+          </>
+        }
+        primaryHref="/signup"
+        primaryLabel="Get started"
+        secondaryHref="/"
+        secondaryLabel="Back to home"
+      />
 
       <MarketingSection
         id="capabilities"
         title={
           <>
-            Core capabilities for <span className="text-white/90">reviewed execution</span>
+            Core capabilities for{" "}
+            <span className="bg-gradient-to-r from-[#FFB257] via-[#FF8A3D] to-[#FF2E97] bg-clip-text text-transparent">
+              reviewed execution
+            </span>
           </>
         }
-        subtitle="These are the surfaces the public story should emphasize: chat, cleanup, prioritization, planning, calendar context, people and client views, and reminders."
+        subtitle={
+          <span>
+            These are the surfaces the public story should emphasize:{" "}
+            <span className="text-white/88">chat</span>,{" "}
+            <span className="text-white/88">cleanup</span>,{" "}
+            <span className="text-white/88">prioritization</span>, planning, calendar context,
+            people and client views, and reminders.
+          </span>
+        }
       >
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
           {featureCards.map((card) => {
@@ -135,10 +127,19 @@ export default function FeaturesPage() {
         id="flow"
         title={
           <>
-            The launch story in <span className="text-white/90">four steps</span>
+            The launch story in{" "}
+            <span className="bg-gradient-to-r from-[#FF5C4D] via-[#FF9900] to-[#FFB257] bg-clip-text text-transparent">
+              four steps
+            </span>
           </>
         }
-        subtitle="This page reuses the shared launch-copy flow so the public navigation stays aligned with the homepage."
+        subtitle={
+          <span>
+            This page reuses the shared launch-copy flow so the public navigation stays aligned
+            with the homepage, while the{" "}
+            <span className="text-white/88">execution language</span> still feels distinct.
+          </span>
+        }
       >
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
           {productFlowSteps.map((step, index) => (
@@ -161,8 +162,23 @@ export default function FeaturesPage() {
 
       <MarketingSection
         id="cta"
-        title="Ready to see the workflow in action?"
-        subtitle="Use the launch page, explore the feature story, or move on to integrations and MCP when you want the deeper platform surfaces."
+        title={
+          <>
+            Ready to see the workflow in{" "}
+            <span className="bg-gradient-to-r from-[#FFB257] via-[#FF9900] to-[#FF2E97] bg-clip-text text-transparent">
+              action
+            </span>
+            ?
+          </>
+        }
+        subtitle={
+          <span>
+            Use the launch page, explore the feature story, or move on to{" "}
+            <span className="text-white/88">integrations</span> and{" "}
+            <span className="text-white/88">MCP</span> when you want the deeper platform
+            surfaces.
+          </span>
+        }
       >
         <div className="rounded-[2rem] border border-white/10 bg-gradient-to-br from-white/10 via-white/[0.06] to-white/[0.03] p-6 shadow-2xl shadow-black/30 sm:p-8">
           <div className="flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between">

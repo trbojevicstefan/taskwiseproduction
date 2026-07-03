@@ -26,7 +26,8 @@ describe("integrations page", () => {
     expect(html).toContain("Google Workspace");
     expect(html).toContain("Manual paste");
     expect(html).toContain("Trello");
-    expect(html).toContain("MCP stays on its own page");
+    expect(html).toContain("MCP stays on its");
+    expect(html).toContain("own page");
     expect(html).toContain('href="/mcp"');
     expect(html).toContain('href="/signup"');
   });

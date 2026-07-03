@@ -20,25 +20,20 @@ describe("homepage marketing refresh", () => {
     consoleError.mockRestore();
 
     expect(html).toContain("Turn meetings into");
-    expect(html).toContain("reviewed task lists");
+    expect(html).toContain("prioritized, reviewed execution");
     expect(html).toContain("Fathom");
     expect(html).toContain("Fireflies");
     expect(html).toContain("Grain");
-    expect(html).toContain("pasted notes");
-    expect(html).toContain("AI chat");
-    expect(html).toContain("AI task cleanup");
+    expect(html).toContain("AI that ingests your meetings");
     expect(html).toContain("deterministic prioritization");
-    expect(html).toContain("planning workspace");
-    expect(html).toContain("Slack reminders");
-    expect(html).toContain("Capture");
-    expect(html).toContain("Understand");
-    expect(html).toContain("Review");
-    expect(html).toContain("Execute");
+    expect(html).toContain("Review-first workflow");
+    expect(html).toContain("MCP operator layer");
     expect(html).toContain("MCP keys");
     expect(html).toContain("audit logs");
     expect(html).toContain("workflow replay");
     expect(html).toContain("workflow delivery");
-    expect(html).toContain("currently disabled");
+    expect(html).toContain("Board sync");
+    expect(html).toContain("Trello");
 
     expect(html).toContain('href="/signup"');
     expect(html).toContain('href="/login"');
