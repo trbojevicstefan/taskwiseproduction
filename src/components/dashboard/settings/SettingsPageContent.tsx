@@ -23,6 +23,7 @@ import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { cn } from '@/lib/utils';
 import DashboardHeader from '../DashboardHeader';
 import TaskCleanupSettingsCard from '@/components/dashboard/settings/TaskCleanupSettingsCard';
+import SlackRemindersSettingsCard from '@/components/dashboard/settings/SlackRemindersSettingsCard';
 import { isAdvancedSettingsEnabled } from '@/lib/simplification-flags';
 
 const AVATAR_STYLES = [
@@ -3402,6 +3403,11 @@ export default function SettingsPageContent() {
 
                 {/* Task Cleanup Settings */}
                 <TaskCleanupSettingsCard
+                  className={cn("mt-8", activeSettingsSection !== "preferences" && "hidden")}
+                />
+
+                {/* Slack Reminders Settings */}
+                <SlackRemindersSettingsCard
                   className={cn("mt-8", activeSettingsSection !== "preferences" && "hidden")}
                 />
 

@@ -46,6 +46,7 @@ const buildFindChain = (docs: any[]) => {
 type DbFixture = {
   meetings?: any[];
   tasks?: any[];
+  reminders?: any[];
   clientPeople?: any[];
   counts?: [number, number, number];
 };
@@ -53,13 +54,16 @@ type DbFixture = {
 const buildDb = ({
   meetings = [],
   tasks = [],
+  reminders = [],
   clientPeople = [],
   counts = [0, 0, 0],
 }: DbFixture) => {
   const meetingsChain = buildFindChain(meetings);
   const tasksChain = buildFindChain(tasks);
+  const remindersChain = buildFindChain(reminders);
   const meetingsFind = jest.fn().mockReturnValue(meetingsChain);
   const tasksFind = jest.fn().mockReturnValue(tasksChain);
+  const remindersFind = jest.fn().mockReturnValue(remindersChain);
   const peopleFind = jest.fn().mockReturnValue({
     toArray: jest.fn().mockResolvedValue(clientPeople),
   });
@@ -73,6 +77,7 @@ const buildDb = ({
     collection: jest.fn((name: string) => {
       if (name === "meetings") return { find: meetingsFind };
       if (name === "tasks") return { find: tasksFind, countDocuments };
+      if (name === "taskReminders") return { find: remindersFind };
       if (name === "people") return { find: peopleFind };
       throw new Error(`Unexpected collection in test: ${name}`);
     }),
@@ -82,10 +87,12 @@ const buildDb = ({
     db,
     meetingsFind,
     tasksFind,
+    remindersFind,
     peopleFind,
     countDocuments,
     meetingsChain,
     tasksChain,
+    remindersChain,
   };
 };
 
@@ -212,6 +219,30 @@ describe("GET /api/calendar", () => {
           status: "todo",
         },
       ],
+      reminders: [
+        {
+          _id: "rem-1",
+          taskId: "t-1",
+          taskTitle: "Send proposal",
+          kind: "before_due",
+          runAt: new Date("2020-01-09T09:00:00.000Z"),
+        },
+        {
+          _id: "rem-2",
+          taskId: "t-1",
+          taskTitle: "Send proposal",
+          kind: "on_due",
+          // Stored ISO string instead of Date still serializes.
+          runAt: "2020-01-10T09:00:00.000Z",
+        },
+        {
+          _id: "rem-3",
+          taskId: "t-9",
+          taskTitle: "Garbage runAt",
+          kind: "overdue",
+          runAt: "not-a-date",
+        },
+      ],
       clientPeople: [
         {
           _id: "p-1",
@@ -292,6 +323,27 @@ describe("GET /api/calendar", () => {
       },
     ]);
 
+    // Reminders (Phase 10 additive): scheduled in-range docs, runAt as ISO,
+    // uncoercible runAt dropped.
+    expect(payload.reminders).toEqual([
+      {
+        id: "rem-1",
+        taskId: "t-1",
+        taskTitle: "Send proposal",
+        kind: "before_due",
+        runAt: "2020-01-09T09:00:00.000Z",
+        status: "scheduled",
+      },
+      {
+        id: "rem-2",
+        taskId: "t-1",
+        taskTitle: "Send proposal",
+        kind: "on_due",
+        runAt: "2020-01-10T09:00:00.000Z",
+        status: "scheduled",
+      },
+    ]);
+
     expect(payload.warnings).toEqual({
       overdueCount: 4,
       cleanupSuggestedCount: 2,
@@ -348,6 +400,26 @@ describe("GET /api/calendar", () => {
       }
     );
     expect(fixture.tasksChain.limit).toHaveBeenCalledWith(500);
+
+    // Reminders query: workspace-tagged scheduled docs, typed Date runAt
+    // range, minimal projection, cap 500.
+    expect(fixture.remindersFind).toHaveBeenCalledWith(
+      {
+        workspaceId: "workspace-1",
+        status: "scheduled",
+        runAt: { $gte: new Date(from), $lte: new Date(to) },
+      },
+      {
+        projection: {
+          _id: 1,
+          taskId: 1,
+          taskTitle: 1,
+          kind: 1,
+          runAt: 1,
+        },
+      }
+    );
+    expect(fixture.remindersChain.limit).toHaveBeenCalledWith(500);
 
     // Client people loaded once, scoped, minimal projection.
     expect(fixture.peopleFind).toHaveBeenCalledTimes(1);
@@ -421,5 +493,7 @@ describe("GET /api/calendar", () => {
       id: "t-future",
       overdue: false,
     });
+    // Additive reminders field is always present, even when empty.
+    expect(payload.reminders).toEqual([]);
   });
 });

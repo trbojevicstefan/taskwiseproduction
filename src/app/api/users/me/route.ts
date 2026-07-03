@@ -17,8 +17,10 @@ import {
 } from "@/lib/workspace-memberships";
 import { findWorkspaceById, listWorkspacesByIds, updateWorkspaceById } from "@/lib/workspaces";
 import {
+  resolveSlackReminderSettings,
   resolveTaskCleanupSettings,
   resolveWorkspaceAdminAccess,
+  type SlackReminderSettings,
   type TaskCleanupSettings,
   type WorkspaceAdminAccessSettings,
 } from "@/lib/workspace-settings";
@@ -62,6 +64,23 @@ const updateSchema = z.object({
                 })
                 .partial()
                 .optional(),
+            })
+            .optional(),
+          slackReminders: z
+            .object({
+              enabled: z.boolean().optional(),
+              remindDaysBefore: z
+                .array(z.number().int().min(1).max(30))
+                .max(3)
+                .optional(),
+              remindOnDue: z.boolean().optional(),
+              remindOverdue: z.boolean().optional(),
+              maxRemindersPerTask: z.number().min(1).max(10).optional(),
+              deliver: z.enum(["dm", "channel"]).optional(),
+              defaultChannelId: z.string().optional().nullable(),
+              quietHoursStart: z.number().min(0).max(23).optional(),
+              quietHoursEnd: z.number().min(0).max(23).optional(),
+              digest: z.enum(["off", "daily"]).optional(),
             })
             .optional(),
         })
@@ -125,6 +144,7 @@ const toAppUser = (
     activeWorkspaceRole?: string | null;
     activeWorkspaceAdminAccess?: WorkspaceAdminAccessSettings | null;
     activeWorkspaceTaskCleanup?: TaskCleanupSettings | null;
+    activeWorkspaceSlackReminders?: SlackReminderSettings | null;
     workspaceIntegrations?: WorkspaceIntegrationSummary;
   } = {}
 ) => {
@@ -149,6 +169,7 @@ const toAppUser = (
     activeWorkspaceRole: options.activeWorkspaceRole || null,
     activeWorkspaceAdminAccess: options.activeWorkspaceAdminAccess || null,
     activeWorkspaceTaskCleanup: options.activeWorkspaceTaskCleanup || null,
+    activeWorkspaceSlackReminders: options.activeWorkspaceSlackReminders || null,
     workspaceIntegrations: options.workspaceIntegrations || emptyWorkspaceIntegrationSummary(),
     firefliesWebhookToken: user.firefliesWebhookToken,
     slackTeamId: user.slackTeamId || null,
@@ -206,6 +227,7 @@ const buildWorkspaceContext = async (
     activeMembershipRole: activeMembership?.role || null,
     activeWorkspaceAdminAccess: resolveWorkspaceAdminAccess(activeWorkspace?.settings),
     activeWorkspaceTaskCleanup: resolveTaskCleanupSettings(activeWorkspace),
+    activeWorkspaceSlackReminders: resolveSlackReminderSettings(activeWorkspace),
   };
 };
 
@@ -363,6 +385,7 @@ export async function GET() {
       activeWorkspaceRole: workspaceContext.activeMembershipRole,
       activeWorkspaceAdminAccess: workspaceContext.activeWorkspaceAdminAccess,
       activeWorkspaceTaskCleanup: workspaceContext.activeWorkspaceTaskCleanup,
+      activeWorkspaceSlackReminders: workspaceContext.activeWorkspaceSlackReminders,
       workspaceIntegrations,
     });
     if (!appUser) {
@@ -433,10 +456,25 @@ export async function PATCH(request: Request) {
           }
         : (existingWorkspace.settings as { taskCleanup?: TaskCleanupSettings } | undefined)
             ?.taskCleanup;
+      // Phase 10: same additive merge pattern as taskCleanup — a partial
+      // slackReminders patch merges over the resolved (defaults-filled)
+      // settings; absent patch leaves the stored value untouched.
+      const slackRemindersUpdate = update.workspace.settings?.slackReminders;
+      const nextSlackReminders = slackRemindersUpdate
+        ? {
+            ...resolveSlackReminderSettings(existingWorkspace),
+            ...slackRemindersUpdate,
+          }
+        : (existingWorkspace.settings as
+            | { slackReminders?: SlackReminderSettings }
+            | undefined)?.slackReminders;
       const nextSettings = {
         ...(existingWorkspace.settings || {}),
         adminAccess: nextAdminAccess,
         ...(nextTaskCleanup !== undefined ? { taskCleanup: nextTaskCleanup } : {}),
+        ...(nextSlackReminders !== undefined
+          ? { slackReminders: nextSlackReminders }
+          : {}),
       };
       await updateWorkspaceById(db as any, targetWorkspaceId, {
         name: update.workspace.name,
@@ -497,6 +535,7 @@ export async function PATCH(request: Request) {
       activeWorkspaceRole: workspaceContext.activeMembershipRole,
       activeWorkspaceAdminAccess: workspaceContext.activeWorkspaceAdminAccess,
       activeWorkspaceTaskCleanup: workspaceContext.activeWorkspaceTaskCleanup,
+      activeWorkspaceSlackReminders: workspaceContext.activeWorkspaceSlackReminders,
       workspaceIntegrations,
     });
     if (!appUser) {

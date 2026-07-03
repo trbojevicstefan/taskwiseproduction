@@ -25,6 +25,8 @@ import { useIntegrations } from "@/contexts/IntegrationsContext";
 import {
   AGENDA_SPAN_DAYS,
   buildDayEntries,
+  coerceDate,
+  dayKey,
   formatRangeLabel,
   getViewRange,
   isCalendarView,
@@ -36,6 +38,7 @@ import {
   EMPTY_CALENDAR_WARNINGS,
   type CalendarData,
   type CalendarDayEntry,
+  type CalendarReminderItem,
   type CalendarView,
   type GoogleCalendarOverlayEvent,
 } from "./types";
@@ -57,7 +60,32 @@ const normalizeCalendarPayload = (payload: CalendarApiResponse): CalendarData =>
     meetings: Array.isArray(source?.meetings) ? source.meetings : [],
     tasks: Array.isArray(source?.tasks) ? source.tasks : [],
     warnings: source?.warnings ?? EMPTY_CALENDAR_WARNINGS,
+    // Additive Phase 10 field; older payloads simply omit it.
+    reminders: Array.isArray(source?.reminders) ? source.reminders : [],
   };
+};
+
+/** Buckets scheduled Slack reminders by yyyy-MM-dd of their runAt, sorted by time. */
+const buildRemindersByDay = (
+  reminders: CalendarReminderItem[] | undefined
+): Map<string, CalendarReminderItem[]> => {
+  const buckets = new Map<string, CalendarReminderItem[]>();
+  (reminders ?? []).forEach((reminder) => {
+    if (reminder.status !== "scheduled") return;
+    const date = coerceDate(reminder.runAt);
+    if (!date) return;
+    const key = dayKey(date);
+    const existing = buckets.get(key);
+    if (existing) {
+      existing.push(reminder);
+    } else {
+      buckets.set(key, [reminder]);
+    }
+  });
+  buckets.forEach((bucket) =>
+    bucket.sort((a, b) => (a.runAt < b.runAt ? -1 : a.runAt > b.runAt ? 1 : 0))
+  );
+  return buckets;
 };
 
 function CalendarLoadingSkeleton() {
@@ -169,6 +197,11 @@ export default function CalendarPageContent() {
     [data, googleEvents]
   );
 
+  const remindersByDay = useMemo(
+    () => buildRemindersByDay(data.reminders),
+    [data.reminders]
+  );
+
   const handleViewChange = useCallback((value: string) => {
     if (!isCalendarView(value)) return;
     setView(value);
@@ -275,6 +308,7 @@ export default function CalendarPageContent() {
           <WeekView
             anchor={anchorDate}
             entriesByDay={entriesByDay}
+            remindersByDay={remindersByDay}
             onEntryClick={handleEntryClick}
           />
         ) : (
@@ -282,6 +316,7 @@ export default function CalendarPageContent() {
             range={range}
             warnings={data.warnings}
             entriesByDay={entriesByDay}
+            remindersByDay={remindersByDay}
             onEntryClick={handleEntryClick}
           />
         )}

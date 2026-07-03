@@ -3,12 +3,14 @@
 
 import React from "react";
 import { eachDayOfInterval, format, isToday, startOfDay } from "date-fns";
-import { AlertTriangle, Archive, Sparkles } from "lucide-react";
+import { AlertTriangle, Archive, Bell, Sparkles } from "lucide-react";
 import { cn } from "@/lib/utils";
-import type {
-  CalendarDayEntry,
-  CalendarRange,
-  CalendarWarnings,
+import {
+  REMINDER_KIND_LABELS,
+  type CalendarDayEntry,
+  type CalendarRange,
+  type CalendarReminderItem,
+  type CalendarWarnings,
 } from "./types";
 import { dayKey } from "./calendar-utils";
 import { CalendarEntryCard } from "./CalendarEntryItem";
@@ -17,11 +19,31 @@ interface AgendaViewProps {
   range: CalendarRange;
   warnings: CalendarWarnings;
   entriesByDay: Map<string, CalendarDayEntry[]>;
+  remindersByDay?: Map<string, CalendarReminderItem[]>;
   onEntryClick: (entry: CalendarDayEntry) => void;
 }
 
 const chipClass =
   "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors";
+
+/** Small outline pill for a scheduled Slack reminder (also used by WeekView). */
+export function ReminderChip({ reminder }: { reminder: CalendarReminderItem }) {
+  const runAt = new Date(reminder.runAt);
+  const timeLabel = Number.isNaN(runAt.getTime())
+    ? reminder.runAt
+    : format(runAt, "MMM d, p");
+  const kindLabel = REMINDER_KIND_LABELS[reminder.kind] || reminder.kind;
+  return (
+    <span
+      data-testid="reminder-chip"
+      title={`${kindLabel} reminder · ${timeLabel}`}
+      className="inline-flex max-w-full items-center gap-1 rounded-full border border-border bg-background px-2 py-0.5 text-[11px] font-medium text-muted-foreground"
+    >
+      <Bell className="h-3 w-3 shrink-0" aria-hidden="true" />
+      <span className="truncate">Reminder: {reminder.taskTitle}</span>
+    </span>
+  );
+}
 
 export function AgendaWarningsStrip({
   warnings,
@@ -80,12 +102,17 @@ export default function AgendaView({
   range,
   warnings,
   entriesByDay,
+  remindersByDay,
   onEntryClick,
 }: AgendaViewProps) {
   const days = eachDayOfInterval({
     start: startOfDay(range.from),
     end: startOfDay(range.to),
-  }).filter((day) => (entriesByDay.get(dayKey(day)) ?? []).length > 0);
+  }).filter(
+    (day) =>
+      (entriesByDay.get(dayKey(day)) ?? []).length > 0 ||
+      (remindersByDay?.get(dayKey(day)) ?? []).length > 0
+  );
 
   return (
     <div data-view="agenda" className="space-y-4">
@@ -97,6 +124,7 @@ export default function AgendaView({
       ) : (
         days.map((day) => {
           const entries = entriesByDay.get(dayKey(day)) ?? [];
+          const reminders = remindersByDay?.get(dayKey(day)) ?? [];
           const today = isToday(day);
           return (
             <section key={dayKey(day)} data-testid="agenda-day">
@@ -116,6 +144,13 @@ export default function AgendaView({
                     onClick={onEntryClick}
                   />
                 ))}
+                {reminders.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5">
+                    {reminders.map((reminder) => (
+                      <ReminderChip key={reminder.id} reminder={reminder} />
+                    ))}
+                  </div>
+                )}
               </div>
             </section>
           );

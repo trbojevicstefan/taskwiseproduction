@@ -14,6 +14,8 @@ export const JOB_TYPES = [
   "fathom-webhook-ingest",
   "domain-event-dispatch",
   "workflow-webhook-delivery-send",
+  "slack-reminder-send",
+  "slack-reminder-sweep",
 ] as const;
 
 export type JobType = (typeof JOB_TYPES)[number];
@@ -50,6 +52,14 @@ export type WorkflowWebhookDeliverySendJobPayload = {
   deliveryId: string;
 };
 
+export type SlackReminderSendJobPayload = {
+  reminderId: string;
+};
+
+export type SlackReminderSweepJobPayload = {
+  workspaceId: string | null;
+};
+
 export type JobPayloadByType = {
   "meeting-rescan": MeetingRescanJobPayload;
   "fathom-sync": FathomSyncJobPayload;
@@ -57,6 +67,8 @@ export type JobPayloadByType = {
   "fathom-webhook-ingest": FathomWebhookIngestJobPayload;
   "domain-event-dispatch": DomainEventDispatchJobPayload;
   "workflow-webhook-delivery-send": WorkflowWebhookDeliverySendJobPayload;
+  "slack-reminder-send": SlackReminderSendJobPayload;
+  "slack-reminder-sweep": SlackReminderSweepJobPayload;
 };
 
 export type JobResult = Record<string, unknown> | null;

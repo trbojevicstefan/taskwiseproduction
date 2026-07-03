@@ -10,19 +10,22 @@ import {
   startOfWeek,
 } from "date-fns";
 import { cn } from "@/lib/utils";
-import type { CalendarDayEntry } from "./types";
+import type { CalendarDayEntry, CalendarReminderItem } from "./types";
 import { dayKey } from "./calendar-utils";
 import { CalendarEntryCard } from "./CalendarEntryItem";
+import { ReminderChip } from "./AgendaView";
 
 interface WeekViewProps {
   anchor: Date;
   entriesByDay: Map<string, CalendarDayEntry[]>;
+  remindersByDay?: Map<string, CalendarReminderItem[]>;
   onEntryClick: (entry: CalendarDayEntry) => void;
 }
 
 export default function WeekView({
   anchor,
   entriesByDay,
+  remindersByDay,
   onEntryClick,
 }: WeekViewProps) {
   const days = eachDayOfInterval({
@@ -37,6 +40,7 @@ export default function WeekView({
     >
       {days.map((day) => {
         const entries = entriesByDay.get(dayKey(day)) ?? [];
+        const reminders = remindersByDay?.get(dayKey(day)) ?? [];
         const today = isToday(day);
         return (
           <div
@@ -58,18 +62,27 @@ export default function WeekView({
               )}
             </div>
             <div className="flex-grow space-y-1.5 p-1.5">
-              {entries.length === 0 ? (
+              {entries.length === 0 && reminders.length === 0 ? (
                 <p className="px-1 pt-1 text-[11px] text-muted-foreground/60">
                   Nothing scheduled
                 </p>
               ) : (
-                entries.map((entry) => (
-                  <CalendarEntryCard
-                    key={`${entry.kind}-${entry.id}`}
-                    entry={entry}
-                    onClick={onEntryClick}
-                  />
-                ))
+                <>
+                  {entries.map((entry) => (
+                    <CalendarEntryCard
+                      key={`${entry.kind}-${entry.id}`}
+                      entry={entry}
+                      onClick={onEntryClick}
+                    />
+                  ))}
+                  {reminders.length > 0 && (
+                    <div className="flex flex-wrap gap-1">
+                      {reminders.map((reminder) => (
+                        <ReminderChip key={reminder.id} reminder={reminder} />
+                      ))}
+                    </div>
+                  )}
+                </>
               )}
             </div>
           </div>

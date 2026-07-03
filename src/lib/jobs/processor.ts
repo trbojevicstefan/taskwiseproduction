@@ -4,6 +4,8 @@ import type {
   FathomSyncJobPayload,
   JobDocument,
   MeetingRescanJobPayload,
+  SlackReminderSendJobPayload,
+  SlackReminderSweepJobPayload,
   SlackUsersSyncJobPayload,
   WorkflowWebhookDeliverySendJobPayload,
 } from "@/lib/jobs/types";
@@ -11,6 +13,8 @@ import { runDomainEventDispatchJob } from "@/lib/jobs/handlers/domain-event-disp
 import { runFathomWebhookIngestJob } from "@/lib/jobs/handlers/fathom-webhook-ingest-job";
 import { runFathomSyncJob } from "@/lib/jobs/handlers/fathom-sync-job";
 import { runMeetingRescanJob } from "@/lib/jobs/handlers/meeting-rescan-job";
+import { runSlackReminderSendJob } from "@/lib/jobs/handlers/slack-reminder-send-job";
+import { runSlackReminderSweepJob } from "@/lib/jobs/handlers/slack-reminder-sweep-job";
 import { runSlackUsersSyncJob } from "@/lib/jobs/handlers/slack-users-sync-job";
 import { runWorkflowWebhookDeliverySendJob } from "@/lib/jobs/handlers/workflow-webhook-delivery-send-job";
 import type { StructuredLogger } from "@/lib/observability";
@@ -80,6 +84,24 @@ export const processJob = async (
       return runWorkflowWebhookDeliverySendJob({
         userId: job.userId,
         deliveryId: payload.deliveryId,
+        correlationId: context?.correlationId,
+        logger: context?.logger,
+      });
+    }
+    case "slack-reminder-send": {
+      const payload = job.payload as SlackReminderSendJobPayload;
+      return runSlackReminderSendJob({
+        userId: job.userId,
+        reminderId: payload.reminderId,
+        correlationId: context?.correlationId,
+        logger: context?.logger,
+      });
+    }
+    case "slack-reminder-sweep": {
+      const payload = job.payload as SlackReminderSweepJobPayload;
+      return runSlackReminderSweepJob({
+        userId: job.userId,
+        workspaceId: payload.workspaceId ?? null,
         correlationId: context?.correlationId,
         logger: context?.logger,
       });

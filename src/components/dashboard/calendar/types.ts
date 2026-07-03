@@ -23,6 +23,26 @@ export interface CalendarTaskItem {
   overdue: boolean;
 }
 
+/**
+ * Additive Phase 10 projection of a scheduled Slack reminder returned by
+ * GET /api/calendar within [from,to]. Only 'scheduled' reminders are sent.
+ */
+export interface CalendarReminderItem {
+  id: string;
+  taskId: string;
+  taskTitle: string;
+  kind: "before_due" | "on_due" | "overdue" | "custom" | string;
+  runAt: string;
+  status: "scheduled";
+}
+
+export const REMINDER_KIND_LABELS: Record<string, string> = {
+  before_due: "Before due",
+  on_due: "On due date",
+  overdue: "Overdue",
+  custom: "Custom",
+};
+
 export interface CalendarWarnings {
   overdueCount: number;
   cleanupSuggestedCount: number;
@@ -33,6 +53,8 @@ export interface CalendarData {
   meetings: CalendarMeetingItem[];
   tasks: CalendarTaskItem[];
   warnings: CalendarWarnings;
+  /** Additive: scheduled Slack reminders in range (may be absent on older payloads). */
+  reminders?: CalendarReminderItem[];
 }
 
 export interface GoogleCalendarOverlayEvent {
@@ -91,4 +113,5 @@ export const EMPTY_CALENDAR_DATA: CalendarData = {
   meetings: [],
   tasks: [],
   warnings: EMPTY_CALENDAR_WARNINGS,
+  reminders: [],
 };

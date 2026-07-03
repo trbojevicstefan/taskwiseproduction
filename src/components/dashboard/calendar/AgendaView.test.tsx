@@ -97,4 +97,41 @@ describe("AgendaView", () => {
     expect(markup).toContain("Follow up notes");
     expect(markup).toContain("Ana");
   });
+
+  it("renders a reminder chip for scheduled Slack reminders", () => {
+    const runAt = addDays(new Date(), 2);
+    const remindersByDay = new Map([
+      [
+        `${runAt.getFullYear()}-${String(runAt.getMonth() + 1).padStart(2, "0")}-${String(
+          runAt.getDate()
+        ).padStart(2, "0")}`,
+        [
+          {
+            id: "reminder-1",
+            taskId: "task-1",
+            taskTitle: "Send proposal to client",
+            kind: "before_due" as const,
+            runAt: runAt.toISOString(),
+            status: "scheduled" as const,
+          },
+        ],
+      ],
+    ]);
+
+    const markup = renderToStaticMarkup(
+      <AgendaView
+        range={range}
+        warnings={EMPTY_CALENDAR_WARNINGS}
+        entriesByDay={new Map()}
+        remindersByDay={remindersByDay}
+        onEntryClick={jest.fn()}
+      />
+    );
+
+    expect(markup).toContain('data-testid="reminder-chip"');
+    expect(markup).toContain("Reminder: Send proposal to client");
+    expect(markup).toContain("Before due reminder");
+    // The reminder-only day still renders a day section.
+    expect(markup).toContain('data-testid="agenda-day"');
+  });
 });

@@ -7,8 +7,13 @@
  *      meetings: [{ id, title, startTime, attendeeCount, isClientMeeting }],
  *      tasks:    [{ id, title, dueAt, status, priorityLabel, priorityScore,
  *                   cleanupStatus, assigneeName, sourceSessionId, overdue }],
+ *      reminders: [{ id, taskId, taskTitle, kind, runAt, status: 'scheduled' }],
  *      warnings: { overdueCount, cleanupSuggestedCount, expiredCount }
  *    }
+ *
+ * `reminders` is additive (Phase 10): the workspace's scheduled Slack task
+ * reminders with runAt inside [from, to]. runAt is always a Date (written by
+ * src/lib/task-reminders.ts), so a typed Mongo range query is safe here.
  *
  * Meetings are workspace-scoped (same fallback $or + isHidden semantics as
  * GET /api/meetings) with startTime inside [from, to]; startTime may be
@@ -38,6 +43,7 @@ const MAX_RANGE_DAYS = 62;
 const DAY_MS = 24 * 60 * 60 * 1000;
 const MAX_TASKS = 500;
 const MAX_MEETINGS = 1000;
+const MAX_REMINDERS = 500;
 
 const SUGGESTED_CLEANUP_STATUSES = [
   "suggested_expire",
@@ -64,6 +70,14 @@ const TASK_PROJECTION = {
   cleanupStatus: 1,
   assigneeName: 1,
   sourceSessionId: 1,
+} as const;
+
+const REMINDER_PROJECTION = {
+  _id: 1,
+  taskId: 1,
+  taskTitle: 1,
+  kind: 1,
+  runAt: 1,
 } as const;
 
 // Same defensive coercion as src/lib/task-priority.ts (not exported there):
@@ -240,6 +254,7 @@ export async function GET(request: Request) {
     const [
       meetingDocs,
       taskDocs,
+      reminderDocs,
       clientPeople,
       overdueCount,
       cleanupSuggestedCount,
@@ -257,6 +272,22 @@ export async function GET(request: Request) {
         )
         .sort({ dueAt: 1, _id: 1 })
         .limit(MAX_TASKS)
+        .toArray(),
+      // Phase 10 additive: scheduled Slack reminders in range. Reminder docs
+      // are always tagged with a workspaceId (or null for personal scope), so
+      // no legacy $or fallback is needed here.
+      db
+        .collection("taskReminders")
+        .find(
+          {
+            workspaceId,
+            status: "scheduled",
+            runAt: { $gte: from, $lte: to },
+          },
+          { projection: REMINDER_PROJECTION }
+        )
+        .sort({ runAt: 1, _id: 1 })
+        .limit(MAX_REMINDERS)
         .toArray(),
       peopleCollection
         .find(
@@ -328,6 +359,21 @@ export async function GET(request: Request) {
       ];
     });
 
+    const reminders = reminderDocs.flatMap((reminder: any) => {
+      const runAt = toDate(reminder.runAt);
+      if (!runAt) return [];
+      return [
+        {
+          id: String(reminder._id),
+          taskId: reminder.taskId ?? null,
+          taskTitle: reminder.taskTitle || "",
+          kind: reminder.kind ?? null,
+          runAt: runAt.toISOString(),
+          status: "scheduled" as const,
+        },
+      ];
+    });
+
     const warnings = {
       overdueCount,
       cleanupSuggestedCount,
@@ -339,13 +385,14 @@ export async function GET(request: Request) {
       durationMs: durationMs(),
       meetingCount: meetings.length,
       taskCount: tasks.length,
+      reminderCount: reminders.length,
       workspaceId,
     });
     emitMetric(200, "success", {
       meetingCount: meetings.length,
       taskCount: tasks.length,
     });
-    return apiSuccess({ meetings, tasks, warnings }, { correlationId });
+    return apiSuccess({ meetings, tasks, reminders, warnings }, { correlationId });
   } catch (error) {
     const statusCode = getApiErrorStatus(error);
     emitMetric(statusCode, "error");

@@ -130,6 +130,31 @@ const indexPlan = [
     ],
   },
   {
+    collection: "taskReminders",
+    indexes: [
+      {
+        key: { workspaceId: 1, dedupKey: 1 },
+        options: {
+          name: "task_reminders_workspace_dedup_unique",
+          unique: true,
+          partialFilterExpression: { dedupKey: { $type: "string" } },
+        },
+      },
+      {
+        key: { workspaceId: 1, status: 1, runAt: 1 },
+        options: { name: "task_reminders_workspace_status_run_at" },
+      },
+      {
+        key: { taskId: 1, status: 1 },
+        options: { name: "task_reminders_task_status" },
+      },
+      {
+        key: { userId: 1, status: 1, runAt: 1 },
+        options: { name: "task_reminders_user_status_run_at" },
+      },
+    ],
+  },
+  {
     collection: "domainEvents",
     indexes: [
       {

@@ -21,7 +21,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Calendar } from '@/components/ui/calendar';
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { CalendarIcon, Sparkles, Loader2, Slack, Copy, ListChecks } from 'lucide-react';
+import { CalendarIcon, Sparkles, Loader2, Slack, Copy, ListChecks, Bell } from 'lucide-react';
 import { format, parseISO } from 'date-fns';
 import { cn } from '@/lib/utils';
 import { useToast } from "@/hooks/use-toast";
@@ -46,6 +46,38 @@ import {
 } from "@/lib/task-insights-client";
 
 type BoardOption = { id: string; name: string };
+
+// Phase 10: read-only projection of GET /api/slack/reminders?taskId=<id>.
+type TaskReminderRow = {
+  id: string;
+  kind: string;
+  runAt: string | null;
+  status: string;
+  lastError?: string | null;
+};
+
+const REMINDER_KIND_LABELS: Record<string, string> = {
+  before_due: "Before due",
+  on_due: "On due date",
+  overdue: "Overdue",
+  custom: "Custom",
+};
+
+const REMINDER_STATUS_BADGE: Record<string, string> = {
+  scheduled:
+    "bg-slate-500/15 text-slate-600 border-slate-500/30 dark:text-slate-300",
+  sent: "bg-emerald-500/15 text-emerald-600 border-emerald-500/30 dark:text-emerald-400",
+  failed:
+    "bg-destructive/15 text-destructive border-destructive/40",
+  canceled: "bg-muted text-muted-foreground border-border",
+};
+
+const formatReminderRunAt = (runAt: string | null): string => {
+  if (!runAt) return "Unscheduled";
+  const date = new Date(runAt);
+  if (Number.isNaN(date.getTime())) return runAt;
+  return format(date, "MMM d, yyyy 'at' h:mm a");
+};
 
 interface TaskDetailDialogProps {
   isOpen: boolean;
@@ -103,6 +135,9 @@ export default function TaskDetailDialog({
   const [isBriefExpanded, setIsBriefExpanded] = useState(false);
   const [briefQuota, setBriefQuota] = useState<BriefQuota | null>(null);
   const [isLoadingBriefQuota, setIsLoadingBriefQuota] = useState(false);
+  const [taskReminders, setTaskReminders] = useState<TaskReminderRow[]>([]);
+  const [remindersVisible, setRemindersVisible] = useState(false);
+  const [isLoadingReminders, setIsLoadingReminders] = useState(false);
   const { toast } = useToast();
   const { user } = useAuth();
   const { isSlackConnected, isGoogleTasksConnected, isTrelloConnected } = useIntegrations();
@@ -162,6 +197,39 @@ export default function TaskDetailDialog({
         if (isActive) {
           setIsLoadingBriefQuota(false);
         }
+      });
+    return () => {
+      isActive = false;
+    };
+  }, [isOpen, task?.id]);
+
+  // Phase 10: lazily load the task's Slack reminders when the dialog opens.
+  // Tolerant of 401/network errors — the block simply stays hidden.
+  useEffect(() => {
+    if (!isOpen || !task?.id) {
+      setTaskReminders([]);
+      setRemindersVisible(false);
+      return;
+    }
+    let isActive = true;
+    setIsLoadingReminders(true);
+    fetch(`/api/slack/reminders?taskId=${encodeURIComponent(task.id)}`)
+      .then(async (response) => {
+        if (!response.ok) throw new Error(`Reminders unavailable (${response.status})`);
+        const payload = await response.json().catch(() => ({}));
+        if (!isActive) return;
+        setTaskReminders(
+          Array.isArray(payload?.reminders) ? payload.reminders : []
+        );
+        setRemindersVisible(true);
+      })
+      .catch(() => {
+        if (!isActive) return;
+        setTaskReminders([]);
+        setRemindersVisible(false);
+      })
+      .finally(() => {
+        if (isActive) setIsLoadingReminders(false);
       });
     return () => {
       isActive = false;
@@ -1176,6 +1244,63 @@ export default function TaskDetailDialog({
                       </Button>
                     </div>
                   </div>
+
+                  {task?.id && remindersVisible ? (
+                    <div className="rounded-xl border bg-background/80 p-4 space-y-3">
+                      <div className="flex items-center gap-2">
+                        <Bell className="h-4 w-4 text-sky-500" />
+                        <Label>Reminders</Label>
+                        {isLoadingReminders ? (
+                          <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
+                        ) : null}
+                      </div>
+                      {taskReminders.length === 0 ? (
+                        <p className="text-xs text-muted-foreground">
+                          No Slack reminders scheduled for this task. Configure
+                          reminders in{" "}
+                          <a
+                            href="/settings?section=preferences"
+                            className="underline underline-offset-2 hover:text-foreground"
+                          >
+                            Settings
+                          </a>
+                          .
+                        </p>
+                      ) : (
+                        <div className="space-y-2">
+                          {taskReminders.map((reminder) => (
+                            <div
+                              key={reminder.id}
+                              className="flex items-center justify-between gap-2 rounded-md border bg-muted/30 px-3 py-2 text-xs"
+                            >
+                              <div className="min-w-0">
+                                <p className="font-semibold text-foreground truncate">
+                                  {REMINDER_KIND_LABELS[reminder.kind] || reminder.kind}
+                                </p>
+                                <p className="text-muted-foreground">
+                                  {formatReminderRunAt(reminder.runAt)}
+                                </p>
+                              </div>
+                              <span
+                                title={
+                                  reminder.status === "failed" && reminder.lastError
+                                    ? reminder.lastError
+                                    : undefined
+                                }
+                                className={cn(
+                                  "inline-flex shrink-0 items-center rounded-full border px-2 py-0.5 text-[11px] font-medium capitalize",
+                                  REMINDER_STATUS_BADGE[reminder.status] ||
+                                    REMINDER_STATUS_BADGE.canceled
+                                )}
+                              >
+                                {reminder.status}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ) : null}
                 </div>
               </motion.div>
             </div>
