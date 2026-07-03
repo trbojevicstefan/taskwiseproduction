@@ -44,6 +44,7 @@
 - The public copy stays focused on features that are actually shipped or documented in the current platform story.
 - I did not touch the unrelated dashboard chat task work in this worktree.
 - The CTA block was revised after review to remove docs-first language and keep the homepage product-led.
+- A visible `/login` sign-in link was added back into the hero CTA cluster to preserve the auth affordance on the marketing page.
 
 ## Concerns
-- None. The homepage test harness is stable after the `console.error` suppression in the test file.
+- None. The homepage test harness is stable after the `console.error` suppression in the test file, and the sign-in assertion now passes.

@@ -125,6 +125,9 @@ export default function HomePage() {
                   See how it works
                 </Link>
               </Button>
+              <Link href="/login" className="text-sm font-medium text-white/65 transition hover:text-white">
+                Sign in
+              </Link>
             </div>
 
             <div className="flex flex-wrap gap-2 text-sm text-white/65">

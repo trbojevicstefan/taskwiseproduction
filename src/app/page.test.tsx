@@ -40,6 +40,7 @@ describe("homepage marketing refresh", () => {
     expect(html).toContain("currently disabled");
 
     expect(html).toContain('href="/signup"');
+    expect(html).toContain('href="/login"');
     expect(html).toContain('href="/features"');
     expect(html).toContain('href="/integrations"');
     expect(html).toContain('href="/mcp"');
