@@ -74,7 +74,7 @@ const DetailField = ({
     className?: string;
     type?: string;
 }) => (
-    <div className={cn("p-4 rounded-lg bg-background/50 border border-border/30", className)}>
+    <div className={cn("p-4 work-inset", className)}>
         <Label htmlFor={`person-${label.toLowerCase()}`} className="flex items-center text-sm font-medium text-muted-foreground mb-1">
             <Icon className="mr-2 h-4 w-4" />
             {label}
@@ -879,7 +879,7 @@ export default function PersonDetailPageContent({ personId }: PersonDetailPageCo
                             isEditing={isEditing}
                             onChange={(e) => handleInputChange('title', e.target.value)}
                         />
-                        <div className="p-4 rounded-lg bg-background/50 border border-border/30">
+                        <div className="p-4 work-inset">
                             <Label className="flex items-center text-sm font-medium text-muted-foreground mb-1">
                                 <Tag className="mr-2 h-4 w-4" />
                                 Type
@@ -930,7 +930,7 @@ export default function PersonDetailPageContent({ personId }: PersonDetailPageCo
                 <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5, delay: 0.2 }} className="mt-8">
                    <Accordion type="single" collapsible defaultValue="aliases" className="w-full">
                       <AccordionItem value="aliases" className="border-none">
-                          <div className="rounded-xl bg-card border border-border/30 shadow-lg relative overflow-hidden">
+                          <div className="rounded-xl bg-card border border-border shadow-lg relative overflow-hidden">
                               <div className="absolute top-0 left-0 h-1 w-full bg-gradient-to-r from-orange-400 via-red-500 to-yellow-400" />
                               <AccordionTrigger className="p-6 hover:no-underline">
                                   <div className="text-left flex-grow">

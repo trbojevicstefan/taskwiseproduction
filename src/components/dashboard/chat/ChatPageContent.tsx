@@ -1669,7 +1669,7 @@ export default function ChatPageContent() {
   );
 
   const tasksPanelContent = (
-    <div className="flex flex-col h-full rounded-3xl bg-gradient-to-b from-background/90 via-background/80 to-background/60 backdrop-blur-xl border border-border/50 shadow-[0_18px_50px_-30px_rgba(0,0,0,0.7)]">
+    <div className="flex flex-col h-full work-panel">
         <div className="flex items-center justify-between px-4 py-3 border-b">
           <div className="flex items-center gap-2 text-sm font-semibold">
             <ListChecks className="h-4 w-4 text-primary" />
@@ -1731,7 +1731,7 @@ export default function ChatPageContent() {
                       Array.from(groupIds).every((id) => selectedTaskIds.has(id));
                     return (
                       <div key={group.type} className="space-y-2">
-                        <div className="flex items-center justify-between rounded-lg border border-border/60 bg-background/70 px-3 py-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                        <div className="flex items-center justify-between work-inset px-3 py-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                           <span>{group.label}</span>
                           <div className="flex items-center gap-2">
                             <Badge variant="secondary" className="text-[10px]">
@@ -1808,7 +1808,7 @@ export default function ChatPageContent() {
   );
 
   const peoplePanelContent = (
-    <div className="flex flex-col h-full rounded-3xl bg-gradient-to-b from-background/90 via-background/80 to-background/60 backdrop-blur-xl border border-border/50 shadow-[0_18px_50px_-30px_rgba(0,0,0,0.7)]">
+    <div className="flex flex-col h-full work-panel">
       <div className="flex items-center justify-between px-4 py-3 border-b">
         <div className="flex items-center gap-2 text-sm font-semibold">
           <Users className="h-4 w-4 text-primary" />
@@ -1826,7 +1826,7 @@ export default function ChatPageContent() {
               const assignedTasks = filterTasksByAssignee(suggestedTasks, person.name);
               const assignedCount = countTasksRecursive(assignedTasks);
               return (
-                <div key={`${person.name}-${index}`} className="flex items-center justify-between gap-3 rounded-xl border bg-background/60 px-3 py-2">
+                <div key={`${person.name}-${index}`} className="flex items-center justify-between gap-3 data-row px-3 py-2">
                   <div className="flex items-center gap-3 min-w-0">
                     <Avatar className="h-8 w-8">
                       <AvatarImage src={`https://api.dicebear.com/8.x/initials/svg?seed=${person.name}`} />
@@ -1959,11 +1959,11 @@ export default function ChatPageContent() {
           </DashboardHeader>
 
           <div className="flex-1 flex min-h-0 relative gap-4 px-4 pb-4 pt-4" ref={layoutRef}>
-            <div className="flex-1 flex flex-col bg-gradient-to-br from-background/90 via-background/70 to-background/40 border border-border/50 rounded-3xl shadow-[0_20px_60px_-40px_rgba(0,0,0,0.7)] backdrop-blur-xl overflow-hidden">
+            <div className="flex-1 flex flex-col work-panel overflow-hidden">
               <ScrollArea className={cn("flex-1", hasSelection && "pb-24")} ref={scrollAreaRef}>
                   <div className="p-6 md:p-8 space-y-8 max-w-3xl mx-auto w-full">
                     {sourceMeeting && currentSessionPeople.length > 0 && (
-                      <div className="rounded-2xl border border-border/60 bg-background/70 p-4 shadow-[0_16px_40px_-32px_rgba(0,0,0,0.6)]">
+                      <div className="rounded-2xl border border-border bg-card p-4 shadow-sm">
                         <div className="mb-3 flex items-center justify-between">
                           <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                             People in this meeting
@@ -1987,7 +1987,7 @@ export default function ChatPageContent() {
                               <DropdownMenu key={`${person.name}-${index}`}>
                                 <DropdownMenuTrigger asChild>
                                   <button
-                                    className="flex items-center gap-2 rounded-full border border-border/50 bg-background/80 px-3 py-1.5 text-xs font-medium text-foreground shadow-sm transition hover:border-primary/40 hover:bg-background"
+                                    className="flex items-center gap-2 rounded-full border border-border bg-card px-3 py-1.5 text-xs font-medium text-foreground shadow-sm transition hover:border-primary/40 hover:bg-muted/60"
                                     type="button"
                                   >
                                     <Avatar className="h-6 w-6">

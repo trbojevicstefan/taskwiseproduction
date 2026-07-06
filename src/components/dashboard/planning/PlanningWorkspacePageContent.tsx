@@ -68,7 +68,7 @@ export function PlanningSectionsGrid({
         icon={Lightbulb}
         title="Nothing to plan yet"
         description="Sync meetings or approve tasks first."
-        className="rounded-xl border border-dashed border-border/60 bg-card/40"
+        className="rounded-xl border border-dashed border-border bg-card"
       />
     );
   }
@@ -80,7 +80,7 @@ export function PlanningSectionsGrid({
         const tasks = overview.sections[key];
         const count = overview.counts[key];
         return (
-          <Card key={key} className="border-border/60 bg-card/70">
+          <Card key={key}>
             <CardHeader className="pb-3">
               <CardTitle className="flex items-center justify-between gap-2 text-base">
                 <span>{meta.title}</span>
@@ -132,7 +132,7 @@ function PlanningSectionsSkeleton() {
   return (
     <div className="grid gap-4 md:grid-cols-2">
       {PLANNING_SECTION_ORDER.map((key) => (
-        <Card key={key} className="border-border/60 bg-card/70">
+        <Card key={key}>
           <CardHeader className="pb-3">
             <Skeleton className="h-5 w-32" />
           </CardHeader>
@@ -413,7 +413,7 @@ export default function PlanningWorkspacePageContent() {
           </div>
 
           <aside className="w-full shrink-0 xl:w-[380px]">
-            <Card className="border-border/60 bg-card/70">
+            <Card>
               <CardContent className="p-4">
                 <GeneralChatPanel
                   heroTitle="Plan with AI"

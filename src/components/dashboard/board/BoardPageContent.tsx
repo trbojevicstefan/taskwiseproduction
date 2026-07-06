@@ -480,7 +480,7 @@ function AssigneeDropdown({
       onDrop={onDrop}
       onDragEnd={onDragEnd}
       className={cn(
-        "group relative rounded-lg border border-border/50 bg-card p-3 shadow-sm transition",
+        "group relative dense-card transition",
         dragDisabled ? "cursor-default" : "cursor-grab active:cursor-grabbing",
         isDragging && "opacity-60 scale-[0.98]",
         isDragOver && dragPosition === "before" && "border-t-2 border-t-primary/60",
@@ -518,7 +518,7 @@ function AssigneeDropdown({
         </p>
       ) : null}
 
-      <div className="mt-3 flex items-center justify-between border-t border-border/40 pt-2">
+      <div className="mt-3 flex items-center justify-between border-t border-border/60 pt-2">
         <div className="flex items-center gap-3 text-xs text-muted-foreground">
           {subtaskCount > 0 ? (
             <div className="flex items-center gap-1">
@@ -2405,12 +2405,12 @@ function BoardWorkspaceContent({
               onDragOver={(event) => handleDragOverColumn(event, status.id)}
               onDrop={(event) => handleDropOnColumn(event, status.id)}
               className={cn(
-                "flex h-full w-80 shrink-0 flex-col rounded-xl border border-border/50 bg-card/60",
+                "flex h-full w-80 shrink-0 flex-col rounded-xl border border-border bg-muted/50",
                 dragOverColumn === status.id ? "ring-2 ring-primary/30 bg-primary/5" : ""
               )}
             >
               <div
-                className="p-3 flex items-center justify-between sticky top-0 border-b border-t-2 border-border/40 rounded-t-xl"
+                className="p-3 flex items-center justify-between sticky top-0 border-b border-t-2 border-border/60 rounded-t-xl"
                 style={{
                   backgroundColor: applyHexAlpha(status.color, 0.12),
                   borderTopColor: status.color,
@@ -2418,6 +2418,7 @@ function BoardWorkspaceContent({
               >
                 <div className="flex items-center gap-2 min-w-0">
                   <span
+                    aria-hidden="true"
                     className="h-2.5 w-2.5 rounded-full"
                     style={{ backgroundColor: status.color }}
                   />
@@ -2428,7 +2429,7 @@ function BoardWorkspaceContent({
                     {columnTasks.length}
                   </span>
                   {status.isTerminal ? (
-                    <span className="rounded-full border border-border/60 px-2 py-0.5 text-[10px] text-muted-foreground">
+                    <span className="rounded-full border border-border px-2 py-0.5 text-[10px] text-muted-foreground">
                       Terminal
                     </span>
                   ) : null}
@@ -2530,8 +2531,8 @@ function BoardWorkspaceContent({
 
   const renderListView = () => (
     <div className="flex-1 px-6 pb-6 min-h-0 flex flex-col">
-      <div className="bg-card rounded-xl border border-border/50 shadow-sm flex flex-col flex-1 min-h-0">
-        <div className="grid grid-cols-12 gap-4 p-4 border-b border-border/50 bg-muted/40 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+      <div className="work-panel flex flex-col flex-1 min-h-0">
+        <div className="grid grid-cols-12 gap-4 p-4 border-b border-border bg-muted/40 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
           <div className="col-span-1 flex items-center">
             <Checkbox
               checked={allVisibleSelected ? true : someVisibleSelected ? "indeterminate" : false}
@@ -2559,7 +2560,7 @@ function BoardWorkspaceContent({
               return (
                 <div
                   key={task.id}
-                  className="grid grid-cols-12 gap-4 p-4 border-b border-border/30 items-center hover:bg-muted/40 transition-colors"
+                  className="grid grid-cols-12 gap-4 p-4 border-b border-border/60 items-center hover:bg-muted/40 transition-colors"
                 >
                   <div className="col-span-1 flex items-center">
                     <Checkbox
@@ -2659,6 +2660,7 @@ function BoardWorkspaceContent({
                   <SelectItem key={board.id} value={board.id}>
                     <div className="flex items-center gap-2">
                       <span
+                        aria-hidden="true"
                         className="h-2 w-2 rounded-full"
                         style={{ backgroundColor: board.color || "#2563eb" }}
                       />

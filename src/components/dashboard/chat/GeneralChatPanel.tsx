@@ -352,7 +352,7 @@ const SourceChip: React.FC<{ source: GeneralChatSource }> = ({ source }) => {
   const Icon = SOURCE_ICONS[source.sourceType] ?? Video;
   const href = resolveSourceHref(source);
   const chipClass =
-    'inline-flex max-w-[220px] items-center gap-1.5 rounded-full border border-border/60 bg-background/80 px-2.5 py-1 text-xs font-medium text-foreground shadow-sm transition hover:border-primary/40 hover:bg-background';
+    'inline-flex max-w-[220px] items-center gap-1.5 rounded-full border border-border bg-card px-2.5 py-1 text-xs font-medium text-foreground shadow-sm transition hover:border-primary/40 hover:bg-muted/60';
 
   const chipBody = (
     <>
@@ -431,7 +431,7 @@ const AssistantAvatar: React.FC = () => (
 );
 
 const assistantBubbleClass =
-  'rounded-2xl border border-border/50 bg-background/70 p-4 text-card-foreground shadow-[0_14px_30px_-24px_rgba(0,0,0,0.55)] backdrop-blur-md';
+  'rounded-2xl border border-border bg-card p-4 text-card-foreground shadow-sm';
 
 const AssistantMessageBubble: React.FC<{
   answer: GeneralChatAnswer;
@@ -539,7 +539,7 @@ const HeroState: React.FC<{
   >
     <div
       className={cn(
-        'flex items-center justify-center rounded-full border border-border/60 bg-background/80 shadow-sm',
+        'flex items-center justify-center rounded-full border border-border bg-card shadow-sm',
         compact ? 'h-10 w-10' : 'h-12 w-12'
       )}
     >
@@ -897,7 +897,7 @@ export default function GeneralChatPanel({
                 : 'Ask about meetings, tasks, people, or clients...'
             }
             onChange={(event) => setInputValue(event.target.value)}
-            className="h-11 w-full rounded-full border border-border/60 bg-background/80 px-4"
+            className="h-11 w-full rounded-full px-4"
             disabled={isLoading}
           />
           <Button

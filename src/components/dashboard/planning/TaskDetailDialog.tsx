@@ -824,7 +824,7 @@ export default function TaskDetailDialog({
       <DialogContent className="sm:max-w-5xl h-[92vh] p-0 overflow-hidden flex flex-col">
         <div className="relative h-full">
           <div className="flex h-full min-h-0 flex-col">
-            <DialogHeader className="px-6 py-4 border-b bg-gradient-to-r from-background via-muted/30 to-background backdrop-blur">
+            <DialogHeader className="px-6 py-4 border-b bg-card">
               <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
                 <div>
                   <DialogTitle>Task Details</DialogTitle>
@@ -921,7 +921,7 @@ export default function TaskDetailDialog({
                             id="ai-research-brief"
                             value={researchBrief}
                             onChange={(e) => setResearchBrief(e.target.value)}
-                            className="mt-3 min-h-[160px] bg-background/70"
+                            className="mt-3 min-h-[160px]"
                           />
                         ) : (
                           <div className="mt-3 space-y-2 leading-relaxed">
@@ -970,7 +970,7 @@ export default function TaskDetailDialog({
                             id="ai-assistance"
                             value={aiAssistanceText}
                             onChange={(e) => setAiAssistanceText(e.target.value)}
-                            className="mt-3 min-h-[160px] bg-background/70"
+                            className="mt-3 min-h-[160px]"
                           />
                         ) : (
                           <div className="mt-3 space-y-2 leading-relaxed">
@@ -1088,7 +1088,7 @@ export default function TaskDetailDialog({
                 className="min-h-0 border-t lg:border-l lg:border-t-0 bg-gradient-to-b from-muted/30 via-muted/10 to-background flex flex-col"
               >
                 <div className="flex-1 min-h-0 overflow-y-auto p-6 space-y-4">
-                  <div className="rounded-xl border bg-background/80 p-4 space-y-4">
+                  <div className="rounded-xl border bg-card p-4 space-y-4">
                     <div className="space-y-2">
                       <Label htmlFor="status">Status</Label>
                       <Select value={status || "todo"} onValueChange={(value: string) => setStatus(value as DisplayTask["status"])}>
@@ -1212,7 +1212,7 @@ export default function TaskDetailDialog({
                     </div>
                   </div>
 
-                  <div className="rounded-xl border bg-background/80 p-4 space-y-3">
+                  <div className="rounded-xl border bg-card p-4 space-y-3">
                     <Label>Send options</Label>
                     <div className="grid grid-cols-2 gap-2">
                       <Button
@@ -1246,7 +1246,7 @@ export default function TaskDetailDialog({
                   </div>
 
                   {task?.id && remindersVisible ? (
-                    <div className="rounded-xl border bg-background/80 p-4 space-y-3">
+                    <div className="rounded-xl border bg-card p-4 space-y-3">
                       <div className="flex items-center gap-2">
                         <Bell className="h-4 w-4 text-sky-500" />
                         <Label>Reminders</Label>
@@ -1304,7 +1304,7 @@ export default function TaskDetailDialog({
                 </div>
               </motion.div>
             </div>
-            <DialogFooter className="border-t border-border/80 bg-background/90 px-6 py-4 backdrop-blur-sm sm:justify-between">
+            <DialogFooter className="border-t bg-card px-6 py-4 sm:justify-between">
               <DialogClose asChild>
                 <Button type="button" variant="outline">
                   Cancel

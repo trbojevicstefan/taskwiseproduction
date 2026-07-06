@@ -288,7 +288,7 @@ function MeetingListItem({
     >
       <div
         onClick={() => onOpen(m.id)}
-        className="cursor-pointer relative rounded-xl border border-border/20 shadow-sm hover:border-primary/40 hover:shadow-lg transition-all h-full flex items-center p-3 gap-4 bg-card/60 dark:bg-black/30 hover:bg-card/90"
+        className="cursor-pointer relative dense-card hover:border-primary/40 hover:shadow-lg transition-all h-full flex items-center gap-4"
       >
         <div className={cn("w-1 self-stretch rounded-full", flavor.color)} />
         {selectionDisabled ? (
@@ -376,7 +376,7 @@ function MeetingStatsBar({ meetings }: { meetings: Meeting[] }) {
   const avgSent = total > 0 ? Math.round((meetings.reduce((s, m) => s + (m.overallSentiment || 0), 0) / total) * 100) : 0;
 
   const StatPill = ({ label, value }: { label: string; value: string | number }) => (
-    <div className="flex items-center gap-2 rounded-full px-3 py-1.5 text-xs font-medium bg-card/80 border border-border/30 shadow-sm">
+    <div className="flex items-center gap-2 rounded-full px-3 py-1.5 text-xs font-medium bg-card border border-border shadow-sm">
       <span className="text-muted-foreground">{label}</span>
       <span className="font-semibold text-foreground">{value}</span>
     </div>
@@ -500,7 +500,7 @@ const TaskRow: React.FC<{
   const cleanupBadge = getCleanupBadgeMeta(task);
 
   return (
-    <div className={cn("flex flex-col", level > 0 && "pl-5 mt-2 border-l-2 border-border/30")}>
+    <div className={cn("flex flex-col", level > 0 && "pl-5 mt-2 border-l-2 border-border/60")}>
       <div className="flex items-start justify-between gap-3 rounded-xl border bg-card px-3 py-2 group">
         <div className="flex items-center gap-2 flex-1 min-w-0">
           {selectionDisabled ? (
