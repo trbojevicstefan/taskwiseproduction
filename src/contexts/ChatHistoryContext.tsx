@@ -30,6 +30,13 @@ interface ChatHistoryContextType {
   updateActiveSessionSuggestions: (suggestions: ExtractedTaskSchema[]) => Promise<void>;
   removeSuggestionFromActiveSession: (suggestionId: string) => Promise<void>;
   updateSession: (sessionId: string, updatedFields: Partial<Omit<ChatSession, 'id' | 'userId' | 'createdAt' | 'lastActivityAt'>>) => Promise<void>;
+  /**
+   * Local-only message sync (no network call). Used by the unified chat panel,
+   * which persists messages itself via PATCH /api/chat-sessions/[id]; this
+   * keeps the in-memory session list consistent so switching sessions and
+   * back does not show stale messages.
+   */
+  applySessionMessagesLocal: (sessionId: string, messages: Message[]) => void;
 }
 
 const ChatHistoryContext = createContext<ChatHistoryContextType | undefined>(undefined);
@@ -249,6 +256,16 @@ export const ChatHistoryProvider = ({ children }: { children: ReactNode }) => {
 }, [user, activeSessionId, toast]);
 
 
+  const applySessionMessagesLocal = useCallback((sessionId: string, messages: Message[]) => {
+    setSessions(prev =>
+      prev.map(session =>
+        session.id === sessionId
+          ? { ...session, messages, lastActivityAt: new Date() }
+          : session
+      )
+    );
+  }, []);
+
   const getActiveSession = useCallback((): ChatSession | undefined => {
     return sessions.find(s => s.id === activeSessionId);
   }, [sessions, activeSessionId]);
@@ -326,6 +343,7 @@ export const ChatHistoryProvider = ({ children }: { children: ReactNode }) => {
       updateActiveSessionSuggestions,
       removeSuggestionFromActiveSession,
       updateSession,
+      applySessionMessagesLocal,
     }}>
       {children}
     </ChatHistoryContext.Provider>
