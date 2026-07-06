@@ -25,6 +25,7 @@ import DashboardHeader from '../DashboardHeader';
 import TaskCleanupSettingsCard from '@/components/dashboard/settings/TaskCleanupSettingsCard';
 import SlackRemindersSettingsCard from '@/components/dashboard/settings/SlackRemindersSettingsCard';
 import MeetingProviderIntegrationCard from '@/components/dashboard/settings/MeetingProviderIntegrationCard';
+import { TrelloConnectDialog } from '@/components/dashboard/common/PushToTrelloDialog';
 import { isAdvancedSettingsEnabled } from '@/lib/simplification-flags';
 
 const AVATAR_STYLES = [
@@ -529,8 +530,8 @@ export default function SettingsPageContent() {
     disconnectGoogleTasks,
     isTrelloConnected,
     isLoadingTrelloConnection,
-    connectTrello,
     disconnectTrello,
+    refreshTrelloConnection,
     isSlackConnected,
     isLoadingSlackConnection,
     connectSlack,
@@ -545,6 +546,13 @@ export default function SettingsPageContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
 
+  // Trello connect uses the token-paste dialog; connection status and
+  // disconnect come from IntegrationsContext (backed by /api/trello/connection).
+  const [isTrelloConnectDialogOpen, setIsTrelloConnectDialogOpen] = useState(false);
+
+  const openTrelloConnectDialog = useCallback(() => {
+    setIsTrelloConnectDialogOpen(true);
+  }, []);
 
   const [displayName, setDisplayName] = useState('');
   const [isSaving, setIsSaving] = useState(false);
@@ -3449,18 +3457,23 @@ export default function SettingsPageContent() {
                               </Button>
                             ) : null}
                         />
-                        <IntegrationCard 
+                        <IntegrationCard
                             icon={ToyBrick}
                             title="Trello"
                             description="Create Trello cards from your tasks."
                             isConnected={isTrelloConnected}
                             isLoading={isLoadingTrelloConnection}
-                            onConnect={connectTrello}
+                            onConnect={openTrelloConnectDialog}
                             onDisconnect={disconnectTrello}
                             settingsAction={{
                               onClick: () => handleIntegrationSettingsComingSoon("Trello"),
                               disabled: !isTrelloConnected,
                             }}
+                        />
+                        <TrelloConnectDialog
+                          isOpen={isTrelloConnectDialogOpen}
+                          onClose={() => setIsTrelloConnectDialogOpen(false)}
+                          onConnected={() => void refreshTrelloConnection()}
                         />
                         <IntegrationCard 
                             icon={Slack}
