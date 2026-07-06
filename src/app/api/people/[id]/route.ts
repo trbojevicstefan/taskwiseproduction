@@ -43,6 +43,7 @@ const patchPersonSchema = z
     sourceSessionIds: z.array(z.string()).optional(),
     personType: z.enum(["teammate", "client", "unknown"]).optional(),
     company: z.string().nullable().optional(),
+    notes: z.string().max(10_000).nullable().optional(),
     nextFollowUpAt: z
       .string()
       .refine((value) => !Number.isNaN(Date.parse(value)), {
@@ -89,6 +90,7 @@ const EDITABLE_PERSON_FIELDS = [
   "sourceSessionIds",
   "personType",
   "company",
+  "notes",
   "nextFollowUpAt",
 ] as const;
 

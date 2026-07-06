@@ -49,6 +49,7 @@ export interface Person {
   personTypeReason?: string; // short human-readable heuristic reason
   company?: string | null; // client accounts; user-editable; may be auto-suggested from email domain
   nextFollowUpAt?: string | null; // ISO date, user-set
+  notes?: string | null; // free-form profile notes, user-editable (Priority 9)
   canonicalPersonId?: string | null; // for merged losers: the canonical (winning) person id
   primarySource?: PersonPrimarySource | null; // where this profile canonically comes from
   sourceIdentities?: PersonSourceIdentity[]; // per-provider identity trail

@@ -180,6 +180,29 @@ const indexPlan = [
     ],
   },
   {
+    collection: "companies",
+    indexes: [
+      {
+        key: { workspaceId: 1, nameKey: 1 },
+        options: {
+          name: "companies_workspace_name_key_unique",
+          unique: true,
+        },
+      },
+      {
+        key: { workspaceId: 1, domain: 1 },
+        options: {
+          name: "companies_workspace_domain",
+          partialFilterExpression: { domain: { $type: "string" } },
+        },
+      },
+      {
+        key: { workspaceId: 1, peopleIds: 1 },
+        options: { name: "companies_workspace_people" },
+      },
+    ],
+  },
+  {
     collection: "meetingSearchChunks",
     indexes: [
       {
