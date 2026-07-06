@@ -59,6 +59,26 @@ export interface Meeting extends BaseSession {
   previousMeetingId?: string | null; // For recurring meeting series
 
   // Optional metadata
+  /**
+   * Meeting agenda. Canonical shape is Array<{ id, title, notes, order }>
+   * written by PATCH /api/meetings/[id]/agenda (see src/lib/meeting-agenda.ts;
+   * editable agendas are managed on /planning). The meeting detail page
+   * renders this read-only and tolerates looser legacy shapes (plain string,
+   * string[], or { text }[]).
+   */
+  agenda?:
+    | string
+    | Array<
+        | string
+        | {
+            id?: string;
+            title?: string;
+            notes?: string;
+            order?: number;
+            text?: string;
+          }
+      >
+    | null;
   tags?: string[];
   keyMoments?: { timestamp: string; description: string }[];
   duration?: number;

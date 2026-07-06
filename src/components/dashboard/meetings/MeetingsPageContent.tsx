@@ -130,6 +130,22 @@ import { moveTaskToBoard } from "@/lib/board-actions";
 import { buildBriefContext } from "@/lib/brief-context";
 import { generateBriefsForTasks } from "@/lib/task-briefs";
 import CoreLoopStartPanel from '../home/CoreLoopStartPanel';
+import {
+  MeetingAgendaSection,
+  MeetingCompletionSuggestionsSection,
+  MeetingLinkedChatSection,
+  MeetingRelatedClientsSection,
+  MeetingReportDialog,
+  MeetingSourceSection,
+  MeetingTranscriptViewer,
+  type MeetingCompletionSuggestionItem,
+  type MeetingReportData,
+} from './MeetingDetailSections';
+import {
+  findTranscriptLineIndex,
+  splitTranscriptLines,
+  transcriptLineDomId,
+} from '@/lib/transcript-navigation';
 
 
 const flavorMap: Record<string, { name: string; color: string; icon: React.ReactNode }> = {
@@ -484,13 +500,14 @@ const TaskRow: React.FC<{
   onDismissCompletion?: (task: ExtractedTaskSchema) => void;
   onToggleSelection: (id: string, checked: boolean) => void;
   onViewDetails: (task: ExtractedTaskSchema) => void;
+  onJumpToTranscript?: (snippet: string) => void;
   isSelected: boolean;
   isIndeterminate: boolean;
   selectionDisabled?: boolean;
   level: number;
   selectedTaskIds: Set<string>;
   getCheckboxState: (task: ExtractedTaskSchema, selectedIds: Set<string>) => 'checked' | 'unchecked' | 'indeterminate';
-}> = ({ task, onAssign, onDelete, onConfirmCompletion, onDismissCompletion, onToggleSelection, onViewDetails, isSelected, isIndeterminate, selectionDisabled, level, selectedTaskIds, getCheckboxState }) => {
+}> = ({ task, onAssign, onDelete, onConfirmCompletion, onDismissCompletion, onToggleSelection, onViewDetails, onJumpToTranscript, isSelected, isIndeterminate, selectionDisabled, level, selectedTaskIds, getCheckboxState }) => {
   const [isExpanded, setIsExpanded] = useState(true);
   const hasSubtasks = task.subtasks && task.subtasks.length > 0;
   const assigneeName = task.assignee?.name || task.assigneeName || 'Unassigned';
@@ -566,12 +583,21 @@ const TaskRow: React.FC<{
             <TooltipProvider>
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <Button variant="ghost" size="icon" className="h-7 w-7">
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-7 w-7"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onJumpToTranscript?.(completionEvidence);
+                    }}
+                  >
                     <Info className="h-4 w-4" />
                   </Button>
                 </TooltipTrigger>
                 <TooltipContent className="max-w-xs text-xs leading-snug">
                   {completionEvidence}
+                  {onJumpToTranscript ? " (click to jump to transcript)" : ""}
                 </TooltipContent>
               </Tooltip>
             </TooltipProvider>
@@ -625,6 +651,7 @@ const TaskRow: React.FC<{
               onConfirmCompletion={onConfirmCompletion}
               onDismissCompletion={onDismissCompletion}
               onViewDetails={onViewDetails}
+              onJumpToTranscript={onJumpToTranscript}
               level={level + 1}
               onToggleSelection={onToggleSelection}
               isSelected={selectedTaskIds.has(subtask.id)}
@@ -1058,7 +1085,7 @@ export function MeetingDetailSheet({
     loadMeetingById,
   } = useMeetingHistory();
   const { isSlackConnected, isGoogleTasksConnected, isTrelloConnected } = useIntegrations();
-  const { updateSession } = useChatHistory();
+  const { sessions, updateSession } = useChatHistory();
   const [people, setPeople] = useState<Person[]>([]);
   const [isLoadingPeople, setIsLoadingPeople] = useState(true);
   const [isAssignDialogOpen, setIsAssignDialogOpen] = useState(false);
@@ -1086,6 +1113,20 @@ export function MeetingDetailSheet({
     role: "attendee" | "mentioned";
     existingPerson: Person | null;
   } | null>(null);
+  // Priority 13: action-oriented detail sections state.
+  const [activeDetailTab, setActiveDetailTab] = useState<string>(
+    variant === "page" ? "summary" : "tasks"
+  );
+  const [transcriptHighlightIndex, setTranscriptHighlightIndex] = useState<
+    number | null
+  >(null);
+  const [pendingSuggestionTaskId, setPendingSuggestionTaskId] = useState<
+    string | null
+  >(null);
+  const [isReportDialogOpen, setIsReportDialogOpen] = useState(false);
+  const [isGeneratingReport, setIsGeneratingReport] = useState(false);
+  const [reportData, setReportData] = useState<MeetingReportData | null>(null);
+  const [reportError, setReportError] = useState<string | null>(null);
   const lastMeetingIdRef = useRef<string | null>(null);
 
   const meeting = useMemo(() => meetings.find((m: any) => m.id === id) || null, [id, meetings]);
@@ -1292,8 +1333,13 @@ export function MeetingDetailSheet({
       setSelectedTaskIds(new Set());
       setSelectedPeopleKeys(new Set());
       setActivePerson(null);
+      setActiveDetailTab(isPageVariant ? "summary" : "tasks");
+      setTranscriptHighlightIndex(null);
+      setIsReportDialogOpen(false);
+      setReportData(null);
+      setReportError(null);
     }
-  }, [meeting?.id]);
+  }, [meeting?.id, isPageVariant]);
 
   useEffect(() => {
     if (!meeting || isEditingTitle) return;
@@ -2368,6 +2414,181 @@ export function MeetingDetailSheet({
     [meetingPeople]
   );
 
+  // -------------------------------------------------------------------------
+  // Priority 13: action-oriented detail sections (agenda, completion
+  // suggestions, linked chats, related clients, source, transcript nav,
+  // generated report).
+  // -------------------------------------------------------------------------
+
+  const meetingTranscript = useMemo(() => {
+    if (!meeting) return "";
+    if (meeting.originalTranscript?.trim()) return meeting.originalTranscript;
+    const transcriptArtifact = (meeting.artifacts || []).find(
+      (artifact) =>
+        artifact.type === "transcript" && artifact.processedText?.trim()
+    );
+    return transcriptArtifact?.processedText || "";
+  }, [meeting]);
+
+  const transcriptLines = useMemo(
+    () => splitTranscriptLines(meetingTranscript),
+    [meetingTranscript]
+  );
+
+  const handleJumpToTranscript = useCallback(
+    (snippet: string) => {
+      const index = findTranscriptLineIndex(transcriptLines, snippet);
+      if (index === -1) {
+        // Graceful no-op: the snippet may be paraphrased beyond recognition.
+        toast({
+          title: "Snippet not found",
+          description: "Couldn't locate this snippet in the transcript.",
+        });
+        return;
+      }
+      setIsReportDialogOpen(false);
+      setActiveDetailTab("transcript");
+      setTranscriptHighlightIndex(index);
+      window.setTimeout(() => {
+        document
+          .getElementById(transcriptLineDomId(index))
+          ?.scrollIntoView({ behavior: "smooth", block: "center" });
+      }, 120);
+    },
+    [transcriptLines, toast]
+  );
+
+  const completionSuggestions = useMemo(() => {
+    if (!meeting) return [] as MeetingCompletionSuggestionItem[];
+    const suggestions: MeetingCompletionSuggestionItem[] = [];
+    const walk = (tasks: ExtractedTaskSchema[]) => {
+      tasks.forEach((task) => {
+        const isSuggested =
+          task.cleanupStatus === "completed_suggested" ||
+          Boolean(task.completionSuggested);
+        const alreadyReviewed =
+          task.completionReviewStatus === "accepted" ||
+          task.completionReviewStatus === "rejected";
+        if (isSuggested && !alreadyReviewed && (task.status || "todo") !== "done") {
+          const evidence = [
+            ...(task.completionEvidence || []),
+            ...((task.cleanupEvidence || []).map((entry: any) => ({
+              snippet: entry?.snippet,
+            })) as { snippet?: string }[]),
+          ].filter(
+            (entry): entry is { snippet: string } =>
+              typeof entry?.snippet === "string" && Boolean(entry.snippet.trim())
+          );
+          suggestions.push({
+            taskId: task.id,
+            title: task.title,
+            assigneeName: task.assignee?.name || task.assigneeName || null,
+            reason: task.cleanupReason || null,
+            evidence,
+          });
+        }
+        if (task.subtasks) walk(task.subtasks);
+      });
+    };
+    walk(getExtractedTasks(meeting.extractedTasks));
+    return suggestions;
+  }, [meeting]);
+
+  const handleCompletionSuggestionAction = useCallback(
+    async (taskId: string, action: "mark_completed" | "dismiss") => {
+      if (!meeting || pendingSuggestionTaskId) return;
+      setPendingSuggestionTaskId(taskId);
+      try {
+        await apiFetch(`/api/tasks/cleanup/actions`, {
+          method: "POST",
+          body: JSON.stringify({ action, taskIds: [taskId] }),
+        });
+        await loadMeetingById(meeting.id, { silent: true });
+        toast({
+          title:
+            action === "mark_completed"
+              ? "Completion confirmed"
+              : "Suggestion dismissed",
+          description:
+            action === "mark_completed"
+              ? "The task has been marked as done."
+              : "The task stays open.",
+        });
+      } catch (error) {
+        toast({
+          title: "Action failed",
+          description:
+            error instanceof Error ? error.message : "Could not update the task.",
+          variant: "destructive",
+        });
+      } finally {
+        setPendingSuggestionTaskId(null);
+      }
+    },
+    [meeting, pendingSuggestionTaskId, loadMeetingById, toast]
+  );
+
+  const relatedClients = useMemo(() => {
+    const byId = new Map<string, { id: string; name: string; company?: string | null }>();
+    meetingPeople.forEach((person: any) => {
+      const existing = findExistingPerson(person);
+      if (!existing || existing.personType !== "client") return;
+      if (byId.has(existing.id)) return;
+      byId.set(existing.id, {
+        id: existing.id,
+        name: existing.name,
+        company: existing.company || null,
+      });
+    });
+    return Array.from(byId.values());
+  }, [meetingPeople, findExistingPerson]);
+
+  const linkedChatSessions = useMemo(() => {
+    if (!meeting) return [] as { id: string; title: string }[];
+    return sessions
+      .filter(
+        (session: any) =>
+          session.sourceMeetingId === meeting.id ||
+          (meeting.chatSessionId && session.id === meeting.chatSessionId)
+      )
+      .map((session: any) => ({
+        id: session.id,
+        title: session.title || "Untitled chat",
+      }));
+  }, [sessions, meeting]);
+
+  const handleGenerateReport = useCallback(async () => {
+    if (!meeting || isGeneratingReport) return;
+    setIsReportDialogOpen(true);
+    setIsGeneratingReport(true);
+    setReportError(null);
+    try {
+      const payload = await apiFetch<{ ok: boolean; data: MeetingReportData }>(
+        `/api/meetings/${meeting.id}/report`,
+        { method: "POST", body: JSON.stringify({}) }
+      );
+      setReportData(payload.data);
+    } catch (error) {
+      setReportError(
+        error instanceof Error
+          ? error.message
+          : "Could not generate the report."
+      );
+    } finally {
+      setIsGeneratingReport(false);
+    }
+  }, [meeting, isGeneratingReport]);
+
+  const handleCopyReport = useCallback(async () => {
+    if (!reportData?.report) return;
+    const { success } = await copyTextToClipboard(reportData.report);
+    if (success) {
+      toast({ title: "Report copied", description: "The report is on your clipboard." });
+    } else {
+      toast({ title: "Copy failed", description: "Could not copy the report.", variant: "destructive" });
+    }
+  }, [reportData, toast]);
+
   const selectedTasks = useMemo(() => {
     if (!meeting) return [];
     return getSelectedTasksRecursive(getExtractedTasks(meeting.extractedTasks));
@@ -2552,9 +2773,28 @@ export function MeetingDetailSheet({
               </Link>
             </Button>
           )}
-          <Button size="sm" variant="outline" className="h-8 gap-1" onClick={() => onNavigateToChat(meeting)}>
+          <Button
+            size="sm"
+            variant={isPageVariant ? "default" : "outline"}
+            className="h-8 gap-1"
+            onClick={() => onNavigateToChat(meeting)}
+          >
             <MessageSquareText className="h-4 w-4" />
-            Go to Chat
+            Ask about this meeting
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-8 gap-1"
+            onClick={handleGenerateReport}
+            disabled={isGeneratingReport}
+          >
+            {isGeneratingReport ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <FileText className="h-4 w-4" />
+            )}
+            Generate Report
           </Button>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
@@ -2590,21 +2830,38 @@ export function MeetingDetailSheet({
       </div>
       <ScrollArea className="h-full">
         <div className="px-6 py-4 space-y-6">
-          <Tabs defaultValue="tasks" className="w-full">
+          <Tabs
+            value={activeDetailTab}
+            onValueChange={setActiveDetailTab}
+            className="w-full"
+          >
             <div className="flex items-center justify-between">
               <TabsList>
-                <TabsTrigger value="summary">Summary</TabsTrigger>
+                <TabsTrigger value="summary">Overview</TabsTrigger>
                 <TabsTrigger value="details">Details</TabsTrigger>
                 <TabsTrigger value="tasks">Tasks</TabsTrigger>
                 <TabsTrigger value="completed">Completed</TabsTrigger>
                 <TabsTrigger value="attendees">People</TabsTrigger>
+                <TabsTrigger value="transcript">Transcript</TabsTrigger>
                 <TabsTrigger value="artifacts">Artifacts</TabsTrigger>
               </TabsList>
 
             </div>
             <div className="pt-4">
               <TabsContent value="summary" className="space-y-4 m-0">
+                <MeetingCompletionSuggestionsSection
+                  suggestions={completionSuggestions}
+                  onAccept={(taskId) =>
+                    handleCompletionSuggestionAction(taskId, "mark_completed")
+                  }
+                  onDismiss={(taskId) =>
+                    handleCompletionSuggestionAction(taskId, "dismiss")
+                  }
+                  onJumpToTranscript={handleJumpToTranscript}
+                  pendingTaskId={pendingSuggestionTaskId}
+                />
                 <Card className="rounded-xl"><CardHeader className="pb-2"><CardTitle className="text-sm">Summary</CardTitle></CardHeader><CardContent className="p-4 pt-0 text-sm">{meeting.summary}</CardContent></Card>
+                <MeetingAgendaSection agenda={meeting.agenda} />
                 {meeting.keyMoments && meeting.keyMoments.length > 0 && (
                   <Card className="rounded-xl">
                     <CardHeader className="pb-2"><CardTitle className="text-sm">Key Moments</CardTitle></CardHeader>
@@ -2613,6 +2870,14 @@ export function MeetingDetailSheet({
                     </CardContent>
                   </Card>
                 )}
+                <div className="grid gap-4 md:grid-cols-2">
+                  <MeetingRelatedClientsSection clients={relatedClients} />
+                  <MeetingLinkedChatSection
+                    sessions={linkedChatSessions}
+                    onOpenSession={() => onNavigateToChat(meeting)}
+                  />
+                  <MeetingSourceSection ingestSource={meeting.ingestSource} />
+                </div>
               </TabsContent>
 
               <TabsContent value="details" className="space-y-4 m-0">
@@ -2768,6 +3033,7 @@ export function MeetingDetailSheet({
                           level={0}
                           onToggleSelection={handleToggleSelection}
                           onViewDetails={handleViewDetails}
+                          onJumpToTranscript={handleJumpToTranscript}
                           isSelected={selectedTaskIds.has(t.id)}
                           isIndeterminate={getCheckboxState(t, selectedTaskIds) === 'indeterminate'}
                           selectedTaskIds={selectedTaskIds}
@@ -2884,6 +3150,13 @@ export function MeetingDetailSheet({
                     <p>No people were identified for this meeting.</p>
                   </div>
                 )}
+              </TabsContent>
+
+              <TabsContent value="transcript" className="space-y-2 m-0">
+                <MeetingTranscriptViewer
+                  lines={transcriptLines}
+                  highlightIndex={transcriptHighlightIndex}
+                />
               </TabsContent>
 
               <TabsContent value="artifacts" className="space-y-2 m-0">
@@ -3066,6 +3339,18 @@ export function MeetingDetailSheet({
         onClose={() => setIsSelectionViewVisible(false)}
         tasks={selectedTasks}
       />
+      {meeting && (
+        <MeetingReportDialog
+          open={isReportDialogOpen}
+          onOpenChange={setIsReportDialogOpen}
+          meetingTitle={meeting.title}
+          isGenerating={isGeneratingReport}
+          report={reportData}
+          error={reportError}
+          onCopy={handleCopyReport}
+          onJumpToTranscript={handleJumpToTranscript}
+        />
+      )}
     </>
   );
 }
