@@ -4,31 +4,18 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   AlertCircle,
-  Calendar,
   CheckCircle2,
   Circle,
   Clock,
-  Filter,
   GripVertical,
   LayoutGrid,
   List as ListIcon,
-  MoreHorizontal,
   Palette,
   Plus,
-  Search,
   Sparkles,
   Trash2,
 } from "lucide-react";
-import {
-  endOfWeek,
-  format,
-  isBefore,
-  isSameDay,
-  isValid,
-  isWithinInterval,
-  startOfToday,
-  startOfWeek,
-} from "date-fns";
+import { format, isValid } from "date-fns";
 import DashboardHeader from "@/components/dashboard/DashboardHeader";
 import DashboardScreenSkeleton from "@/components/dashboard/DashboardScreenSkeleton";
 import { Button } from "@/components/ui/button";
@@ -36,17 +23,6 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuTrigger,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuCheckboxItem,
-  DropdownMenuItem,
-  DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
-} from "@/components/ui/dropdown-menu";
 import {
   Dialog,
   DialogContent,
@@ -84,6 +60,33 @@ import TaskSweepDialog, {
   type TaskSweepCandidate,
   type TaskSweepDiscardReason,
 } from "@/components/dashboard/board/TaskSweepDialog";
+import BoardTaskCard, {
+  AssigneeDropdown,
+  PriorityBadge,
+  TaskActionsMenu,
+  priorityLabelText,
+  type DragPosition,
+} from "@/components/dashboard/board/BoardTaskCard";
+import BoardColumnHeader from "@/components/dashboard/board/BoardColumnHeader";
+import BoardFilterBar, {
+  type BoardMeetingOption,
+} from "@/components/dashboard/board/BoardFilterBar";
+import {
+  applyBoardFiltersToParams,
+  hasActiveBoardFilters,
+  parseBoardFilters,
+  parseColumnSort,
+  serializeColumnSort,
+  sortColumnTasks,
+  taskMatchesBoardFilters,
+  type BoardFilters,
+  type ColumnSortMap,
+  type ColumnSortMode,
+} from "@/components/dashboard/board/board-filters";
+import {
+  computeBulkMovePlan,
+  findDoneStatus,
+} from "@/components/dashboard/board/board-bulk";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 import { apiFetch } from "@/lib/api";
@@ -97,14 +100,13 @@ import { subscribeRealtimeUpdates } from "@/lib/realtime-client";
 import type { Task } from "@/types/project";
 import type { Board, BoardStatus, BoardStatusCategory } from "@/types/board";
 import type { Person } from "@/types/person";
-import type { ExtractedTaskSchema, TaskPriorityLabel } from "@/types/chat";
+import type { ExtractedTaskSchema } from "@/types/chat";
 import { buildBriefContext } from "@/lib/brief-context";
 import { generateBriefsForTasks } from "@/lib/task-briefs";
 
 type TaskPriority = Task["priority"];
 
 type ViewMode = "board" | "list";
-type DragPosition = "before" | "after" | null;
 
 type BoardTaskItem = Task & {
   boardItemId: string;
@@ -113,22 +115,6 @@ type BoardTaskItem = Task & {
 };
 
 const priorityOptions: TaskPriority[] = ["low", "medium", "high"];
-
-const priorityStyles: Record<TaskPriorityLabel, string> = {
-  low: "bg-emerald-500/15 text-emerald-600 border-emerald-500/30 dark:text-emerald-400",
-  medium: "bg-amber-500/15 text-amber-700 border-amber-500/30 dark:text-amber-400",
-  high: "bg-rose-500/15 text-rose-600 border-rose-500/30 dark:text-rose-400",
-  urgent: "bg-red-600/15 text-red-700 border-red-600/40 dark:text-red-400",
-};
-
-const priorityLabel: Record<TaskPriorityLabel, string> = {
-  low: "Low",
-  medium: "Medium",
-  high: "High",
-  urgent: "Urgent",
-};
-
-type DueFilter = "all" | "today" | "overdue" | "this_week";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -177,37 +163,6 @@ const formatDueDate = (value?: string | Date | null) => {
   return format(parsed, "MMM d");
 };
 
-const applyHexAlpha = (hex: string, alpha: number) => {
-  if (!hex) return `rgba(0, 0, 0, ${alpha})`;
-  let value = hex.replace("#", "").trim();
-  if (value.length === 3) {
-    value = value
-      .split("")
-      .map((ch: any) => ch + ch)
-      .join("");
-  }
-  if (value.length !== 6) {
-    return `rgba(0, 0, 0, ${alpha})`;
-  }
-  const r = Number.parseInt(value.slice(0, 2), 16);
-  const g = Number.parseInt(value.slice(2, 4), 16);
-  const b = Number.parseInt(value.slice(4, 6), 16);
-  if ([r, g, b].some((part: any) => Number.isNaN(part))) {
-    return `rgba(0, 0, 0, ${alpha})`;
-  }
-  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
-};
-
-const getInitials = (value?: string | null) => {
-  if (!value) return "?";
-  const cleaned = value.trim();
-  if (!cleaned) return "?";
-  const parts = cleaned.split(/\s+/).filter(Boolean);
-  if (!parts.length) return cleaned.slice(0, 2).toUpperCase();
-  const initials = parts.slice(0, 2).map((part: any) => part[0]).join("");
-  return initials.toUpperCase();
-};
-
 interface BoardPageContentProps {
   workspaceId: string;
 }
@@ -248,305 +203,6 @@ function BoardUnavailableState() {
     </div>
   );
 }
-function PriorityBadge({
-  priority,
-  reason,
-}: {
-  priority: TaskPriorityLabel;
-  reason?: string | null;
-}) {
-  return (
-    <span
-      title={reason || undefined}
-      className={cn(
-        "text-xs font-medium px-2 py-0.5 rounded-full border",
-        priorityStyles[priority]
-      )}
-    >
-      {priorityLabel[priority]}
-    </span>
-  );
-}
-
-const getCleanupBadgeMeta = (
-  task: Pick<Task, "cleanupStatus" | "cleanupCategory">
-): { label: string; className: string } | null => {
-  switch (task.cleanupStatus) {
-    case "suggested_expire":
-      return task.cleanupCategory === "stale_follow_up" ||
-        task.cleanupCategory === "expired_event"
-        ? {
-            label: "Stale?",
-            className:
-              "bg-slate-500/15 text-slate-600 border-slate-500/30 dark:text-slate-400",
-          }
-        : {
-            label: "Vanity?",
-            className:
-              "bg-amber-500/15 text-amber-700 border-amber-500/30 dark:text-amber-400",
-          };
-    case "duplicate_suggested":
-      return {
-        label: "Duplicate?",
-        className:
-          "bg-violet-500/15 text-violet-600 border-violet-500/30 dark:text-violet-400",
-      };
-    case "completed_suggested":
-      return {
-        label: "Done?",
-        className:
-          "bg-emerald-500/15 text-emerald-600 border-emerald-500/30 dark:text-emerald-400",
-      };
-    default:
-      return null;
-  }
-};
-
-function CleanupBadge({ task }: { task: Task }) {
-  const meta = getCleanupBadgeMeta(task);
-  if (!meta) return null;
-  return (
-    <span
-      title={task.cleanupReason || undefined}
-      className={cn(
-        "text-xs font-medium px-2 py-0.5 rounded-full border",
-        meta.className
-      )}
-    >
-      {meta.label}
-    </span>
-  );
-}
-
-function AssigneeAvatar({
-  label,
-  person,
-}: {
-  label?: string | null;
-  person?: Person | null;
-}) {
-  const name = person?.name || label || "Unassigned";
-  const initials = getInitials(name);
-  const frameClass =
-    "h-7 w-7 rounded-full border-2 border-background flex items-center justify-center text-[10px] font-semibold overflow-hidden";
-
-  if (!person) {
-    if (label && label !== "Unassigned") {
-      return (
-        <div className={cn(frameClass, "bg-primary/10 text-primary")} title={name}>
-          {initials}
-        </div>
-      );
-    }
-    return (
-      <div className={cn(frameClass, "bg-muted")} title="Unassigned">
-        <img src="/logo.svg" alt="TaskWiseAI" className="h-4 w-4" width={16} height={16} />
-      </div>
-    );
-  }
-
-  if (person.avatarUrl) {
-    return (
-      <img
-        src={person.avatarUrl}
-        alt={person.name}
-        className="h-7 w-7 rounded-full border-2 border-background object-cover"
-      />
-    );
-  }
-
-  return (
-    <div className={cn(frameClass, "bg-primary/10 text-primary")} title={name}>
-      {initials}
-    </div>
-  );
-}
-
-function TaskActionsMenu({ onEdit, onDelete }: { onEdit: () => void; onDelete: () => void }) {
-  return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <button
-          className="rounded-md p-1 text-muted-foreground transition hover:bg-muted hover:text-foreground"
-          type="button"
-          data-no-drag
-        >
-          <MoreHorizontal className="h-4 w-4" />
-        </button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end">
-        <DropdownMenuItem onSelect={onEdit}>Edit task</DropdownMenuItem>
-        <DropdownMenuItem
-          onSelect={onDelete}
-          className="text-destructive focus:text-destructive"
-        >
-          Delete task
-        </DropdownMenuItem>
-      </DropdownMenuContent>
-    </DropdownMenu>
-  );
-}
-
-function AssigneeDropdown({
-  task,
-  assigneeName,
-  assigneePerson,
-  people,
-  onAssign,
-}: {
-  task: Task;
-  assigneeName: string;
-  assigneePerson: Person | null;
-  people: Person[];
-  onAssign: (task: Task, person: Person | null) => void;
-}) {
-  return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <button type="button" data-no-drag>
-          <AssigneeAvatar label={assigneeName} person={assigneePerson} />
-        </button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-48">
-        <DropdownMenuItem onSelect={() => onAssign(task, null)}>
-          Unassigned
-        </DropdownMenuItem>
-        <DropdownMenuSeparator />
-        {people.length ? (
-          people.map((person: any) => (
-            <DropdownMenuItem
-              key={person.id}
-              onSelect={() => onAssign(task, person)}
-            >
-              {person.name}
-            </DropdownMenuItem>
-          ))
-        ) : (
-          <DropdownMenuItem disabled>No people yet</DropdownMenuItem>
-        )}
-      </DropdownMenuContent>
-    </DropdownMenu>
-  );
-}
-
-  function BoardTaskCard({
-    task,
-    assigneeName,
-    assigneePerson,
-    people,
-    isSelected,
-    onToggleSelect,
-    onEdit,
-    onDelete,
-    onOpen,
-    onAssign,
-  onDragStart,
-  onDragOver,
-  onDrop,
-  onDragEnd,
-  isDragging,
-  isDragOver,
-  dragPosition,
-  dragDisabled,
-  }: {
-    task: Task;
-    assigneeName: string;
-    assigneePerson: Person | null;
-    people: Person[];
-    isSelected: boolean;
-    onToggleSelect: (taskId: string, selected: boolean) => void;
-    onEdit: () => void;
-    onDelete: () => void;
-    onOpen: () => void;
-    onAssign: (task: Task, person: Person | null) => void;
-  onDragStart: (event: React.DragEvent<HTMLDivElement>) => void;
-  onDragOver: (event: React.DragEvent<HTMLDivElement>) => void;
-  onDrop: (event: React.DragEvent<HTMLDivElement>) => void;
-  onDragEnd: () => void;
-  isDragging: boolean;
-  isDragOver: boolean;
-  dragPosition: DragPosition;
-  dragDisabled: boolean;
-}) {
-  const dueLabel = formatDueDate(task.dueAt || null);
-  const priority = task.priority || "medium";
-  const subtaskCount = task.subtaskCount || 0;
-
-  return (
-    <div
-      draggable={!dragDisabled}
-      onDragStart={onDragStart}
-      onDragOver={onDragOver}
-      onDrop={onDrop}
-      onDragEnd={onDragEnd}
-      className={cn(
-        "group relative dense-card transition",
-        dragDisabled ? "cursor-default" : "cursor-grab active:cursor-grabbing",
-        isDragging && "opacity-60 scale-[0.98]",
-        isDragOver && dragPosition === "before" && "border-t-2 border-t-primary/60",
-        isDragOver && dragPosition === "after" && "border-b-2 border-b-primary/60"
-      )}
-    >
-        <div className="flex items-start justify-between gap-2">
-          <div className="flex items-center gap-2">
-            <Checkbox
-              checked={isSelected}
-              onCheckedChange={(checked) => onToggleSelect(task.id, Boolean(checked))}
-              aria-label={`Select ${task.title}`}
-              className="h-4 w-4"
-            />
-            <PriorityBadge
-              priority={task.priorityLabel || priority}
-              reason={task.priorityReason}
-            />
-            <CleanupBadge task={task} />
-          </div>
-          <TaskActionsMenu onEdit={onEdit} onDelete={onDelete} />
-        </div>
-
-      <button
-        type="button"
-        data-no-drag
-        onClick={onOpen}
-        className="mt-2 text-left text-sm font-semibold text-foreground leading-snug hover:text-primary"
-      >
-        {task.title}
-      </button>
-      {task.description ? (
-        <p className="mt-1 text-xs text-muted-foreground line-clamp-2">
-          {task.description}
-        </p>
-      ) : null}
-
-      <div className="mt-3 flex items-center justify-between border-t border-border/60 pt-2">
-        <div className="flex items-center gap-3 text-xs text-muted-foreground">
-          {subtaskCount > 0 ? (
-            <div className="flex items-center gap-1">
-              <CheckCircle2 className="h-3.5 w-3.5" />
-              <span>{subtaskCount} subtasks</span>
-            </div>
-          ) : null}
-          {dueLabel ? (
-            <div className="flex items-center gap-1">
-              <Calendar className="h-3.5 w-3.5" />
-              <span>{dueLabel}</span>
-            </div>
-          ) : null}
-        </div>
-        <div className="flex items-center gap-2">
-          <AssigneeDropdown
-            task={task}
-            assigneeName={assigneeName}
-            assigneePerson={assigneePerson}
-            people={people}
-            onAssign={onAssign}
-          />
-          <GripVertical className="h-4 w-4 text-muted-foreground" />
-        </div>
-      </div>
-    </div>
-  );
-}
 function BoardWorkspaceContent({
     workspaceId: _workspaceId,
   }: BoardPageContentProps) {
@@ -564,14 +220,14 @@ function BoardWorkspaceContent({
   const [people, setPeople] = useState<Person[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [viewMode, setViewMode] = useState<ViewMode>("board");
-  const [searchQuery, setSearchQuery] = useState("");
-  const [dueFilter, setDueFilter] = useState<DueFilter>("all");
-  const [statusFilters, setStatusFilters] = useState<Set<string>>(new Set());
-  const [priorityFilters, setPriorityFilters] = useState<Set<TaskPriority>>(
-    new Set(priorityOptions)
+  // Filters + per-column sort are initialized from (and persisted to) the URL
+  // query string so board views survive reloads and can be shared.
+  const [filters, setFilters] = useState<BoardFilters>(() =>
+    parseBoardFilters(new URLSearchParams(searchParamsString))
   );
-  const [assigneeFilters, setAssigneeFilters] = useState<Set<string>>(new Set());
-  const [includeUnassigned, setIncludeUnassigned] = useState(false);
+  const [columnSort, setColumnSort] = useState<ColumnSortMap>(() =>
+    parseColumnSort(new URLSearchParams(searchParamsString).get("sort"))
+  );
     const [isTaskDialogOpen, setIsTaskDialogOpen] = useState(false);
     const [isTaskDetailDialogOpen, setIsTaskDetailDialogOpen] = useState(false);
     const [isTaskSweepOpen, setIsTaskSweepOpen] = useState(false);
@@ -685,27 +341,7 @@ function BoardWorkspaceContent({
     return map;
   }, [people]);
 
-  const isFiltering = useMemo(() => {
-    const hasSearch = searchQuery.trim().length > 0;
-    const hasAssigneeFilter = assigneeFilters.size > 0 || includeUnassigned;
-    const hasStatusFilter = statusFilters.size !== orderedStatuses.length;
-    const hasPriorityFilter = priorityFilters.size !== priorityOptions.length;
-    return (
-      hasSearch ||
-      hasAssigneeFilter ||
-      hasStatusFilter ||
-      hasPriorityFilter ||
-      dueFilter !== "all"
-    );
-  }, [
-    searchQuery,
-    assigneeFilters,
-    includeUnassigned,
-    priorityFilters,
-    dueFilter,
-    statusFilters,
-    orderedStatuses.length,
-  ]);
+  const isFiltering = useMemo(() => hasActiveBoardFilters(filters), [filters]);
 
   const resolveAssigneeIds = useCallback(
     (task: Task) => {
@@ -735,70 +371,27 @@ function BoardWorkspaceContent({
     [peopleById, personEmailToId, personNameKeyToId]
   );
 
+  const resolveTaskCompany = useCallback(
+    (task: Task) => {
+      for (const id of resolveAssigneeIds(task)) {
+        const company = peopleById.get(id)?.company;
+        if (company && company.trim()) return company.trim();
+      }
+      return null;
+    },
+    [peopleById, resolveAssigneeIds]
+  );
+
   const filteredTasks = useMemo(() => {
-    const normalizedQuery = searchQuery.trim().toLowerCase();
-    const hasAssigneeFilter = assigneeFilters.size > 0 || includeUnassigned;
-    const applyStatus = statusFilters.size !== orderedStatuses.length;
-    const applyPriority = priorityFilters.size !== priorityOptions.length;
-    const today = new Date();
-    const weekRange = {
-      start: startOfWeek(today, { weekStartsOn: 1 }),
-      end: endOfWeek(today, { weekStartsOn: 1 }),
+    const ctx = {
+      resolveAssigneeIds,
+      resolveCompany: resolveTaskCompany,
     };
-    return tasks.filter((task: any) => {
+    return tasks.filter((task: BoardTaskItem) => {
       const statusId = task.boardStatusId || orderedStatuses[0]?.id || "";
-      if (normalizedQuery) {
-        const haystack = `${task.title} ${task.description || ""}`
-          .toLowerCase()
-          .trim();
-        if (!haystack.includes(normalizedQuery)) return false;
-      }
-
-      if (applyStatus && !statusFilters.has(statusId)) {
-        return false;
-      }
-
-      if (applyPriority && !priorityFilters.has(task.priority)) {
-        return false;
-      }
-
-      if (hasAssigneeFilter) {
-        const assigneeIds = resolveAssigneeIds(task);
-        const matches = Array.from(assigneeIds).some((id: any) => assigneeFilters.has(id));
-        const hasAssignee = assigneeIds.size > 0;
-        if (matches) {
-          // keep
-        } else if (!hasAssignee && includeUnassigned) {
-          // keep
-        } else {
-          return false;
-        }
-      }
-
-      if (dueFilter !== "all") {
-        if (!task.dueAt) return false;
-        const dueDate = new Date(task.dueAt);
-        if (!isValid(dueDate)) return false;
-        if (dueFilter === "today" && !isSameDay(dueDate, today)) return false;
-        if (dueFilter === "overdue" && !isBefore(dueDate, startOfToday())) return false;
-        if (dueFilter === "this_week" && !isWithinInterval(dueDate, weekRange)) {
-          return false;
-        }
-      }
-
-      return true;
+      return taskMatchesBoardFilters(task, statusId, filters, ctx);
     });
-  }, [
-    tasks,
-    searchQuery,
-    assigneeFilters,
-    includeUnassigned,
-    priorityFilters,
-    dueFilter,
-    resolveAssigneeIds,
-    statusFilters,
-    orderedStatuses.length,
-  ]);
+  }, [tasks, filters, resolveAssigneeIds, resolveTaskCompany, orderedStatuses]);
 
   const tasksByStatus = useMemo(() => {
     const map = new Map<string, BoardTaskItem[]>();
@@ -808,16 +401,13 @@ function BoardWorkspaceContent({
       if (!statusId || !map.has(statusId)) return;
       map.get(statusId)?.push(task);
     });
-    map.forEach((items: any) =>
-      items.sort((a: any, b: any) => {
-        const rankA = typeof a.boardRank === "number" ? a.boardRank : 0;
-        const rankB = typeof b.boardRank === "number" ? b.boardRank : 0;
-        if (rankA !== rankB) return rankA - rankB;
-        return a.title.localeCompare(b.title);
-      })
-    );
+    orderedStatuses.forEach((status: BoardStatus) => {
+      const items = map.get(status.id);
+      if (!items) return;
+      map.set(status.id, sortColumnTasks(items, columnSort[status.id] || "manual"));
+    });
     return map;
-  }, [filteredTasks, orderedStatuses]);
+  }, [filteredTasks, orderedStatuses, columnSort]);
 
   const totalTasksByStatus = useMemo(() => {
     const map = new Map<string, number>();
@@ -828,6 +418,31 @@ function BoardWorkspaceContent({
     });
     return map;
   }, [orderedStatuses, tasks]);
+
+  const meetingFilterOptions = useMemo<BoardMeetingOption[]>(() => {
+    const map = new Map<string, string>();
+    tasks.forEach((task: BoardTaskItem) => {
+      if (!task.sourceSessionId) return;
+      if (!map.has(task.sourceSessionId)) {
+        map.set(
+          task.sourceSessionId,
+          task.sourceSessionName?.trim() || "Untitled meeting"
+        );
+      }
+    });
+    return Array.from(map.entries())
+      .map(([id, name]) => ({ id, name }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [tasks]);
+
+  const companyFilterOptions = useMemo(() => {
+    const companies = new Set<string>();
+    tasks.forEach((task: BoardTaskItem) => {
+      const company = resolveTaskCompany(task);
+      if (company) companies.add(company);
+    });
+    return Array.from(companies).sort((a, b) => a.localeCompare(b));
+  }, [tasks, resolveTaskCompany]);
 
   const getAssigneeName = useCallback(
     (task: Task) => {
@@ -1484,49 +1099,44 @@ function BoardWorkspaceContent({
     [updateBoardItem]
   );
 
-  const togglePriority = (priority: TaskPriority) => {
-    setPriorityFilters((prev) => {
-      const next = new Set(prev);
-      if (next.has(priority)) {
-        next.delete(priority);
-      } else {
-        next.add(priority);
+  // Persist filters + column sort to the URL query string (debounced so
+  // search typing doesn't spam history). router.replace keeps history clean.
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      const params = new URLSearchParams(searchParamsString);
+      applyBoardFiltersToParams(filters, params);
+      const sortValue = serializeColumnSort(columnSort);
+      params.delete("sort");
+      if (sortValue) params.set("sort", sortValue);
+      const next = params.toString();
+      if (next !== searchParamsString) {
+        router.replace(
+          `/workspaces/${_workspaceId}/board${next ? `?${next}` : ""}`,
+          { scroll: false }
+        );
       }
-      if (!next.size) {
-        next.add(priority);
-      }
-      return next;
-    });
-  };
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [filters, columnSort, router, searchParamsString, _workspaceId]);
 
-  const toggleStatusFilter = (statusId: string) => {
-    setStatusFilters((prev) => {
-      const next = new Set(prev);
-      if (next.has(statusId)) {
-        next.delete(statusId);
-      } else {
-        next.add(statusId);
-      }
-      if (!next.size) {
-        next.add(statusId);
-      }
-      return next;
-    });
-  };
-
-  const clearFilters = () => {
-    setSearchQuery("");
-    setDueFilter("all");
-    setStatusFilters(new Set(orderedStatuses.map((status: any) => status.id)));
-    setPriorityFilters(new Set(priorityOptions));
-    setAssigneeFilters(new Set());
-    setIncludeUnassigned(false);
-  };
+  const handleColumnSortChange = useCallback(
+    (statusId: string, mode: ColumnSortMode) => {
+      setColumnSort((prev) => {
+        const next = { ...prev };
+        if (mode === "manual") {
+          delete next[statusId];
+        } else {
+          next[statusId] = mode;
+        }
+        return next;
+      });
+    },
+    []
+  );
 
   useEffect(() => {
     if (!orderedStatuses.length) return;
     const statusIds = orderedStatuses.map((status: any) => status.id);
-    setStatusFilters(new Set(statusIds));
     setBulkStatusId((prev) => (prev && statusIds.includes(prev) ? prev : statusIds[0]));
     setTaskDraft((prev) => ({
       ...prev,
@@ -2122,6 +1732,54 @@ function BoardWorkspaceContent({
       setSelectedTaskIds(new Set());
     }, []);
 
+    // Keyboard: Escape clears the current selection (unless a dialog is open —
+    // Radix owns Escape there, or focus is inside a text field).
+    useEffect(() => {
+      const handleKeyDown = (event: KeyboardEvent) => {
+        if (event.key !== "Escape" || event.defaultPrevented) return;
+        const target = event.target as HTMLElement | null;
+        if (
+          target &&
+          (target.tagName === "INPUT" ||
+            target.tagName === "TEXTAREA" ||
+            target.isContentEditable ||
+            target.closest?.('[role="dialog"], [role="menu"]'))
+        ) {
+          return;
+        }
+        setSelectedTaskIds((prev) => (prev.size ? new Set() : prev));
+      };
+      window.addEventListener("keydown", handleKeyDown);
+      return () => window.removeEventListener("keydown", handleKeyDown);
+    }, []);
+
+    const handleQuickAddTask = useCallback(
+      async (statusId: string, title: string) => {
+        if (!activeBoardId || !title.trim()) return false;
+        try {
+          const created = await apiFetch<BoardTaskItem>(
+            `/api/workspaces/${_workspaceId}/boards/${activeBoardId}/items`,
+            {
+              method: "POST",
+              body: JSON.stringify({ title: title.trim(), statusId }),
+            }
+          );
+          setTasks((prev) => [...prev, created]);
+          return true;
+        } catch (error) {
+          console.error("Quick add failed:", error);
+          toast({
+            title: "Could not add task",
+            description:
+              error instanceof Error ? error.message : "Try again in a moment.",
+            variant: "destructive",
+          });
+          return false;
+        }
+      },
+      [_workspaceId, activeBoardId, toast]
+    );
+
     const handleCopySelected = useCallback(async () => {
       if (!selectedShareTasks.length) return;
       const text = formatTasksToText(selectedShareTasks);
@@ -2303,66 +1961,68 @@ function BoardWorkspaceContent({
     setIsStatusDialogOpen(true);
   }, [resolveBoardStatusId, selectedTasks]);
 
+  // Shared by the status dialog and the toolbar's "Mark Done" bulk action.
+  const moveSelectedTasksToStatus = useCallback(
+    async (targetStatusId: string) => {
+      if (!selectedTasks.length || !targetStatusId) return false;
+      const plan = computeBulkMovePlan(selectedTasks, targetStatusId);
+      if (!plan) return false;
+
+      const targetStatusMeta = getStatusMeta(targetStatusId);
+      const targetCategory = targetStatusMeta?.category || "todo";
+
+      let nextRank = tasks.reduce((maxRank: number, task: BoardTaskItem) => {
+        const statusId = task.boardStatusId || resolveBoardStatusId(null);
+        if (statusId !== targetStatusId) return maxRank;
+        const rank = typeof task.boardRank === "number" ? task.boardRank : 0;
+        return rank > maxRank ? rank : maxRank;
+      }, 0);
+
+      const taskIdsToUpdate = new Set(plan.taskIds);
+      const nextTasks = tasks.map((task: any) => {
+        if (!taskIdsToUpdate.has(task.id)) return task;
+        nextRank += 1000;
+        return {
+          ...task,
+          boardStatusId: targetStatusId,
+          boardRank: nextRank,
+          status: targetCategory,
+        };
+      });
+
+      await applyBulkUpdates(nextTasks, plan.payload);
+      return true;
+    },
+    [
+      applyBulkUpdates,
+      getStatusMeta,
+      resolveBoardStatusId,
+      selectedTasks,
+      tasks,
+    ]
+  );
+
   const handleBulkStatusChange = useCallback(async () => {
-    if (!selectedTasks.length) {
-      setIsStatusDialogOpen(false);
-      return;
-    }
-
     const targetStatusId = resolveBoardStatusId(bulkStatusId);
-    if (!targetStatusId) {
-      setIsStatusDialogOpen(false);
-      return;
+    if (targetStatusId) {
+      await moveSelectedTasksToStatus(targetStatusId);
     }
-    const targetStatusMeta = getStatusMeta(targetStatusId);
-    const targetCategory = targetStatusMeta?.category || "todo";
-
-    const maxRankByStatus = new Map<string, number>();
-    tasks.forEach((task: any) => {
-      const statusId = task.boardStatusId || resolveBoardStatusId(null);
-      const rank = typeof task.boardRank === "number" ? task.boardRank : 0;
-      const currentMax = maxRankByStatus.get(statusId) ?? 0;
-      if (rank > currentMax) {
-        maxRankByStatus.set(statusId, rank);
-      }
-    });
-
-    let nextRank = maxRankByStatus.get(targetStatusId) ?? 0;
-    const taskIdsToUpdate = new Set(
-      selectedTasks
-        .filter((task: any) => task.boardStatusId !== targetStatusId)
-        .map((task: any) => task.id)
-    );
-    if (!taskIdsToUpdate.size) {
-      setIsStatusDialogOpen(false);
-      return;
-    }
-    const nextTasks = tasks.map((task: any) => {
-      if (!selectedTaskIds.has(task.id)) return task;
-      if (!taskIdsToUpdate.has(task.id)) return task;
-      nextRank += 1000;
-      return {
-        ...task,
-        boardStatusId: targetStatusId,
-        boardRank: nextRank,
-        status: targetCategory,
-      };
-    });
-
-    await applyBulkUpdates(nextTasks, {
-      taskIds: Array.from(taskIdsToUpdate),
-      statusId: targetStatusId,
-    });
     setIsStatusDialogOpen(false);
-  }, [
-    applyBulkUpdates,
-    bulkStatusId,
-    selectedTaskIds,
-    selectedTasks,
-    tasks,
-    getStatusMeta,
-    resolveBoardStatusId,
-  ]);
+  }, [bulkStatusId, moveSelectedTasksToStatus, resolveBoardStatusId]);
+
+  const handleBulkMarkDone = useCallback(async () => {
+    if (!selectedTasks.length) return;
+    const doneStatus = findDoneStatus(orderedStatuses);
+    if (!doneStatus) {
+      toast({
+        title: "No done column",
+        description: "Add a done-category column to this board first.",
+        variant: "destructive",
+      });
+      return;
+    }
+    await moveSelectedTasksToStatus(doneStatus.id);
+  }, [moveSelectedTasksToStatus, orderedStatuses, selectedTasks, toast]);
 
   const handleCreatePerson = useCallback(
     async (name: string) => {
@@ -2409,70 +2069,19 @@ function BoardWorkspaceContent({
                 dragOverColumn === status.id ? "ring-2 ring-primary/30 bg-primary/5" : ""
               )}
             >
-              <div
-                className="p-3 flex items-center justify-between sticky top-0 border-b border-t-2 border-border/60 rounded-t-xl"
-                style={{
-                  backgroundColor: applyHexAlpha(status.color, 0.12),
-                  borderTopColor: status.color,
-                }}
-              >
-                <div className="flex items-center gap-2 min-w-0">
-                  <span
-                    aria-hidden="true"
-                    className="h-2.5 w-2.5 rounded-full"
-                    style={{ backgroundColor: status.color }}
-                  />
-                  <h3 className="text-sm font-semibold text-foreground truncate">
-                    {status.label}
-                  </h3>
-                  <span className="rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">
-                    {columnTasks.length}
-                  </span>
-                  {status.isTerminal ? (
-                    <span className="rounded-full border border-border px-2 py-0.5 text-[10px] text-muted-foreground">
-                      Terminal
-                    </span>
-                  ) : null}
-                </div>
-                <div className="flex gap-1">
-                  <button
-                    className="rounded-md p-1 text-muted-foreground transition hover:bg-muted hover:text-foreground"
-                    type="button"
-                    onClick={() => openNewTask(status.id)}
-                  >
-                    <Plus className="h-4 w-4" />
-                  </button>
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <button
-                        className="rounded-md p-1 text-muted-foreground transition hover:bg-muted hover:text-foreground"
-                        type="button"
-                      >
-                        <MoreHorizontal className="h-4 w-4" />
-                      </button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end">
-                        <DropdownMenuItem onSelect={() => selectColumnTasks(status.id)}>
-                          Select all tasks
-                        </DropdownMenuItem>
-                        <DropdownMenuItem onSelect={() => clearColumnSelection(status.id)}>
-                          Clear selection
-                        </DropdownMenuItem>
-                        <DropdownMenuSeparator />
-                        <DropdownMenuItem onSelect={() => openStageColorDialog(status)}>
-                          Change color
-                        </DropdownMenuItem>
-                      <DropdownMenuItem
-                        onSelect={() => setStageToDelete(status)}
-                        disabled={totalTasksForStatus > 0 || orderedStatuses.length <= 1}
-                        className="text-destructive focus:text-destructive"
-                      >
-                        Delete stage
-                      </DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                </div>
-              </div>
+              <BoardColumnHeader
+                status={status}
+                visibleCount={columnTasks.length}
+                totalCount={totalTasksForStatus}
+                sortMode={columnSort[status.id] || "manual"}
+                onSortChange={(mode) => handleColumnSortChange(status.id, mode)}
+                onQuickAdd={(title) => handleQuickAddTask(status.id, title)}
+                onSelectAll={() => selectColumnTasks(status.id)}
+                onClearSelection={() => clearColumnSelection(status.id)}
+                onChangeColor={() => openStageColorDialog(status)}
+                onDelete={() => setStageToDelete(status)}
+                deleteDisabled={totalTasksForStatus > 0 || orderedStatuses.length <= 1}
+              />
               <div className="flex-1 p-3 flex flex-col gap-3 overflow-y-auto">
                   {columnTasks.map((task: any) => (
                     <BoardTaskCard
@@ -2480,6 +2089,7 @@ function BoardWorkspaceContent({
                       task={task}
                       assigneeName={getAssigneeName(task)}
                       assigneePerson={getAssigneePerson(task)}
+                      company={resolveTaskCompany(task)}
                       people={people}
                       isSelected={selectedTaskIds.has(task.id)}
                       onToggleSelect={toggleTaskSelection}
@@ -2696,15 +2306,14 @@ function BoardWorkspaceContent({
             </div>
           </div>
 
-          <div className="relative">
-            <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              value={searchQuery}
-              onChange={(event) => setSearchQuery(event.target.value)}
-              placeholder="Search tasks"
-              className="pl-9 w-64 bg-muted/60 border-transparent focus:bg-card"
-            />
-          </div>
+          <BoardFilterBar
+            filters={filters}
+            onChange={setFilters}
+            people={people}
+            statuses={orderedStatuses}
+            meetingOptions={meetingFilterOptions}
+            companyOptions={companyFilterOptions}
+          />
 
           <div className="h-8 w-px bg-border/70" />
 
@@ -2735,80 +2344,6 @@ function BoardWorkspaceContent({
             </button>
           </div>
 
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="outline" size="sm">
-                <Filter className="mr-2 h-4 w-4" />
-                Filters
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-64">
-              <DropdownMenuLabel>Assignee</DropdownMenuLabel>
-              <DropdownMenuCheckboxItem
-                checked={includeUnassigned}
-                onCheckedChange={(checked) => setIncludeUnassigned(Boolean(checked))}
-              >
-                Unassigned
-              </DropdownMenuCheckboxItem>
-              {people.map((person: any) => (
-                <DropdownMenuCheckboxItem
-                  key={person.id}
-                  checked={assigneeFilters.has(person.id)}
-                  onCheckedChange={(checked) => {
-                    setAssigneeFilters((prev) => {
-                      const next = new Set(prev);
-                      if (checked) {
-                        next.add(person.id);
-                      } else {
-                        next.delete(person.id);
-                      }
-                      return next;
-                    });
-                  }}
-                >
-                  {person.name}
-                </DropdownMenuCheckboxItem>
-              ))}
-              <DropdownMenuSeparator />
-              <DropdownMenuLabel>Due date</DropdownMenuLabel>
-              <DropdownMenuRadioGroup
-                value={dueFilter}
-                onValueChange={(value) => setDueFilter(value as DueFilter)}
-              >
-                <DropdownMenuRadioItem value="all">All dates</DropdownMenuRadioItem>
-                <DropdownMenuRadioItem value="today">Due today</DropdownMenuRadioItem>
-                <DropdownMenuRadioItem value="overdue">Overdue</DropdownMenuRadioItem>
-                <DropdownMenuRadioItem value="this_week">This week</DropdownMenuRadioItem>
-              </DropdownMenuRadioGroup>
-              <DropdownMenuSeparator />
-              <DropdownMenuLabel>Status</DropdownMenuLabel>
-              {orderedStatuses.map((status: any) => (
-                <DropdownMenuCheckboxItem
-                  key={status.id}
-                  checked={statusFilters.has(status.id)}
-                  onCheckedChange={() => toggleStatusFilter(status.id)}
-                >
-                  {status.label}
-                </DropdownMenuCheckboxItem>
-              ))}
-              <DropdownMenuSeparator />
-              <DropdownMenuLabel>Priority</DropdownMenuLabel>
-              {priorityOptions.map((priority: TaskPriority) => (
-                <DropdownMenuCheckboxItem
-                  key={priority}
-                  checked={priorityFilters.has(priority)}
-                  onCheckedChange={() => togglePriority(priority)}
-                >
-                  {priorityLabel[priority]}
-                </DropdownMenuCheckboxItem>
-              ))}
-              <DropdownMenuSeparator />
-              <DropdownMenuItem onSelect={clearFilters} disabled={!isFiltering}>
-                Clear filters
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-
           <Button
             variant="outline"
             size="sm"
@@ -2837,6 +2372,7 @@ function BoardWorkspaceContent({
           onAssign={() => setIsAssignDialogOpen(true)}
           onSetDueDate={() => setIsSetDueDateDialogOpen(true)}
           onChangeStatus={openStatusDialog}
+          onMarkDone={handleBulkMarkDone}
           onSend={(format) => handleExport(format)}
           onCopy={handleCopySelected}
           onGenerateBriefs={handleGenerateBriefsForSelection}
@@ -3126,7 +2662,7 @@ function BoardWorkspaceContent({
                   <SelectContent>
                     {priorityOptions.map((priority: TaskPriority) => (
                       <SelectItem key={priority} value={priority}>
-                        {priorityLabel[priority]}
+                        {priorityLabelText[priority]}
                       </SelectItem>
                     ))}
                   </SelectContent>
