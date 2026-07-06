@@ -1,8 +1,10 @@
 
 // src/app/planning/agendas/page.tsx
-// The Google Calendar agenda-prep tool (Meeting Planner) — moved unchanged
-// from /planning when the Phase 5 planning workspace took over that route.
+// Priority 12 — the agenda entry point: upcoming meetings that need an agenda
+// (linking into the agenda workspace at /planning/agendas/[meetingId]) plus
+// the existing Google Calendar Meeting Planner below it, unchanged.
 import DashboardPageLayout from '@/components/layouts/DashboardPageLayout';
+import AgendaInbox from '@/components/dashboard/planning/AgendaInbox';
 import MeetingPlannerPageContent from '@/components/dashboard/meetings/MeetingPlannerPageContent';
 import type { Metadata } from 'next';
 
@@ -14,7 +16,12 @@ export const metadata: Metadata = {
 export default function MeetingAgendasPage() {
   return (
     <DashboardPageLayout>
-      <MeetingPlannerPageContent />
+      <div className="flex h-full min-h-0 flex-col overflow-y-auto">
+        <AgendaInbox />
+        <div className="min-h-0 flex-1">
+          <MeetingPlannerPageContent />
+        </div>
+      </div>
     </DashboardPageLayout>
   );
 }
