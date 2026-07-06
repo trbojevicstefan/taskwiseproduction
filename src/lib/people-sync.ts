@@ -1,16 +1,38 @@
 import { randomUUID } from "crypto";
 import type { Db } from "mongodb";
 import { normalizePersonNameKey } from "@/lib/transcript-utils";
+import { upsertSourceIdentity } from "@/lib/people-matching";
 import {
   classifyPersonHeuristic,
   resolveInternalDomains,
 } from "@/lib/person-classification";
+import type { PersonSourceIdentityProvider } from "@/types/person";
 
 type AttendeeInput = {
   name?: string | null;
   email?: string | null;
   title?: string | null;
 };
+
+// Meeting providers whose attendee lists flow through this upsert path.
+export type MeetingPeopleProvider = Extract<
+  PersonSourceIdentityProvider,
+  "fathom" | "fireflies" | "grain" | "google"
+>;
+
+const MEETING_PEOPLE_PROVIDERS: ReadonlySet<string> = new Set([
+  "fathom",
+  "fireflies",
+  "grain",
+  "google",
+]);
+
+export const resolveMeetingPeopleProvider = (
+  ingestSource?: string | null
+): MeetingPeopleProvider | null =>
+  typeof ingestSource === "string" && MEETING_PEOPLE_PROVIDERS.has(ingestSource)
+    ? (ingestSource as MeetingPeopleProvider)
+    : null;
 
 type UpsertPeopleResult = {
   created: number;
@@ -32,20 +54,29 @@ export const upsertPeopleFromAttendees = async ({
   userId,
   attendees,
   sourceSessionId,
+  provider,
 }: {
   db: Db;
   userId: string;
   attendees: AttendeeInput[];
   sourceSessionId?: string | null;
+  // Meeting provider the attendees came from (records sourceIdentities);
+  // omit for plain transcript/paste ingestion.
+  provider?: MeetingPeopleProvider | null;
 }): Promise<UpsertPeopleResult> => {
   if (!Array.isArray(attendees) || attendees.length === 0) {
     return { created: 0, updated: 0 };
   }
 
-  const people = await db
+  const allPeople = await db
     .collection("people")
     .find({ userId })
     .toArray();
+  // Merged tombstones must never re-absorb attendees — their aliases were
+  // unioned into the surviving person during the merge.
+  const people = allPeople.filter(
+    (person: any) => person.mergeState !== "merged"
+  );
 
   const emailMap = new Map<string, any>();
   const nameKeyMap = new Map<string, any>();
@@ -119,6 +150,17 @@ export const upsertPeopleFromAttendees = async ({
         update.aliases = Array.from(nextAliases);
       }
 
+      if (provider) {
+        update.sourceIdentities = upsertSourceIdentity(existing.sourceIdentities, {
+          provider,
+          ...(email ? { email } : {}),
+          ...(name ? { name } : {}),
+          confidence: 0.9,
+          lastSeenAt: now,
+        });
+      }
+      if (!existing.mergeState) update.mergeState = "active";
+
       // Auto-(re)classify only when it cannot clobber a manual choice and the
       // doc is unclassified or just gained an email — avoid churning docs.
       const gainedEmail = Boolean(!existing.email && email);
@@ -176,6 +218,19 @@ export const upsertPeopleFromAttendees = async ({
       personType: classification.personType,
       personTypeSource: "auto",
       personTypeReason: classification.reason,
+      primarySource: provider ? "meeting_provider" : "transcript",
+      mergeState: "active",
+      sourceIdentities: provider
+        ? [
+            {
+              provider,
+              ...(email ? { email } : {}),
+              ...(name ? { name } : {}),
+              confidence: 0.9,
+              lastSeenAt: now,
+            },
+          ]
+        : [],
       createdAt: now,
       lastSeenAt: now,
     };

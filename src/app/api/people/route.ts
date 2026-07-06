@@ -41,6 +41,14 @@ const serializePerson = (person: any) => ({
   company: person.company ?? null,
   nextFollowUpAt:
     person.nextFollowUpAt?.toISOString?.() || person.nextFollowUpAt || null,
+  // Canonical identity fields (additive; absent docs read as active).
+  canonicalPersonId: person.canonicalPersonId ?? null,
+  primarySource: person.primarySource ?? null,
+  sourceIdentities: person.sourceIdentities ?? [],
+  mergeState: person.mergeState ?? "active",
+  mergedIntoPersonId: person.mergedIntoPersonId ?? null,
+  blockedMergePersonIds: person.blockedMergePersonIds ?? [],
+  blockedMergeKeys: person.blockedMergeKeys ?? [],
 });
 
 const PERSON_TYPES = new Set(["teammate", "client", "unknown"]);
@@ -115,9 +123,12 @@ export async function GET(request?: Request) {
       ? new URL(request.url).searchParams.get("type")
       : null;
     const personTypeFilter = buildPersonTypeFilter(typeParam);
+    // Merged tombstones stay in Mongo for auditability/reversal but are
+    // hidden from every listing.
+    const activeMergeFilter = { mergeState: { $ne: "merged" } };
     const peopleQuery = personTypeFilter
-      ? { $and: [workspaceFallbackScope, personTypeFilter] }
-      : workspaceFallbackScope;
+      ? { $and: [workspaceFallbackScope, personTypeFilter, activeMergeFilter] }
+      : { $and: [workspaceFallbackScope, activeMergeFilter] };
 
     const people = await db
       .collection("people")
@@ -475,6 +486,10 @@ export async function POST(request: Request) {
       );
     }
 
+    // People created through this route either come from the manual "Add
+    // Person" flow (sourceSessionId literal "manual") or from a transcript /
+    // chat discovery flow (sourceSessionId is a session id).
+    const isManualCreation = !sourceSessionId || sourceSessionId === "manual";
     const person = {
       _id: randomUUID(),
       userId,
@@ -489,6 +504,19 @@ export async function POST(request: Request) {
       aliases: body.aliases || [],
       isBlocked: Boolean(body.isBlocked),
       sourceSessionIds: sourceSessionId ? [sourceSessionId] : [],
+      primarySource: isManualCreation ? "manual" : "transcript",
+      mergeState: "active",
+      sourceIdentities: isManualCreation
+        ? [
+            {
+              provider: "manual",
+              ...(body.email ? { email: String(body.email).toLowerCase() } : {}),
+              name,
+              confidence: 1,
+              lastSeenAt: now,
+            },
+          ]
+        : [],
       createdAt: now,
       lastSeenAt: now,
     };
