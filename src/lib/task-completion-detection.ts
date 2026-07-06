@@ -6,6 +6,7 @@ import { isPlaceholderTitle, isValidTitle } from "@/lib/ai-utils";
 import { recordExternalApiFailure } from "@/lib/observability-metrics";
 import {
   buildAssigneeKey,
+  buildCompletionEvidenceFingerprint,
   buildEmbeddingText,
   candidateKeyForTask,
   chunkCandidates,
@@ -19,6 +20,7 @@ import {
   toCompactCandidateTitle,
   toTokenSet,
 } from "@/lib/task-completion-helpers";
+import { classifyCompletionSuggestion } from "@/lib/task-completion-sync";
 
 export type CompletionDebugInfo = {
   candidateCounts: {
@@ -279,7 +281,6 @@ export const buildCompletionSuggestions = async ({
 }): Promise<ExtractedTaskSchema[]> => {
   const fullTranscript = typeof transcript === "string" ? transcript.trim() : "";
   if (!userId || !fullTranscript) return [];
-  void excludeMeetingId;
 
   const attendeeNames = new Set(
     attendees.map((person: any) => normalizeAssigneeName(person.name)).filter(Boolean)
@@ -965,7 +966,118 @@ export const buildCompletionSuggestions = async ({
     await resolveFallbackCandidates();
   }
 
-  debugInfo.completions.mapped = results.length;
+  // Rejection memory: drop suggestions whose evidence a reviewer already
+  // rejected for the target task (cleanup "dismiss" stores the evidence
+  // fingerprints in the DB-internal completionRejectedFingerprints array).
+  const rejectedFingerprintsByTaskId = new Map<string, Set<string>>();
+  tasks.forEach((task: any) => {
+    const rawId = task._id?.toString?.() || task._id || task.id;
+    const taskId = rawId ? String(rawId) : "";
+    if (!taskId) return;
+    const fingerprints = Array.isArray(task.completionRejectedFingerprints)
+      ? task.completionRejectedFingerprints.map(String).filter(Boolean)
+      : [];
+    if (fingerprints.length) {
+      rejectedFingerprintsByTaskId.set(taskId, new Set(fingerprints));
+    }
+  });
 
-  return results;
+  let rejectedSuppressed = 0;
+  const finalResults = results.filter((result: any) => {
+    const fingerprint = buildCompletionEvidenceFingerprint(
+      result.completionEvidence?.[0]?.snippet
+    );
+    if (!fingerprint) return true;
+    const remainingTargets = (result.completionTargets || []).filter(
+      (target: any) => {
+        if (target.sourceType !== "task") return true;
+        return !rejectedFingerprintsByTaskId
+          .get(String(target.taskId))
+          ?.has(fingerprint);
+      }
+    );
+    if (!remainingTargets.length) {
+      rejectedSuppressed += 1;
+      return false;
+    }
+    result.completionTargets = remainingTargets;
+    return true;
+  });
+  if (rejectedSuppressed) {
+    debugLog("rejected-evidence suppression", { suppressed: rejectedSuppressed });
+  }
+
+  // Persist suggest/auto tiers onto the target task docs as reviewable
+  // cleanup suggestions (cleanupStatus "completed_suggested" — the existing
+  // Phase 3 review surface). Guarded so reviewed cleanup states are never
+  // overwritten and rejected evidence is never re-suggested; done tasks are
+  // skipped. Low-confidence ("ignore" tier) results are never persisted.
+  const now = new Date();
+  const reviewOps: any[] = [];
+  finalResults.forEach((result: any) => {
+    if (classifyCompletionSuggestion(result) === "ignore") return;
+    const snippet = result.completionEvidence?.[0]?.snippet || "";
+    if (!snippet) return;
+    const fingerprint = buildCompletionEvidenceFingerprint(snippet);
+    (result.completionTargets || []).forEach((target: any) => {
+      if (target.sourceType !== "task" || !target.taskId) return;
+      const taskId = String(target.taskId);
+      reviewOps.push({
+        updateOne: {
+          filter: {
+            userId,
+            $and: [
+              { $or: [{ _id: taskId }, { id: taskId }] },
+              {
+                $or: [
+                  { cleanupStatus: { $exists: false } },
+                  { cleanupStatus: null },
+                  { cleanupStatus: "active" },
+                ],
+              },
+            ],
+            status: { $ne: "done" },
+            ...(fingerprint
+              ? { completionRejectedFingerprints: { $ne: fingerprint } }
+              : {}),
+          },
+          update: {
+            $set: {
+              cleanupStatus: "completed_suggested",
+              cleanupCategory: "already_completed",
+              cleanupReason:
+                "A newer transcript indicates this task is already done.",
+              cleanupConfidence: result.completionConfidence ?? null,
+              cleanupEvidence: [
+                {
+                  sourceType: "transcript",
+                  sourceId: excludeMeetingId || "",
+                  snippet,
+                },
+              ],
+              completionSuggested: true,
+              completionConfidence: result.completionConfidence ?? null,
+              completionEvidence: result.completionEvidence ?? null,
+              completionReviewStatus: "suggested",
+              lastUpdated: now,
+            },
+          },
+        },
+      });
+    });
+  });
+  if (reviewOps.length) {
+    try {
+      await db.collection("tasks").bulkWrite(reviewOps, { ordered: false });
+    } catch (error) {
+      console.error(
+        "[task-completion] failed to persist review suggestions:",
+        error
+      );
+    }
+  }
+
+  debugInfo.completions.mapped = finalResults.length;
+
+  return finalResults;
 };

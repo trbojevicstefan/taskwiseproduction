@@ -1,6 +1,7 @@
 // src/types/project.ts
 import type { AppUser } from '@/contexts/AuthContext';
 import type {
+  CompletionReviewStatus,
   CompletionTarget,
   TaskCleanupCategory,
   TaskCleanupEvidence,
@@ -46,6 +47,11 @@ export interface Task {
   completionConfidence?: number | null;
   completionEvidence?: TaskEvidence[] | null;
   completionTargets?: CompletionTarget[] | null;
+  // Priority 7 completion-review state (review-owned; kept OUT of
+  // buildTaskRecords so meeting re-sync can never clobber review decisions).
+  completionReviewStatus?: CompletionReviewStatus | null;
+  completionReviewedBy?: string | null;
+  completionReviewedAt?: string | null;
   taskState?: "active" | "suggested" | "archived" | null;
   researchBrief?: string | null;
   aiAssistanceText?: string | null;

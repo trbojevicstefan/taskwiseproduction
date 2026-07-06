@@ -10,6 +10,7 @@ import {
 import { getDb } from "@/lib/db";
 import { publishDomainEvent } from "@/lib/domain-events";
 import { getSessionUserId } from "@/lib/server-auth";
+import { buildCompletionEvidenceFingerprint } from "@/lib/task-completion-helpers";
 import { resolveWorkspaceScopeForUser } from "@/lib/workspace-scope";
 
 const ROUTE = "/api/tasks/cleanup/actions";
@@ -127,7 +128,12 @@ export async function POST(request: Request) {
         // reusable helper.
         const tasksToComplete = await tasksCollection
           .find(filter, {
-            projection: { _id: 1, sourceSessionId: 1, sourceSessionType: 1 },
+            projection: {
+              _id: 1,
+              sourceSessionId: 1,
+              sourceSessionType: 1,
+              cleanupStatus: 1,
+            },
           })
           .toArray();
         const taskIds = tasksToComplete.map((task: any) => String(task._id));
@@ -143,6 +149,23 @@ export async function POST(request: Request) {
             }
           );
           updated = result?.modifiedCount || 0;
+          // Accepting a completion suggestion: record the completion review
+          // decision on tasks that were suggested as already completed.
+          const acceptedCompletionIds = tasksToComplete
+            .filter((task: any) => task.cleanupStatus === "completed_suggested")
+            .map((task: any) => String(task._id));
+          if (acceptedCompletionIds.length) {
+            await tasksCollection.updateMany(
+              { ...scopeFilter, _id: { $in: acceptedCompletionIds } },
+              {
+                $set: {
+                  completionReviewStatus: "accepted",
+                  completionReviewedBy: userId,
+                  completionReviewedAt: nowIso,
+                },
+              }
+            );
+          }
           for (const task of tasksToComplete) {
             const sourceSessionType =
               task.sourceSessionType === "meeting" ||
@@ -170,6 +193,65 @@ export async function POST(request: Request) {
         break;
       }
       case "dismiss": {
+        // Rejecting a completion suggestion: remember the rejected evidence
+        // via stable fingerprints (DB-internal completionRejectedFingerprints)
+        // so the completion pipeline never re-suggests the same evidence for
+        // this task, and record the review decision.
+        const completionSuggestedDocs = await tasksCollection
+          .find(
+            {
+              ...scopeFilter,
+              _id: { $in: body.taskIds },
+              cleanupStatus: "completed_suggested",
+            },
+            {
+              projection: { _id: 1, cleanupEvidence: 1, completionEvidence: 1 },
+            }
+          )
+          .toArray();
+        if (completionSuggestedDocs.length) {
+          const rejectionOps = completionSuggestedDocs.map((task: any) => {
+            const snippets = [
+              ...(Array.isArray(task.cleanupEvidence) ? task.cleanupEvidence : []),
+              ...(Array.isArray(task.completionEvidence)
+                ? task.completionEvidence
+                : []),
+            ]
+              .map((item: any) => item?.snippet)
+              .filter(Boolean);
+            const fingerprints = Array.from(
+              new Set(
+                snippets
+                  .map((snippet: string) =>
+                    buildCompletionEvidenceFingerprint(snippet)
+                  )
+                  .filter(Boolean)
+              )
+            );
+            return {
+              updateOne: {
+                filter: { _id: task._id },
+                update: {
+                  $set: {
+                    completionReviewStatus: "rejected",
+                    completionReviewedBy: userId,
+                    completionReviewedAt: nowIso,
+                  },
+                  ...(fingerprints.length
+                    ? {
+                        $addToSet: {
+                          completionRejectedFingerprints: {
+                            $each: fingerprints,
+                          },
+                        },
+                      }
+                    : {}),
+                },
+              },
+            };
+          });
+          await tasksCollection.bulkWrite(rejectionOps, { ordered: false });
+        }
         const result = await tasksCollection.updateMany(filter, {
           $set: {
             cleanupStatus: "dismissed",
