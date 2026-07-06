@@ -4,7 +4,8 @@
  *
  * GET /api/calendar?from=<ISO>&to=<ISO> (both required, span <= 62 days)
  * -> apiSuccess {
- *      meetings: [{ id, title, startTime, attendeeCount, isClientMeeting }],
+ *      meetings: [{ id, title, startTime, attendeeCount, isClientMeeting,
+ *                   calendarEventId, organizerEmail, attendees[{name,email}] }],
  *      tasks:    [{ id, title, dueAt, status, priorityLabel, priorityScore,
  *                   cleanupStatus, assigneeName, sourceSessionId, overdue }],
  *      reminders: [{ id, taskId, taskTitle, kind, runAt, status: 'scheduled' }],
@@ -58,7 +59,12 @@ const MEETING_PROJECTION = {
   attendees: 1,
   userId: 1,
   workspaceId: 1,
+  calendarEventId: 1,
+  organizerEmail: 1,
 } as const;
+
+/** Cap the additive per-meeting attendee list sent to the calendar drawer. */
+const MAX_MEETING_ATTENDEES = 25;
 
 const TASK_PROJECTION = {
   _id: 1,
@@ -332,6 +338,22 @@ export async function GET(request: Request) {
         startTime: toDate(meeting.startTime)?.toISOString() ?? null,
         attendeeCount: attendees.length,
         isClientMeeting: isClientMeeting(attendees, clients),
+        // Additive (Priority 10): the event-detail drawer shows attendees and
+        // matches Google overlay events by external event id / organizer.
+        calendarEventId:
+          typeof meeting.calendarEventId === "string" && meeting.calendarEventId
+            ? meeting.calendarEventId
+            : null,
+        organizerEmail:
+          typeof meeting.organizerEmail === "string" && meeting.organizerEmail
+            ? meeting.organizerEmail
+            : null,
+        attendees: attendees
+          .slice(0, MAX_MEETING_ATTENDEES)
+          .map((attendee: any) => ({
+            name: typeof attendee?.name === "string" ? attendee.name : null,
+            email: typeof attendee?.email === "string" ? attendee.email : null,
+          })),
       };
     });
 
