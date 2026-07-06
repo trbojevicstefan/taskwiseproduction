@@ -25,6 +25,7 @@ import DashboardHeader from '../DashboardHeader';
 import TaskCleanupSettingsCard from '@/components/dashboard/settings/TaskCleanupSettingsCard';
 import SlackRemindersSettingsCard from '@/components/dashboard/settings/SlackRemindersSettingsCard';
 import MeetingProviderIntegrationCard from '@/components/dashboard/settings/MeetingProviderIntegrationCard';
+import { TrelloConnectDialog } from '@/components/dashboard/common/PushToTrelloDialog';
 import { isAdvancedSettingsEnabled } from '@/lib/simplification-flags';
 
 const AVATAR_STYLES = [
@@ -529,8 +530,8 @@ export default function SettingsPageContent() {
     disconnectGoogleTasks,
     isTrelloConnected,
     isLoadingTrelloConnection,
-    connectTrello,
     disconnectTrello,
+    refreshTrelloConnection,
     isSlackConnected,
     isLoadingSlackConnection,
     connectSlack,
@@ -545,6 +546,13 @@ export default function SettingsPageContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
 
+  // Trello connect uses the token-paste dialog; connection status and
+  // disconnect come from IntegrationsContext (backed by /api/trello/connection).
+  const [isTrelloConnectDialogOpen, setIsTrelloConnectDialogOpen] = useState(false);
+
+  const openTrelloConnectDialog = useCallback(() => {
+    setIsTrelloConnectDialogOpen(true);
+  }, []);
 
   const [displayName, setDisplayName] = useState('');
   const [isSaving, setIsSaving] = useState(false);
@@ -3098,7 +3106,7 @@ export default function SettingsPageContent() {
                             return (
                               <div
                                 key={member.membershipId}
-                                className="rounded-md border bg-background/60 p-3"
+                                className="work-inset p-3"
                               >
                                 <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
                                   <div className="min-w-0">
@@ -3209,7 +3217,7 @@ export default function SettingsPageContent() {
                         ].map((control) => (
                           <div
                             key={control.key}
-                            className="flex items-center justify-between gap-4 rounded-md border bg-background/60 p-3"
+                            className="flex items-center justify-between gap-4 work-inset p-3"
                           >
                             <div className="space-y-1">
                               <p className="text-sm font-medium">{control.label}</p>
@@ -3449,18 +3457,23 @@ export default function SettingsPageContent() {
                               </Button>
                             ) : null}
                         />
-                        <IntegrationCard 
+                        <IntegrationCard
                             icon={ToyBrick}
                             title="Trello"
                             description="Create Trello cards from your tasks."
                             isConnected={isTrelloConnected}
                             isLoading={isLoadingTrelloConnection}
-                            onConnect={connectTrello}
+                            onConnect={openTrelloConnectDialog}
                             onDisconnect={disconnectTrello}
                             settingsAction={{
                               onClick: () => handleIntegrationSettingsComingSoon("Trello"),
                               disabled: !isTrelloConnected,
                             }}
+                        />
+                        <TrelloConnectDialog
+                          isOpen={isTrelloConnectDialogOpen}
+                          onClose={() => setIsTrelloConnectDialogOpen(false)}
+                          onConnected={() => void refreshTrelloConnection()}
                         />
                         <IntegrationCard 
                             icon={Slack}
@@ -3524,7 +3537,7 @@ export default function SettingsPageContent() {
                     <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-4 text-sm text-amber-800 dark:text-amber-200">
                       Advanced settings can affect external delivery behavior, scoped API access, and automation output.
                     </div>
-                    <div className="rounded-lg border border-border/50 bg-background/60 p-4">
+                    <div className="work-inset p-4">
                       <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
                         <div className="space-y-1">
                           <p className="text-sm font-semibold flex items-center gap-2">
@@ -3558,7 +3571,7 @@ export default function SettingsPageContent() {
                         </Button>
                       </div>
                     </div>
-                    <div className="rounded-lg border border-border/50 bg-background/60 p-4">
+                    <div className="work-inset p-4">
                       <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
                         <div className="space-y-1">
                           <p className="text-sm font-semibold flex items-center gap-2">
@@ -3583,7 +3596,7 @@ export default function SettingsPageContent() {
                         </Button>
                       </div>
                     </div>
-                    <div className="rounded-lg border border-border/50 bg-background/60 p-4">
+                    <div className="work-inset p-4">
                       <div className="space-y-1">
                         <p className="text-sm font-semibold">Runbooks</p>
                         <p className="text-xs text-muted-foreground">
@@ -3913,7 +3926,7 @@ export default function SettingsPageContent() {
                     return (
                       <div
                         key={connection.id}
-                        className="rounded-md border bg-background/60 p-3 space-y-2"
+                        className="work-inset p-3 space-y-2"
                       >
                         <div className="flex flex-wrap items-center justify-between gap-2">
                           <div className="min-w-0">
@@ -4013,7 +4026,7 @@ export default function SettingsPageContent() {
                       ? "Create a webhook to generate a workspace callback URL."
                       : "Connect Fathom to generate a webhook URL.")
                   }
-                  className="flex-1 bg-background/70"
+                  className="flex-1"
                 />
                 {webhookUrl ? (
                   <Button
@@ -4140,7 +4153,7 @@ export default function SettingsPageContent() {
                   return (
                     <div
                       key={webhookId || webhookUrl}
-                      className="rounded-lg border bg-background/60 p-3"
+                      className="work-inset p-3"
                     >
                       <div className="flex items-start justify-between gap-3">
                         <div className="min-w-0">
@@ -4238,7 +4251,7 @@ export default function SettingsPageContent() {
                     return (
                       <div
                         key={workflow.id}
-                        className="rounded-md border bg-background/60 p-3 space-y-2"
+                        className="work-inset p-3 space-y-2"
                       >
                         <div className="flex flex-wrap items-start justify-between gap-2">
                           <div className="min-w-0 space-y-1">
@@ -4333,7 +4346,7 @@ export default function SettingsPageContent() {
                                 return (
                                   <div
                                     key={delivery.id}
-                                    className="rounded-md border bg-background/70 p-3 space-y-2"
+                                    className="work-inset p-3 space-y-2"
                                   >
                                     <div className="flex flex-wrap items-center justify-between gap-2">
                                       <div className="flex flex-wrap items-center gap-2">
@@ -4501,7 +4514,7 @@ export default function SettingsPageContent() {
                 </p>
               </div>
               {!canManageWorkspaceIntegrations ? (
-                <div className="rounded-md border border-border/70 bg-background/70 px-3 py-2 text-xs text-muted-foreground">
+                <div className="work-inset px-3 py-2 text-xs text-muted-foreground">
                   Only workspace integration admins can create or revoke MCP keys.
                 </div>
               ) : null}
@@ -4530,7 +4543,7 @@ export default function SettingsPageContent() {
               </div>
 
               <div className="space-y-2">
-                <div className="rounded-md border bg-background/70 px-3 py-2 flex items-center justify-between gap-3">
+                <div className="work-inset px-3 py-2 flex items-center justify-between gap-3">
                   <div>
                     <p className="text-sm font-medium">
                       <code>mcp:read</code> scope
@@ -4546,7 +4559,7 @@ export default function SettingsPageContent() {
                     aria-label="Toggle mcp read scope"
                   />
                 </div>
-                <div className="rounded-md border bg-background/70 px-3 py-2 flex items-center justify-between gap-3">
+                <div className="work-inset px-3 py-2 flex items-center justify-between gap-3">
                   <div>
                     <p className="text-sm font-medium">
                       <code>mcp:write</code> scope
@@ -4628,7 +4641,7 @@ export default function SettingsPageContent() {
                       return (
                         <div
                           key={key.id}
-                          className="rounded-md border bg-background/70 p-3 space-y-2"
+                          className="work-inset p-3 space-y-2"
                         >
                           <div className="flex flex-wrap items-start justify-between gap-2">
                             <div className="min-w-0">
@@ -4742,7 +4755,7 @@ export default function SettingsPageContent() {
                   </p>
                 ) : (
                   mcpAuditLogs.map((log) => (
-                    <div key={log.id} className="rounded-md border bg-background/70 p-3 space-y-1">
+                    <div key={log.id} className="work-inset p-3 space-y-1">
                       <div className="flex flex-wrap items-center justify-between gap-2">
                         <div className="flex flex-wrap items-center gap-2">
                           <Badge
@@ -4849,7 +4862,7 @@ export default function SettingsPageContent() {
                   </div>
                   <div className="space-y-1">
                     <Label htmlFor="workflow-enabled">Enabled</Label>
-                    <div className="h-10 px-3 rounded-md border bg-background/70 flex items-center justify-between">
+                    <div className="h-10 px-3 work-inset flex items-center justify-between">
                       <span className="text-sm text-muted-foreground">
                         {workflowForm.enabled ? "Active" : "Paused"}
                       </span>
@@ -4937,7 +4950,7 @@ export default function SettingsPageContent() {
                       return (
                         <div
                           key={filter.id}
-                          className="rounded-md border bg-background/70 p-3 space-y-2"
+                          className="work-inset p-3 space-y-2"
                         >
                           <div className="flex items-center justify-between">
                             <span className="text-xs font-medium text-muted-foreground">
@@ -5238,7 +5251,7 @@ export default function SettingsPageContent() {
                     </div>
 
                     {workflowPlaygroundTestResult ? (
-                      <div className="rounded-md border bg-background/70 p-3 space-y-1">
+                      <div className="work-inset p-3 space-y-1">
                         <div className="flex flex-wrap items-center gap-2">
                           <Badge
                             variant={

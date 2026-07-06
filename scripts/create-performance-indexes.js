@@ -180,6 +180,50 @@ const indexPlan = [
     ],
   },
   {
+    collection: "companies",
+    indexes: [
+      {
+        key: { workspaceId: 1, nameKey: 1 },
+        options: {
+          name: "companies_workspace_name_key_unique",
+          unique: true,
+        },
+      },
+      {
+        key: { workspaceId: 1, domain: 1 },
+        options: {
+          name: "companies_workspace_domain",
+          partialFilterExpression: { domain: { $type: "string" } },
+        },
+      },
+      {
+        key: { workspaceId: 1, peopleIds: 1 },
+        options: { name: "companies_workspace_people" },
+      },
+    ],
+  },
+  {
+    collection: "meetingSearchChunks",
+    indexes: [
+      {
+        key: { workspaceId: 1, meetingId: 1 },
+        options: { name: "meeting_search_chunks_workspace_meeting" },
+      },
+      {
+        key: { workspaceId: 1, updatedAt: -1 },
+        options: { name: "meeting_search_chunks_workspace_updated" },
+      },
+      {
+        key: { meetingId: 1 },
+        options: { name: "meeting_search_chunks_meeting" },
+      },
+      {
+        key: { userId: 1, updatedAt: -1 },
+        options: { name: "meeting_search_chunks_user_updated" },
+      },
+    ],
+  },
+  {
     collection: "domainEvents",
     indexes: [
       {

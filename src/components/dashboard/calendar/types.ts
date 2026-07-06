@@ -2,12 +2,23 @@
 
 export type CalendarView = "month" | "week" | "agenda";
 
+export interface CalendarAttendee {
+  name?: string | null;
+  email?: string | null;
+}
+
 export interface CalendarMeetingItem {
   id: string;
   title: string;
   startTime: string | null;
   attendeeCount: number;
   isClientMeeting: boolean;
+  /** Additive (Priority 10): external calendar event id stored on the meeting. */
+  calendarEventId?: string | null;
+  /** Additive (Priority 10): used for Google-event ↔ meeting matching. */
+  organizerEmail?: string | null;
+  /** Additive (Priority 10): capped attendee list for the detail drawer. */
+  attendees?: CalendarAttendee[];
 }
 
 export interface CalendarTaskItem {
@@ -66,6 +77,13 @@ export interface GoogleCalendarOverlayEvent {
   htmlLink?: string | null;
   location?: string | null;
   organizer?: string | null;
+  /** Present when the overlay is loaded with ?allEvents=1 (Calendar page). */
+  description?: string | null;
+  attendees?: Array<{
+    email?: string | null;
+    name?: string | null;
+    responseStatus?: string | null;
+  }>;
 }
 
 export type TaskTone = "neutral" | "overdue" | "urgent";

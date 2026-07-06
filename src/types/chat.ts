@@ -41,6 +41,15 @@ export interface TaskCleanupEvidence {
 // scores are computed deterministically by src/lib/task-priority.ts.
 export type TaskPriorityLabel = 'low' | 'medium' | 'high' | 'urgent';
 
+// Priority 7 completion-review state. Review-owned: written only by the
+// completion auto-apply policy (src/lib/task-completion-sync.ts) and the
+// cleanup review actions route — never by meeting re-sync (buildTaskRecords).
+export type CompletionReviewStatus =
+  | 'suggested'
+  | 'accepted'
+  | 'rejected'
+  | 'auto_applied';
+
 export interface TaskReferenceSchema {
   taskId: string;
   sourceTaskId: string;
@@ -111,6 +120,11 @@ export interface ExtractedTaskSchema {
   completionConfidence?: number | null;
   completionEvidence?: TaskEvidence[] | null;
   completionTargets?: CompletionTarget[] | null;
+  // Priority 7 completion-review state (review-owned; kept OUT of
+  // buildTaskRecords so meeting re-sync can never clobber review decisions).
+  completionReviewStatus?: CompletionReviewStatus | null;
+  completionReviewedBy?: string | null;
+  completionReviewedAt?: string | null;
 
   // Task cleanup metadata (Phase 3). Absent cleanupStatus === 'active'.
   cleanupStatus?: TaskCleanupStatus | null;

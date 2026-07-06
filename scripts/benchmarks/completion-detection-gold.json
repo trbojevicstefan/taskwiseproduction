@@ -52,5 +52,87 @@
       { "groupId": "cand_3", "title": "Write postmortem notes", "assigneeKey": "name:elena" }
     ],
     "expectedCompleted": ["cand_1", "cand_2"]
+  },
+  {
+    "id": "explicit_status_update",
+    "transcript": "05:12 - Noah: Update on the vendor security questionnaire: it's complete, I submitted the final answers on Friday.",
+    "candidates": [
+      { "groupId": "cand_1", "title": "Fill out vendor security questionnaire", "assigneeKey": "name:noah" },
+      { "groupId": "cand_2", "title": "Schedule vendor kickoff call", "assigneeKey": "name:noah" }
+    ],
+    "expectedCompleted": ["cand_1"]
+  },
+  {
+    "id": "implicit_completed_live",
+    "transcript": "09:33 - Ines: The new pricing page went live this morning, so customers are already seeing the updated tiers.",
+    "candidates": [
+      { "groupId": "cand_1", "title": "Publish new pricing page", "assigneeKey": "name:ines" },
+      { "groupId": "cand_2", "title": "Draft pricing FAQ", "assigneeKey": "name:ines" }
+    ],
+    "expectedCompleted": ["cand_1"]
+  },
+  {
+    "id": "discussed_but_not_done",
+    "transcript": "14:20 - Omar: We spent a while talking about the billing service migration today. We walked through what it would take and who would own each piece, and we agreed it is worth doing next quarter.",
+    "candidates": [
+      { "groupId": "cand_1", "title": "Migrate billing service to new provider", "assigneeKey": "name:omar" },
+      { "groupId": "cand_2", "title": "Document billing service dependencies", "assigneeKey": "name:omar" }
+    ],
+    "expectedCompleted": []
+  },
+  {
+    "id": "blocked_failed_attempt",
+    "transcript": "10:41 - Lea: I tried to deploy the Salesforce connector twice yesterday but the deploy failed with auth errors both times. I'm still blocked on credentials from their IT team.",
+    "candidates": [
+      { "groupId": "cand_1", "title": "Deploy Salesforce connector", "assigneeKey": "name:lea" },
+      { "groupId": "cand_2", "title": "Request Salesforce sandbox credentials", "assigneeKey": "name:lea" }
+    ],
+    "expectedCompleted": []
+  },
+  {
+    "id": "similar_title_wrong_assignee",
+    "transcript": "16:05 - Ravi: Dana finished the customer onboarding guide yesterday and shared it in the docs channel.",
+    "candidates": [
+      { "groupId": "cand_1", "title": "Write customer onboarding guide", "assigneeKey": "name:dana" },
+      { "groupId": "cand_2", "title": "Write customer onboarding guide", "assigneeKey": "name:marcus" }
+    ],
+    "expectedCompleted": ["cand_1"]
+  },
+  {
+    "id": "same_client_different_project",
+    "transcript": "11:52 - Talia: Good news for Acme — the website redesign is done and signed off by their team.",
+    "candidates": [
+      { "groupId": "cand_1", "title": "Finish Acme website redesign", "assigneeKey": "name:talia" },
+      { "groupId": "cand_2", "title": "Finish Acme mobile app redesign", "assigneeKey": "name:talia" }
+    ],
+    "expectedCompleted": ["cand_1"]
+  },
+  {
+    "id": "short_snippet_completed",
+    "transcript": "Invoice for March sent to Acme.",
+    "candidates": [
+      { "groupId": "cand_1", "title": "Send March invoice to Acme", "assigneeKey": "name:mira" },
+      { "groupId": "cand_2", "title": "Reconcile February payments", "assigneeKey": "name:mira" }
+    ],
+    "expectedCompleted": ["cand_1"]
+  },
+  {
+    "id": "short_snippet_not_done",
+    "transcript": "Still waiting on legal for the DPA.",
+    "candidates": [
+      { "groupId": "cand_1", "title": "Get DPA signed by legal", "assigneeKey": "name:mira" }
+    ],
+    "expectedCompleted": []
+  },
+  {
+    "id": "one_statement_many_old_tasks",
+    "transcript": "19:27 - Felix: Launch prep is fully wrapped up — the DNS cutover is done and the SSL certificates are installed and live. The retro is still pending though.",
+    "candidates": [
+      { "groupId": "cand_1", "title": "Complete DNS cutover for launch", "assigneeKey": "name:felix" },
+      { "groupId": "cand_2", "title": "Install SSL certificates", "assigneeKey": "name:felix" },
+      { "groupId": "cand_3", "title": "Run launch retro", "assigneeKey": "name:felix" },
+      { "groupId": "cand_4", "title": "Write launch announcement blog post", "assigneeKey": "name:felix" }
+    ],
+    "expectedCompleted": ["cand_1", "cand_2"]
   }
 ]

@@ -1,8 +1,10 @@
 # Taskwise simplification + AI upgrade — session handoff
 
-**Branch:** `feat/taskwise-simplification-ai-upgrade` (cut from `staging` with `--no-track`; upstream is `origin/feat/taskwise-simplification-ai-upgrade`).
+**Branch:** `feat/taskwise-simplification-ai-upgrade` (cut from `staging` with `--no-track`; upstream is `origin/feat/taskwise-simplification-ai-upgrade`), since merged to `main`.
 **Spec:** `taskwise.md` (repo root). **Implementation map:** `docs/superpowers/plans/2026-07-02-simplification-ai-upgrade-plan.md` — read that first; it condenses a 9-subsystem audit (key files, choke points, hazards, do-not-touch list).
-**Last updated:** 2026-07-03.
+**Last updated:** 2026-07-07.
+
+> **2026-07-07 session (`feat/finish-pending-plans`, merged to `main`):** Phase 8 was completed (14 tools / 8 resources / 5 prompts / registry+route tests / registry-driven `/docs/mcp` / `docs/mcp-clients/`), and the `taskwiseupdate.md` repair plan was implemented — P1 unified chat with meeting-scoped context, P2 hybrid semantic retrieval (`meetingSearchChunks` + embeddings + backfill script), P3 Trello restored, P6 canonical people identities + safer merge, P7 completion-detection review states/auto-apply policy/benchmark gates, P8 light-theme contrast + work-surface utilities, P9 companies + profile reports, P10 calendar event drawer + create/link meetings, P11 board filters/bulk/quick-add, P12 planning upcoming meetings + agenda workspace, P13 action-oriented meeting detail + grounded reports. One commit per workstream (`60dfc4e`..`5990511`). Not done: `taskwiseupdate.md` P4 live-provider verification (needs real Fireflies/Grain/Trello/Google credentials) and the settings integration-card health-diagnostics polish. New deploy steps: `npm run db:indexes:perf` (meetingSearchChunks + companies indexes) and optionally `npx tsx scripts/backfill-meeting-search-chunks.ts --apply` to index existing meetings.
 
 ## Phase status
 
@@ -20,7 +22,7 @@ Phases were executed in dependency order, not spec order. One commit per phase; 
 | 5 | Planning workspace | ✅ done | `11ae150` |
 | 10 | Slack scheduled reminders | ✅ done | `57f60bf` |
 | 7 | Fireflies + Grain providers | ✅ done | `9b96ff2` |
-| 8 | MCP expansion + client configs | 🟡 **partial — scaffolding only** | see `git log` (`wip: Phase 8`) |
+| 8 | MCP expansion + client configs | ✅ done (finished 2026-07-07) | `b1317ad` (scaffolding) + `780da3d` (packs/resources/prompts/docs) |
 
 ## Phase 8 — exact state and how to finish
 

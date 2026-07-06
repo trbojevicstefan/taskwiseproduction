@@ -480,6 +480,16 @@ export default function CleanupSuggestionsPageContent() {
                   <div className="space-y-2">
                     {completedSuggested.map((task) => {
                       const evidence = task.cleanupEvidence?.[0]?.snippet;
+                      const evidenceMeta = task.completionEvidence?.[0];
+                      const evidenceAttribution = [
+                        evidenceMeta?.speaker,
+                        evidenceMeta?.timestamp,
+                        task.sourceSessionType === "meeting"
+                          ? task.sourceSessionName
+                          : null,
+                      ]
+                        .filter(Boolean)
+                        .join(" · ");
                       return (
                         <SuggestionRow
                           key={task.id}
@@ -490,6 +500,9 @@ export default function CleanupSuggestionsPageContent() {
                             evidence ? (
                               <blockquote className="border-l-2 border-border/70 pl-3 text-xs italic text-muted-foreground">
                                 “{evidence}”
+                                {evidenceAttribution ? (
+                                  <span className="not-italic"> — {evidenceAttribution}</span>
+                                ) : null}
                               </blockquote>
                             ) : null
                           }

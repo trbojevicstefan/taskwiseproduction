@@ -45,6 +45,7 @@ interface IntegrationsContextType {
   trelloToken: TrelloTokenInfo | null;
   connectTrello: () => void;
   disconnectTrello: () => Promise<void>;
+  refreshTrelloConnection: () => Promise<void>;
   isSlackConnected: boolean;
   isLoadingSlackConnection: boolean;
   slackInstallation: SlackInstallation | null;
@@ -57,6 +58,34 @@ interface IntegrationsContextType {
 }
 
 const IntegrationsContext = createContext<IntegrationsContextType | undefined>(undefined);
+
+/** True only when /api/trello/connection reports an active connection. */
+export const resolveTrelloConnectionState = (payload: unknown): boolean => {
+  if (!payload || typeof payload !== "object") return false;
+  const connection = (payload as { connection?: { status?: unknown } | null })
+    .connection;
+  return Boolean(
+    connection &&
+      typeof connection === "object" &&
+      (connection as { status?: unknown }).status === "active"
+  );
+};
+
+/**
+ * Fetches the workspace Trello connection state. Degrades gracefully: any
+ * network failure, non-2xx response, or unexpected payload reads as
+ * disconnected.
+ */
+export const fetchTrelloConnectionState = async (): Promise<boolean> => {
+  try {
+    const response = await fetch("/api/trello/connection");
+    if (!response.ok) return false;
+    const payload = await response.json().catch(() => null);
+    return resolveTrelloConnectionState(payload);
+  } catch {
+    return false;
+  }
+};
 
 const GOOGLE_INTEGRATION_LOCAL_CALLBACK_URL =
   "http://localhost:9002/api/auth/callback/google-integration";
@@ -86,6 +115,8 @@ export const IntegrationsProvider = ({ children }: { children: ReactNode }) => {
   const { user, loading, refreshUserProfile } = useAuth();
   const [googleTokenInfo, setGoogleTokenInfo] = useState<ClientSideGoogleTokenInfo | null>(null);
   const [trelloToken] = useState<TrelloTokenInfo | null>(null);
+  const [isTrelloConnected, setIsTrelloConnected] = useState(false);
+  const [isLoadingTrelloConnection, setIsLoadingTrelloConnection] = useState(true);
   const [slackInstallation, setSlackInstallation] = useState<SlackInstallation | null>(null);
   const [isLoadingSlackConnection, setIsLoadingSlackConnection] = useState(true);
   const [isLoadingFathomConnection, setIsLoadingFathomConnection] = useState(true);
@@ -106,13 +137,29 @@ export const IntegrationsProvider = ({ children }: { children: ReactNode }) => {
     (user?.activeWorkspaceRole === "admin" &&
       Boolean(user?.activeWorkspaceAdminAccess?.integrations));
 
-  const warnDisabled = useCallback(() => {
-    toast({
-      title: "Integrations Disabled",
-      description: "Integrations are paused during the Mongo migration.",
-      variant: "destructive",
-    });
-  }, [toast]);
+  // Trello connection status is served by /api/trello/connection and scoped
+  // to the active workspace server-side. Fetched once per sign-in/workspace
+  // change; refreshTrelloConnection lets connect/disconnect UIs resync.
+  const refreshTrelloConnection = useCallback(async () => {
+    if (!user?.uid) {
+      setIsTrelloConnected(false);
+      setIsLoadingTrelloConnection(false);
+      return;
+    }
+    setIsLoadingTrelloConnection(true);
+    try {
+      setIsTrelloConnected(await fetchTrelloConnectionState());
+    } finally {
+      setIsLoadingTrelloConnection(false);
+    }
+    // activeWorkspaceId is a deliberate dependency: switching workspaces must
+    // re-check the (workspace-scoped) connection.
+  }, [user?.uid, activeWorkspaceId]);
+
+  useEffect(() => {
+    if (loading) return;
+    void refreshTrelloConnection();
+  }, [loading, refreshTrelloConnection]);
 
   const connectGoogleTasks = async () => {
     if (!user?.uid) {
@@ -253,8 +300,37 @@ export const IntegrationsProvider = ({ children }: { children: ReactNode }) => {
       return null;
     }
   }, [user?.uid]);
-  const connectTrello = () => warnDisabled();
-  const disconnectTrello = async () => warnDisabled();
+  // Trello connects through the token-paste dialog (Settings -> Integrations
+  // or the Push-to-Trello dialog); there is no redirect flow to start here.
+  const connectTrello = () => {
+    toast({
+      title: "Connect Trello",
+      description:
+        "Open Settings → Integrations and use the Trello card to connect.",
+    });
+  };
+
+  const disconnectTrello = async () => {
+    try {
+      const response = await fetch("/api/trello/connection", { method: "DELETE" });
+      if (!response.ok && response.status !== 404) {
+        const payload = await response.json().catch(() => ({}));
+        throw new Error(payload?.error || "Could not disconnect Trello.");
+      }
+      setIsTrelloConnected(false);
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Could not disconnect Trello. Please try again.";
+      console.error("Failed to disconnect Trello:", error);
+      toast({
+        title: "Trello Disconnect Failed",
+        description: message,
+        variant: "destructive",
+      });
+    }
+  };
   const connectSlack = () => {
     window.location.href = "/api/slack/oauth/start";
   };
@@ -415,11 +491,12 @@ export const IntegrationsProvider = ({ children }: { children: ReactNode }) => {
       disconnectGoogleTasks,
       getValidGoogleAccessToken,
       triggerTokenFetch,
-      isTrelloConnected: false,
-      isLoadingTrelloConnection: false,
+      isTrelloConnected,
+      isLoadingTrelloConnection,
       trelloToken,
       connectTrello,
       disconnectTrello,
+      refreshTrelloConnection,
       isSlackConnected: Boolean(user?.slackTeamId || workspaceSlack?.connected),
       isLoadingSlackConnection,
       slackInstallation,

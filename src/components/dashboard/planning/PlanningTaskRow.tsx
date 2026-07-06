@@ -130,7 +130,7 @@ export default function PlanningTaskRow({
     null;
 
   return (
-    <div className="flex items-start justify-between gap-2 rounded-lg border border-border/50 bg-background/60 p-2.5">
+    <div className="flex items-start justify-between gap-2 data-row p-2.5">
       <div className="min-w-0 flex-1 space-y-1.5">
         <p className="truncate text-sm font-medium text-foreground" title={task.title}>
           {task.title}
@@ -151,7 +151,7 @@ export default function PlanningTaskRow({
                 "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium",
                 isOverdue
                   ? "border-destructive/40 bg-destructive/10 text-destructive"
-                  : "border-border/60 bg-muted/50 text-muted-foreground"
+                  : "border-border bg-muted text-muted-foreground"
               )}
             >
               <CalendarIcon className="h-3 w-3" />

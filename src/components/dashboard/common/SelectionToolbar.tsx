@@ -3,7 +3,7 @@ import React from 'react';
 import ReactDOM from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Button } from '@/components/ui/button';
-import { CheckCircle2, Copy, UserPlus, Trash2, X, Send, Slack, CalendarDays, Brain, FileDown, Eye, Edit3, Mail, Loader2 } from 'lucide-react';
+import { CheckCheck, CheckCircle2, Copy, UserPlus, Trash2, X, Send, Slack, CalendarDays, Brain, FileDown, Eye, Edit3, Mail, Loader2 } from 'lucide-react';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
 import { SiTrello } from '@icons-pack/react-simple-icons';
 import { cn } from '@/lib/utils';
@@ -24,6 +24,7 @@ interface SelectionToolbarProps {
   onAssign?: () => void;
   onSetDueDate?: () => void;
   onChangeStatus?: () => void;
+  onMarkDone?: () => void;
   onDelete?: () => void;
   onClear: () => void;
   onView?: () => void;
@@ -50,6 +51,7 @@ const SelectionToolbar: React.FC<SelectionToolbarProps> = ({
   onAssign,
   onSetDueDate,
   onChangeStatus,
+  onMarkDone,
   onDelete,
   onClear,
   onView,
@@ -145,6 +147,11 @@ const SelectionToolbar: React.FC<SelectionToolbarProps> = ({
                 {onChangeStatus && (
                     <Button variant="ghost" size="sm" onClick={onChangeStatus} className="rounded-full">
                         <CheckCircle2 size={16} className="mr-2" /> Status
+                    </Button>
+                )}
+                {onMarkDone && (
+                    <Button variant="ghost" size="sm" onClick={onMarkDone} className="rounded-full">
+                        <CheckCheck size={16} className="mr-2" /> Mark Done
                     </Button>
                 )}
                 

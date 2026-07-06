@@ -18,6 +18,7 @@ export const JOB_TYPES = [
   "slack-reminder-sweep",
   "meeting-provider-webhook-ingest",
   "meeting-provider-sync",
+  "meeting-search-index",
 ] as const;
 
 export type JobType = (typeof JOB_TYPES)[number];
@@ -76,6 +77,11 @@ export type MeetingProviderSyncJobPayload = {
   since?: string | null;
 };
 
+export type MeetingSearchIndexJobPayload = {
+  meetingId: string;
+  workspaceId?: string | null;
+};
+
 export type JobPayloadByType = {
   "meeting-rescan": MeetingRescanJobPayload;
   "fathom-sync": FathomSyncJobPayload;
@@ -87,6 +93,7 @@ export type JobPayloadByType = {
   "slack-reminder-sweep": SlackReminderSweepJobPayload;
   "meeting-provider-webhook-ingest": MeetingProviderWebhookIngestJobPayload;
   "meeting-provider-sync": MeetingProviderSyncJobPayload;
+  "meeting-search-index": MeetingSearchIndexJobPayload;
 };
 
 export type JobResult = Record<string, unknown> | null;

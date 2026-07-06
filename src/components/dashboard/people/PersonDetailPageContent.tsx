@@ -5,7 +5,7 @@ import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
-import { User, Mail, Loader2, Briefcase, Save, MessageSquare, Bot, FileText, Slack, Edit3, CheckCircle2, X, Trash2, Filter, Tag, Building2, CalendarClock } from 'lucide-react';
+import { User, Mail, Loader2, Briefcase, Save, MessageSquare, Bot, FileText, Slack, Edit3, CheckCircle2, X, Trash2, Filter, Tag, Building2, CalendarClock, CalendarDays, Quote, GitMerge, UserCheck, StickyNote, AlertTriangle } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { getPersonDetails, onTasksForPersonSnapshot, updatePerson } from '@/lib/data';
 import type { Person, PersonWithTaskCount } from '@/types/person';
@@ -18,6 +18,8 @@ import { useToast } from '@/hooks/use-toast';
 import { useIntegrations } from '@/contexts/IntegrationsContext';
 import { useMeetingHistory } from '@/contexts/MeetingHistoryContext';
 import ShareToSlackDialog from '@/components/dashboard/common/ShareToSlackDialog';
+import ProfileReportDialog from '@/components/dashboard/common/ProfileReportDialog';
+import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { cn } from '@/lib/utils';
@@ -50,6 +52,14 @@ interface PersonDetailPageContentProps {
   personId: string;
 }
 
+interface TranscriptMention {
+  meetingId: string;
+  meetingTitle: string;
+  startTime: string | null;
+  snippet: string;
+  timestamp: string | null;
+}
+
 const getInitials = (name: string | null | undefined) => {
     if (!name) return 'U';
     return name.split(' ').map(n => n[0]).join('').toUpperCase().substring(0, 2);
@@ -74,7 +84,7 @@ const DetailField = ({
     className?: string;
     type?: string;
 }) => (
-    <div className={cn("p-4 rounded-lg bg-background/50 border border-border/30", className)}>
+    <div className={cn("p-4 work-inset", className)}>
         <Label htmlFor={`person-${label.toLowerCase()}`} className="flex items-center text-sm font-medium text-muted-foreground mb-1">
             <Icon className="mr-2 h-4 w-4" />
             {label}
@@ -131,6 +141,9 @@ export default function PersonDetailPageContent({ personId }: PersonDetailPageCo
   const [isBulkDeleteConfirmOpen, setIsBulkDeleteConfirmOpen] = useState(false);
   const [dueDateFilter, setDueDateFilter] = useState<"all" | "overdue" | "next_7" | "no_due">("all");
   const [isGeneratingBriefs, setIsGeneratingBriefs] = useState(false);
+  const [isReportOpen, setIsReportOpen] = useState(false);
+  const [isSettingType, setIsSettingType] = useState(false);
+  const [mentions, setMentions] = useState<TranscriptMention[]>([]);
 
   const mapTaskToExtracted = useCallback(
     (task: Task): ExtractedTaskSchema => ({
@@ -270,6 +283,106 @@ export default function PersonDetailPageContent({ personId }: PersonDetailPageCo
       return next;
     });
   }, [tasks]);
+
+  // Recent transcript mentions (Priority 9 profile section).
+  useEffect(() => {
+    if (!user?.uid || !personId) {
+      setMentions([]);
+      return;
+    }
+    let active = true;
+    apiFetch<{ mentions: TranscriptMention[] }>(`/api/people/${personId}/mentions`)
+      .then((payload) => {
+        if (active) setMentions(payload.mentions || []);
+      })
+      .catch((error) => {
+        console.error("Failed to load transcript mentions:", error);
+        if (active) setMentions([]);
+      });
+    return () => {
+      active = false;
+    };
+  }, [user?.uid, personId]);
+
+  // Relationship summary + meeting timeline derived data.
+  const openTaskCount = useMemo(
+    () => tasks.filter((task: any) => (task.status || "todo") !== "done").length,
+    [tasks]
+  );
+
+  const overdueTaskCount = useMemo(() => {
+    const now = Date.now();
+    return tasks.filter((task: any) => {
+      if ((task.status || "todo") === "done" || !task.dueAt) return false;
+      const due = new Date(task.dueAt).getTime();
+      return !Number.isNaN(due) && due < now;
+    }).length;
+  }, [tasks]);
+
+  const personMeetings = useMemo(() => {
+    if (!person) return [];
+    const sessionIds = new Set((person.sourceSessionIds || []).map(String));
+    const emailKey = person.email?.trim().toLowerCase() || null;
+    const nameKeys = new Set(
+      [person.name, ...(person.aliases || [])]
+        .filter(Boolean)
+        .map((name) => String(name).trim().toLowerCase())
+    );
+    return meetings
+      .filter((meeting: any) => {
+        if (sessionIds.has(String(meeting.id))) return true;
+        const attendees = Array.isArray(meeting.attendees) ? meeting.attendees : [];
+        return attendees.some((attendee: any) => {
+          const attendeeEmail =
+            typeof attendee?.email === "string"
+              ? attendee.email.trim().toLowerCase()
+              : null;
+          if (emailKey && attendeeEmail === emailKey) return true;
+          const attendeeName =
+            typeof attendee?.name === "string"
+              ? attendee.name.trim().toLowerCase()
+              : null;
+          return Boolean(attendeeName && nameKeys.has(attendeeName));
+        });
+      })
+      .sort((a: any, b: any) => {
+        const aTime = a.startTime ? new Date(a.startTime).getTime() : 0;
+        const bTime = b.startTime ? new Date(b.startTime).getTime() : 0;
+        return bTime - aTime;
+      })
+      .slice(0, 8);
+  }, [meetings, person]);
+
+  const lastMeetingAt = useMemo(() => {
+    const first: any = personMeetings[0];
+    if (!first?.startTime) return null;
+    const date = new Date(first.startTime);
+    return Number.isNaN(date.getTime()) ? null : date;
+  }, [personMeetings]);
+
+  const handleSetPersonType = async (nextType: Person["personType"]) => {
+    if (!user || !person?.id || isSettingType) return;
+    setIsSettingType(true);
+    try {
+      await updatePerson(user.uid, person.id, { personType: nextType });
+      const updatedPersonDetails = await getPersonDetails(user.uid, person.id);
+      setPerson(updatedPersonDetails);
+      setEditablePerson(updatedPersonDetails || {});
+      toast({
+        title: nextType === "teammate" ? "Marked as teammate" : "Marked as client",
+        description: `${person.name} is now classified as a ${nextType}.`,
+      });
+    } catch (error) {
+      console.error("Failed to update person type:", error);
+      toast({
+        title: "Update Failed",
+        description: "Could not update this person's type.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsSettingType(false);
+    }
+  };
 
   const handleInputChange = (field: keyof Person, value: string | string[] | null) => {
       setEditablePerson(prev => ({ ...prev, [field]: value }));
@@ -812,6 +925,22 @@ export default function PersonDetailPageContent({ personId }: PersonDetailPageCo
                 </>
             ) : (
                 <>
+                  <Button variant="outline" onClick={() => setIsReportOpen(true)}>
+                    <FileText className="mr-2 h-4 w-4" />
+                    Generate report
+                  </Button>
+                  {(person?.personType ?? 'unknown') !== 'teammate' && (
+                    <Button variant="outline" onClick={() => handleSetPersonType('teammate')} disabled={isSettingType}>
+                      {isSettingType ? <Loader2 className="mr-2 h-4 w-4 animate-spin"/> : <UserCheck className="mr-2 h-4 w-4"/>}
+                      Mark as teammate
+                    </Button>
+                  )}
+                  {(person?.personType ?? 'unknown') !== 'client' && (
+                    <Button variant="outline" onClick={() => handleSetPersonType('client')} disabled={isSettingType}>
+                      {isSettingType ? <Loader2 className="mr-2 h-4 w-4 animate-spin"/> : <Building2 className="mr-2 h-4 w-4"/>}
+                      Mark as client
+                    </Button>
+                  )}
                   <Button variant="outline" onClick={handleToggleBlock} disabled={isBlocking}>
                     {isBlocking ? <Loader2 className="mr-2 h-4 w-4 animate-spin"/> : <CheckCircle2 className="mr-2 h-4 w-4"/>}
                     {person?.isBlocked ? "Unblock" : "Block"}
@@ -846,12 +975,24 @@ export default function PersonDetailPageContent({ personId }: PersonDetailPageCo
                     transition={{ duration: 0.5, delay: 0.1 }} 
                     className="flex flex-col md:flex-row items-center gap-6"
                 >
-                    <div className="relative group flex-shrink-0">
+                    <div className="relative group flex-shrink-0 flex flex-col items-center gap-2">
                         <div className="p-1 bg-gradient-to-br from-green-400 to-teal-500 rounded-full">
                             <Avatar className="w-16 h-16 border-4 border-background shadow-lg">
                                 <AvatarImage src={currentPersonData.avatarUrl || `https://api.dicebear.com/8.x/initials/svg?seed=${currentPersonData.name}`} alt={currentPersonData.name} />
                                 <AvatarFallback className="text-2xl">{getInitials(currentPersonData.name)}</AvatarFallback>
                             </Avatar>
+                        </div>
+                        <div className="flex flex-wrap justify-center gap-1">
+                            <Badge variant="secondary" className="capitalize">
+                                {person.personType || 'unknown'}
+                            </Badge>
+                            <Badge variant="outline" className="flex items-center gap-1">
+                                <Slack className="h-3 w-3" />
+                                {person.slackId ? 'Slack linked' : 'No Slack'}
+                            </Badge>
+                            {(person.mergeState ?? 'active') !== 'active' && (
+                                <Badge variant="destructive" className="capitalize">{person.mergeState}</Badge>
+                            )}
                         </div>
                     </div>
                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 flex-grow">
@@ -879,7 +1020,7 @@ export default function PersonDetailPageContent({ personId }: PersonDetailPageCo
                             isEditing={isEditing}
                             onChange={(e) => handleInputChange('title', e.target.value)}
                         />
-                        <div className="p-4 rounded-lg bg-background/50 border border-border/30">
+                        <div className="p-4 work-inset">
                             <Label className="flex items-center text-sm font-medium text-muted-foreground mb-1">
                                 <Tag className="mr-2 h-4 w-4" />
                                 Type
@@ -926,19 +1067,80 @@ export default function PersonDetailPageContent({ personId }: PersonDetailPageCo
                         />
                     </div>
                 </motion.div>
-                
+
+                <motion.div
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.5, delay: 0.15 }}
+                  className="mt-8"
+                  data-testid="relationship-summary"
+                >
+                  <h2 className="sr-only">Relationship summary</h2>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+                    <div className="dense-card">
+                      <p className="text-xs text-muted-foreground">Open tasks</p>
+                      <p className="text-xl font-semibold">{openTaskCount}</p>
+                    </div>
+                    <div className="dense-card">
+                      <p className="text-xs text-muted-foreground flex items-center gap-1">
+                        <AlertTriangle className="h-3 w-3" /> Overdue
+                      </p>
+                      <p className={cn("text-xl font-semibold", overdueTaskCount > 0 && "text-destructive")}>
+                        {overdueTaskCount}
+                      </p>
+                    </div>
+                    <div className="dense-card">
+                      <p className="text-xs text-muted-foreground">Meetings</p>
+                      <p className="text-xl font-semibold">{personMeetings.length}</p>
+                    </div>
+                    <div className="dense-card">
+                      <p className="text-xs text-muted-foreground">Last meeting</p>
+                      <p className="text-sm font-medium">
+                        {lastMeetingAt ? format(lastMeetingAt, 'MMM d, yyyy') : 'None yet'}
+                      </p>
+                    </div>
+                    <div className="dense-card">
+                      <p className="text-xs text-muted-foreground">Next follow-up</p>
+                      <p className="text-sm font-medium">
+                        {person.nextFollowUpAt
+                          ? format(new Date(person.nextFollowUpAt), 'MMM d, yyyy')
+                          : 'Not scheduled'}
+                      </p>
+                    </div>
+                  </div>
+                </motion.div>
+
                 <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5, delay: 0.2 }} className="mt-8">
                    <Accordion type="single" collapsible defaultValue="aliases" className="w-full">
                       <AccordionItem value="aliases" className="border-none">
-                          <div className="rounded-xl bg-card border border-border/30 shadow-lg relative overflow-hidden">
+                          <div className="rounded-xl bg-card border border-border shadow-lg relative overflow-hidden">
                               <div className="absolute top-0 left-0 h-1 w-full bg-gradient-to-r from-orange-400 via-red-500 to-yellow-400" />
                               <AccordionTrigger className="p-6 hover:no-underline">
                                   <div className="text-left flex-grow">
-                                      <CardTitle className="flex items-center gap-3"><Bot className="text-muted-foreground"/> Integration Aliases</CardTitle>
-                                      <CardDescription className="mt-1">Improve future AI matching by adding nicknames or IDs from other platforms.</CardDescription>
+                                      <CardTitle className="flex items-center gap-3"><Bot className="text-muted-foreground"/> Notes &amp; Aliases</CardTitle>
+                                      <CardDescription className="mt-1">Keep free-form notes and improve future AI matching by adding nicknames or IDs from other platforms.</CardDescription>
                                   </div>
                               </AccordionTrigger>
                               <AccordionContent className="px-6 pb-6 pt-0">
+                                <div className="p-4 work-inset mb-4">
+                                    <Label htmlFor="person-notes" className="flex items-center text-sm font-medium text-muted-foreground mb-1">
+                                        <StickyNote className="mr-2 h-4 w-4" />
+                                        Notes
+                                    </Label>
+                                    {isEditing ? (
+                                        <Textarea
+                                            id="person-notes"
+                                            value={editablePerson.notes || ''}
+                                            onChange={(e) => handleInputChange('notes', e.target.value || null)}
+                                            placeholder="Context, preferences, agreements — anything worth remembering."
+                                            className="min-h-[90px]"
+                                        />
+                                    ) : (
+                                        <p className="text-sm text-foreground whitespace-pre-wrap min-h-[26px]">
+                                            {currentPersonData.notes || <span className="text-muted-foreground/60 italic">No notes yet.</span>}
+                                        </p>
+                                    )}
+                                </div>
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                     <DetailField 
                                         icon={Slack}
@@ -1201,6 +1403,125 @@ export default function PersonDetailPageContent({ personId }: PersonDetailPageCo
                         </CardContent>
                     </Card>
                 </motion.div>
+
+                <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5, delay: 0.35 }} className="mt-8">
+                    <Card>
+                        <CardHeader>
+                          <CardTitle className="flex items-center gap-3">
+                            <CalendarDays className="text-muted-foreground"/> Meeting Timeline
+                          </CardTitle>
+                          <CardDescription>
+                            Recent meetings where {person.name} appeared as an attendee or was identified.
+                          </CardDescription>
+                        </CardHeader>
+                        <CardContent>
+                          {personMeetings.length > 0 ? (
+                            <div className="space-y-2">
+                              {personMeetings.map((meeting: any) => (
+                                <Link
+                                  key={meeting.id}
+                                  href={`/meetings/${meeting.id}`}
+                                  className="data-row flex items-center justify-between gap-4 px-4 py-3 hover:bg-muted/50 transition-colors"
+                                >
+                                  <span className="font-medium text-sm truncate">{meeting.title || 'Untitled meeting'}</span>
+                                  <span className="text-xs text-muted-foreground flex-shrink-0">
+                                    {meeting.startTime ? format(new Date(meeting.startTime), 'MMM d, yyyy') : 'No date'}
+                                  </span>
+                                </Link>
+                              ))}
+                            </div>
+                          ) : (
+                            <p className="text-sm text-muted-foreground py-4">No meetings recorded with this person yet.</p>
+                          )}
+                        </CardContent>
+                    </Card>
+                </motion.div>
+
+                <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5, delay: 0.4 }} className="mt-8">
+                    <Card>
+                        <CardHeader>
+                          <CardTitle className="flex items-center gap-3">
+                            <Quote className="text-muted-foreground"/> Recent Transcript Mentions
+                          </CardTitle>
+                          <CardDescription>
+                            Lines from recent meeting transcripts that mention {person.name} by name or alias.
+                          </CardDescription>
+                        </CardHeader>
+                        <CardContent>
+                          {mentions.length > 0 ? (
+                            <div className="space-y-3">
+                              {mentions.map((mention, index) => (
+                                <div key={`${mention.meetingId}-${index}`} className="work-inset p-3">
+                                  <p className="text-sm whitespace-pre-wrap">“{mention.snippet}”</p>
+                                  <div className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
+                                    {mention.timestamp && <Badge variant="outline">{mention.timestamp}</Badge>}
+                                    <Link href={`/meetings/${mention.meetingId}`} className="hover:underline">
+                                      {mention.meetingTitle}
+                                    </Link>
+                                    {mention.startTime && (
+                                      <span>· {format(new Date(mention.startTime), 'MMM d, yyyy')}</span>
+                                    )}
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          ) : (
+                            <p className="text-sm text-muted-foreground py-4">No transcript mentions found in recent meetings.</p>
+                          )}
+                        </CardContent>
+                    </Card>
+                </motion.div>
+
+                <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5, delay: 0.45 }} className="mt-8">
+                    <Card>
+                        <CardHeader>
+                          <CardTitle className="flex items-center gap-3">
+                            <GitMerge className="text-muted-foreground"/> Source Identities &amp; Merge State
+                          </CardTitle>
+                          <CardDescription>
+                            Where this profile came from and how duplicate handling treats it.
+                          </CardDescription>
+                        </CardHeader>
+                        <CardContent className="space-y-4">
+                          <div className="flex flex-wrap gap-2 text-sm">
+                            <Badge variant="secondary" className="capitalize">
+                              Merge state: {person.mergeState ?? 'active'}
+                            </Badge>
+                            {person.primarySource && (
+                              <Badge variant="outline" className="capitalize">
+                                Primary source: {person.primarySource.replace('_', ' ')}
+                              </Badge>
+                            )}
+                            {person.mergedIntoPersonId && (
+                              <Link href={`/people/${person.mergedIntoPersonId}`}>
+                                <Badge variant="destructive">Merged into another profile</Badge>
+                              </Link>
+                            )}
+                          </div>
+                          {(person.sourceIdentities || []).length > 0 ? (
+                            <div className="space-y-2">
+                              {(person.sourceIdentities || []).map((identity, index) => (
+                                <div key={`${identity.provider}-${index}`} className="data-row flex flex-wrap items-center gap-x-4 gap-y-1 px-4 py-2 text-sm">
+                                  <Badge variant="outline" className="capitalize">{identity.provider}</Badge>
+                                  {identity.name && <span className="font-medium">{identity.name}</span>}
+                                  {identity.email && <span className="text-muted-foreground">{identity.email}</span>}
+                                  {identity.externalId && (
+                                    <span className="text-xs text-muted-foreground">ID: {identity.externalId}</span>
+                                  )}
+                                  {identity.lastSeenAt && (
+                                    <span className="text-xs text-muted-foreground ml-auto">
+                                      Seen {format(new Date(identity.lastSeenAt), 'MMM d, yyyy')}
+                                    </span>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          ) : (
+                            <p className="text-sm text-muted-foreground">No recorded source identities yet — this profile predates identity tracking or was created manually.</p>
+                          )}
+                        </CardContent>
+                    </Card>
+                </motion.div>
             </div>
         </div>
       <AlertDialog open={isDeleteConfirmOpen} onOpenChange={setIsDeleteConfirmOpen}>
@@ -1219,6 +1540,14 @@ export default function PersonDetailPageContent({ personId }: PersonDetailPageCo
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+      {person && (
+        <ProfileReportDialog
+          isOpen={isReportOpen}
+          onClose={() => setIsReportOpen(false)}
+          endpoint={`/api/people/${person.id}/report`}
+          subjectName={person.name}
+        />
+      )}
       {isSlackConnected && person && (
         <ShareToSlackDialog
           isOpen={isSlackShareOpen}

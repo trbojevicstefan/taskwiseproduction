@@ -59,6 +59,54 @@ export const truncateText = (value: string, maxLength: number) => {
 export const escapeRegexPattern = (value: string) =>
   value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
+/** Defensive date coercion for schemaless stored dates (Date OR ISO string). */
+export const toDateOrNull = (value: unknown): Date | null => {
+  if (!value) return null;
+  const date = value instanceof Date ? value : new Date(value as string | number);
+  return Number.isNaN(date.getTime()) ? null : date;
+};
+
+/**
+ * Serialize a meeting for MCP output WITHOUT secrets or bulk payloads:
+ * strips recordingId/recordingIdHash (serializeMeeting precedent in
+ * mcp-read-tools) AND originalTranscript (Phase 8 packs never return raw
+ * transcripts wholesale — use get_transcript_snippets).
+ */
+export const serializeMcpMeeting = (meeting: any) => {
+  const { recordingId, recordingIdHash, originalTranscript, _id, ...rest } =
+    meeting || {};
+  void recordingId;
+  void recordingIdHash;
+  void originalTranscript;
+  return {
+    ...rest,
+    id: String(_id || meeting?.id || ""),
+    createdAt: serializeDateValue(meeting?.createdAt),
+    lastActivityAt: serializeDateValue(meeting?.lastActivityAt),
+    startTime: serializeDateValue(meeting?.startTime),
+    endTime: serializeDateValue(meeting?.endTime),
+  };
+};
+
+/** Serialize a task for MCP output (serializeTask precedent in mcp-read-tools). */
+export const serializeMcpTask = (task: any) => ({
+  ...task,
+  id: String(task?._id || task?.id || ""),
+  _id: undefined,
+  createdAt: serializeDateValue(task?.createdAt),
+  lastUpdated: serializeDateValue(task?.lastUpdated),
+  dueAt: serializeDateValue(task?.dueAt),
+});
+
+/** Serialize a person for MCP output (serializePerson precedent in mcp-read-tools). */
+export const serializeMcpPerson = (person: any) => ({
+  ...person,
+  id: String(person?._id || person?.id || ""),
+  _id: undefined,
+  createdAt: serializeDateValue(person?.createdAt),
+  lastSeenAt: serializeDateValue(person?.lastSeenAt),
+});
+
 /** Distinct active member userIds for a workspace (for legacy fallback scoping). */
 export const getWorkspaceMemberUserIds = async (db: Db, workspaceId: string) => {
   const memberships = await listActiveWorkspaceMembershipsForWorkspace(db, workspaceId);

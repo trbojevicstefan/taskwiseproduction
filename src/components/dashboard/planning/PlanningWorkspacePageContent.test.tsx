@@ -33,12 +33,23 @@ import PlanningWorkspacePageContent, {
   PlanningSectionsGrid,
 } from "@/components/dashboard/planning/PlanningWorkspacePageContent";
 import { resolvePlanningTaskHref } from "@/components/dashboard/planning/PlanningTaskRow";
+import UpcomingMeetingsSection, {
+  UpcomingMeetingRow,
+  resolveUpcomingMeetingHref,
+} from "@/components/dashboard/planning/UpcomingMeetingsSection";
+import {
+  applySuggestionsToAgenda,
+  type AgendaSectionDraft,
+} from "@/components/dashboard/planning/AgendaWorkspacePageContent";
 import {
   PLANNING_ASSISTANT_PROMPTS,
   normalizePlanningOverview,
+  normalizeUpcomingMeetings,
   isPlanningOverviewEmpty,
+  isPlanningWorkspaceEmpty,
   type PlanningOverview,
   type PlanningTask,
+  type UpcomingMeeting,
 } from "@/components/dashboard/planning/planning-overview";
 
 const makeTask = (overrides: Partial<PlanningTask> = {}): PlanningTask => ({
@@ -239,5 +250,212 @@ describe("normalizePlanningOverview", () => {
     expect(overview.sections.needsDueDate).toEqual([]);
     expect(overview.counts.today).toBe(1);
     expect(overview.counts.thisWeek).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Priority 12 — upcoming meetings + empty-state logic
+// ---------------------------------------------------------------------------
+
+const makeUpcomingMeeting = (
+  overrides: Partial<UpcomingMeeting> = {}
+): UpcomingMeeting => ({
+  id: "tw:m-1",
+  source: "taskwise",
+  meetingId: "m-1",
+  googleEventId: null,
+  title: "Weekly Sync",
+  startTime: "2026-07-07T10:00:00.000Z",
+  endTime: null,
+  attendees: [{ name: "Alice Client", email: "alice@client.com" }],
+  hangoutLink: null,
+  needsAgenda: true,
+  agendaSectionCount: 0,
+  openTaskCount: 2,
+  openTaskIds: ["t-1", "t-2"],
+  ...overrides,
+});
+
+describe("isPlanningWorkspaceEmpty (empty-state rule)", () => {
+  it("is empty only when tasks AND upcoming meetings are both empty", () => {
+    expect(isPlanningWorkspaceEmpty(emptyOverview, [])).toBe(true);
+    expect(
+      isPlanningWorkspaceEmpty(emptyOverview, [makeUpcomingMeeting()])
+    ).toBe(false);
+    expect(isPlanningWorkspaceEmpty(populatedOverview, [])).toBe(false);
+  });
+});
+
+describe("PlanningSectionsGrid empty-state control", () => {
+  it("suppresses the big EmptyState when upcoming meetings exist", () => {
+    const markup = renderToStaticMarkup(
+      <PlanningSectionsGrid
+        overview={emptyOverview}
+        onRequestAssign={noop}
+        onSetDueDate={noop}
+        onMarkDone={noop}
+        showEmptyState={false}
+      />
+    );
+
+    expect(markup).not.toContain("Nothing to plan yet");
+    expect(markup).toContain("No open tasks to triage yet.");
+  });
+});
+
+describe("normalizeUpcomingMeetings", () => {
+  it("keeps well-formed entries and drops junk", () => {
+    const meetings = normalizeUpcomingMeetings({
+      meetings: [
+        makeUpcomingMeeting(),
+        { id: "g:x" }, // missing startTime — dropped
+        "junk",
+        null,
+      ],
+    });
+    expect(meetings).toHaveLength(1);
+    expect(meetings[0]).toMatchObject({
+      id: "tw:m-1",
+      needsAgenda: true,
+      openTaskCount: 2,
+    });
+  });
+
+  it("returns [] for malformed payloads", () => {
+    expect(normalizeUpcomingMeetings(undefined)).toEqual([]);
+    expect(normalizeUpcomingMeetings({ meetings: "nope" })).toEqual([]);
+  });
+});
+
+describe("UpcomingMeetingsSection", () => {
+  it("renders rows with needs-agenda flag, open-task count, and agenda link", () => {
+    const meetings = [
+      makeUpcomingMeeting(),
+      makeUpcomingMeeting({
+        id: "g:gev-1",
+        source: "google",
+        meetingId: null,
+        googleEventId: "gev-1",
+        title: "Client Kickoff",
+        needsAgenda: true,
+        openTaskCount: 0,
+        hangoutLink: "https://meet.google.com/abc",
+        attendees: [],
+      }),
+      makeUpcomingMeeting({
+        id: "tw:m-2",
+        meetingId: "m-2",
+        title: "Prepared Meeting",
+        needsAgenda: false,
+        agendaSectionCount: 3,
+        openTaskCount: 0,
+      }),
+    ];
+    const markup = renderToStaticMarkup(
+      <UpcomingMeetingsSection meetings={meetings} />
+    );
+
+    expect(markup).toContain("Upcoming meetings");
+    expect(markup).toContain("Weekly Sync");
+    expect(markup).toContain("Client Kickoff");
+    expect(markup).toContain("Needs agenda");
+    expect(markup).toContain("Agenda ready (3)");
+    expect(markup).toContain("2 open tasks");
+    expect(markup).toContain('href="/planning/agendas/m-1"');
+    expect(markup).toContain('href="https://meet.google.com/abc"');
+    // 2 of the 3 rows still need an agenda.
+    expect(markup).toContain("2 need agenda");
+  });
+
+  it("renders nothing when there are no upcoming meetings", () => {
+    expect(
+      renderToStaticMarkup(<UpcomingMeetingsSection meetings={[]} />)
+    ).toBe("");
+  });
+});
+
+describe("resolveUpcomingMeetingHref", () => {
+  it("links taskwise rows to the agenda workspace, google-only rows to the planner", () => {
+    expect(resolveUpcomingMeetingHref(makeUpcomingMeeting())).toBe(
+      "/planning/agendas/m-1"
+    );
+    expect(
+      resolveUpcomingMeetingHref(
+        makeUpcomingMeeting({ meetingId: null, source: "google" })
+      )
+    ).toBe("/planning/agendas");
+  });
+});
+
+describe("UpcomingMeetingRow", () => {
+  it("labels the action by agenda state", () => {
+    expect(
+      renderToStaticMarkup(
+        <UpcomingMeetingRow meeting={makeUpcomingMeeting()} />
+      )
+    ).toContain("Prepare agenda");
+    expect(
+      renderToStaticMarkup(
+        <UpcomingMeetingRow
+          meeting={makeUpcomingMeeting({
+            needsAgenda: false,
+            agendaSectionCount: 1,
+          })}
+        />
+      )
+    ).toContain("Edit agenda");
+  });
+});
+
+describe("applySuggestionsToAgenda", () => {
+  const existing: AgendaSectionDraft[] = [
+    { id: "s-1", title: "Intro", notes: "", order: 0 },
+  ];
+  let counter = 0;
+  const idFactory = () => `new-${++counter}`;
+
+  beforeEach(() => {
+    counter = 0;
+  });
+
+  it("appends only the user-checked topics and re-numbers order", () => {
+    const next = applySuggestionsToAgenda(
+      existing,
+      [
+        {
+          id: "sug-1",
+          title: "Review: Send proposal",
+          notes: "Open task",
+          source: "open_task",
+        },
+      ],
+      idFactory
+    );
+    expect(next).toEqual([
+      { id: "s-1", title: "Intro", notes: "", order: 0 },
+      {
+        id: "new-1",
+        title: "Review: Send proposal",
+        notes: "Open task",
+        order: 1,
+      },
+    ]);
+    // The input is not mutated.
+    expect(existing).toHaveLength(1);
+  });
+
+  it("skips topics whose title already exists in the agenda", () => {
+    const next = applySuggestionsToAgenda(
+      existing,
+      [
+        { id: "sug-1", title: "intro", notes: "", source: "carry_over" },
+        { id: "sug-2", title: "New topic", notes: "", source: "carry_over" },
+      ],
+      idFactory
+    );
+    expect(next.map((section) => section.title)).toEqual([
+      "Intro",
+      "New topic",
+    ]);
   });
 });

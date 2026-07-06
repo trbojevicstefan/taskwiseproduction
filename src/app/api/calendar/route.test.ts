@@ -166,6 +166,8 @@ describe("GET /api/calendar", () => {
           title: "Kickoff with Acme",
           startTime: new Date("2020-01-05T10:00:00.000Z"),
           attendees: [{ name: "Someone Else", email: "ALICE@client.com " }],
+          calendarEventId: "gcal-abc",
+          organizerEmail: "host@acme.com",
         },
         {
           _id: "m-2",
@@ -263,7 +265,9 @@ describe("GET /api/calendar", () => {
     const payload = await response.json();
     expect(payload.ok).toBe(true);
 
-    // Meetings: serialized shape, string/Date startTime both normalized to ISO.
+    // Meetings: serialized shape, string/Date startTime both normalized to
+    // ISO. calendarEventId/organizerEmail/attendees are additive (Priority 10)
+    // for the event-detail drawer and Google-event matching.
     expect(payload.meetings).toEqual([
       {
         id: "m-1",
@@ -271,6 +275,9 @@ describe("GET /api/calendar", () => {
         startTime: "2020-01-05T10:00:00.000Z",
         attendeeCount: 1,
         isClientMeeting: true, // client match via email (case/space-insensitive)
+        calendarEventId: "gcal-abc",
+        organizerEmail: "host@acme.com",
+        attendees: [{ name: "Someone Else", email: "ALICE@client.com " }],
       },
       {
         id: "m-2",
@@ -278,6 +285,12 @@ describe("GET /api/calendar", () => {
         startTime: "2020-01-10T09:00:00.000Z",
         attendeeCount: 2,
         isClientMeeting: true, // client match via alias name-key
+        calendarEventId: null,
+        organizerEmail: null,
+        attendees: [
+          { name: "  Bob   Buyer! ", email: null },
+          { name: "Internal Ida", email: null },
+        ],
       },
       {
         id: "m-3",
@@ -285,6 +298,12 @@ describe("GET /api/calendar", () => {
         startTime: "2020-01-12T09:00:00.000Z",
         attendeeCount: 2,
         isClientMeeting: false,
+        calendarEventId: null,
+        organizerEmail: null,
+        attendees: [
+          { name: "Random Person", email: "random@internal.com" },
+          { name: "Internal Ida", email: null },
+        ],
       },
       {
         id: "m-4",
@@ -292,6 +311,9 @@ describe("GET /api/calendar", () => {
         startTime: null,
         attendeeCount: 0,
         isClientMeeting: false,
+        calendarEventId: null,
+        organizerEmail: null,
+        attendees: [],
       },
     ]);
 
@@ -373,6 +395,8 @@ describe("GET /api/calendar", () => {
           attendees: 1,
           userId: 1,
           workspaceId: 1,
+          calendarEventId: 1,
+          organizerEmail: 1,
         },
       }
     );

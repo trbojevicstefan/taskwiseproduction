@@ -47,7 +47,8 @@ const buildTasksCollection = () => {
   const updateMany = jest.fn().mockResolvedValue({ modifiedCount: 2 });
   const toArray = jest.fn().mockResolvedValue([]);
   const find = jest.fn().mockReturnValue({ toArray });
-  return { updateMany, find, toArray };
+  const bulkWrite = jest.fn().mockResolvedValue({ ok: 1 });
+  return { updateMany, find, toArray, bulkWrite };
 };
 
 describe("POST /api/tasks/cleanup/actions", () => {
@@ -211,6 +212,97 @@ describe("POST /api/tasks/cleanup/actions", () => {
     const [, update] = tasksCollection.updateMany.mock.calls[0];
     expect(update.$set.cleanupStatus).toBe("dismissed");
     expect(update.$set.status).toBeUndefined();
+    // No completion suggestions among the dismissed tasks -> no rejection write.
+    expect(tasksCollection.bulkWrite).not.toHaveBeenCalled();
     expect(mockedPublishDomainEvent).not.toHaveBeenCalled();
+  });
+
+  it("mark_completed records an accepted completion review on completed_suggested tasks", async () => {
+    tasksCollection.toArray.mockResolvedValue([
+      {
+        _id: "task-1",
+        sourceSessionId: "meeting-1",
+        sourceSessionType: "meeting",
+        cleanupStatus: "completed_suggested",
+      },
+      {
+        _id: "task-2",
+        sourceSessionId: null,
+        sourceSessionType: "task",
+        cleanupStatus: "suggested_expire",
+      },
+    ]);
+
+    const response = await POST(
+      buildRequest({ action: "mark_completed", taskIds: ["task-1", "task-2"] })
+    );
+
+    expect(response.status).toBe(200);
+    expect(tasksCollection.updateMany).toHaveBeenCalledTimes(2);
+
+    // First write: the shared done + dismissed transition for every task.
+    const [, doneUpdate] = tasksCollection.updateMany.mock.calls[0];
+    expect(doneUpdate.$set).toMatchObject({
+      status: "done",
+      cleanupStatus: "dismissed",
+    });
+
+    // Second write: completion review acceptance, only for the suggested task.
+    const [acceptFilter, acceptUpdate] = tasksCollection.updateMany.mock.calls[1];
+    expect(acceptFilter._id).toEqual({ $in: ["task-1"] });
+    expect(acceptUpdate.$set).toMatchObject({
+      completionReviewStatus: "accepted",
+      completionReviewedBy: "user-1",
+    });
+    expect(typeof acceptUpdate.$set.completionReviewedAt).toBe("string");
+  });
+
+  it("dismiss on completion suggestions stores rejected evidence fingerprints", async () => {
+    const { buildCompletionEvidenceFingerprint } = jest.requireActual(
+      "@/lib/task-completion-helpers"
+    );
+    tasksCollection.toArray.mockResolvedValue([
+      {
+        _id: "task-1",
+        cleanupEvidence: [
+          {
+            sourceType: "transcript",
+            sourceId: "meeting-1",
+            snippet: "We shipped it yesterday.",
+          },
+        ],
+        completionEvidence: [{ snippet: "We shipped it yesterday." }],
+      },
+    ]);
+
+    const response = await POST(
+      buildRequest({ action: "dismiss", taskIds: ["task-1"] })
+    );
+
+    expect(response.status).toBe(200);
+
+    // The completed_suggested lookup is scoped to the requested ids.
+    const [findFilter] = tasksCollection.find.mock.calls[0];
+    expect(findFilter).toMatchObject({
+      _id: { $in: ["task-1"] },
+      cleanupStatus: "completed_suggested",
+    });
+
+    expect(tasksCollection.bulkWrite).toHaveBeenCalledTimes(1);
+    const [ops] = tasksCollection.bulkWrite.mock.calls[0];
+    expect(ops).toHaveLength(1);
+    const { filter, update } = ops[0].updateOne;
+    expect(filter).toEqual({ _id: "task-1" });
+    expect(update.$set).toMatchObject({
+      completionReviewStatus: "rejected",
+      completionReviewedBy: "user-1",
+    });
+    expect(update.$addToSet.completionRejectedFingerprints.$each).toEqual([
+      buildCompletionEvidenceFingerprint("We shipped it yesterday."),
+    ]);
+
+    // The generic dismiss still runs for every requested task.
+    const [, dismissUpdate] = tasksCollection.updateMany.mock.calls[0];
+    expect(dismissUpdate.$set.cleanupStatus).toBe("dismissed");
   });
 });

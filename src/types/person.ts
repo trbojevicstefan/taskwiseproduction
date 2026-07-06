@@ -3,6 +3,34 @@
 export type PersonType = "teammate" | "client" | "unknown";
 export type PersonTypeSource = "manual" | "auto";
 
+// Canonical identity model (Priority 6). All fields are additive/optional —
+// docs without them are treated as { mergeState: "active" } with no recorded
+// source identities.
+export type PersonPrimarySource =
+  | "slack"
+  | "manual"
+  | "meeting_provider"
+  | "transcript";
+
+export type PersonSourceIdentityProvider =
+  | "slack"
+  | "fathom"
+  | "fireflies"
+  | "grain"
+  | "google"
+  | "manual";
+
+export interface PersonSourceIdentity {
+  provider: PersonSourceIdentityProvider;
+  externalId?: string;
+  email?: string;
+  name?: string;
+  confidence?: number;
+  lastSeenAt?: any; // Date in Mongo, ISO string over the wire
+}
+
+export type PersonMergeState = "active" | "merged" | "blocked";
+
 export interface Person {
   id: string; // Document ID
   userId: string; // The TaskWiseAI user who this person belongs to
@@ -21,6 +49,14 @@ export interface Person {
   personTypeReason?: string; // short human-readable heuristic reason
   company?: string | null; // client accounts; user-editable; may be auto-suggested from email domain
   nextFollowUpAt?: string | null; // ISO date, user-set
+  notes?: string | null; // free-form profile notes, user-editable (Priority 9)
+  canonicalPersonId?: string | null; // for merged losers: the canonical (winning) person id
+  primarySource?: PersonPrimarySource | null; // where this profile canonically comes from
+  sourceIdentities?: PersonSourceIdentity[]; // per-provider identity trail
+  mergeState?: PersonMergeState | null; // absent === "active"
+  mergedIntoPersonId?: string | null; // set when mergeState === "merged"
+  blockedMergePersonIds?: string[]; // person ids this person must never be merge-suggested with
+  blockedMergeKeys?: string[]; // normalized name/email keys of discovered candidates blocked from matching this person
   createdAt: any; // Timestamp
   lastSeenAt: any; // Timestamp
 }

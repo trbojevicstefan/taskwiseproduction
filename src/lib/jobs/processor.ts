@@ -6,6 +6,7 @@ import type {
   MeetingProviderSyncJobPayload,
   MeetingProviderWebhookIngestJobPayload,
   MeetingRescanJobPayload,
+  MeetingSearchIndexJobPayload,
   SlackReminderSendJobPayload,
   SlackReminderSweepJobPayload,
   SlackUsersSyncJobPayload,
@@ -17,6 +18,7 @@ import { runFathomSyncJob } from "@/lib/jobs/handlers/fathom-sync-job";
 import { runMeetingProviderSyncJob } from "@/lib/jobs/handlers/meeting-provider-sync-job";
 import { runMeetingProviderWebhookIngestJob } from "@/lib/jobs/handlers/meeting-provider-webhook-ingest-job";
 import { runMeetingRescanJob } from "@/lib/jobs/handlers/meeting-rescan-job";
+import { runMeetingSearchIndexJob } from "@/lib/jobs/handlers/meeting-search-index-job";
 import { runSlackReminderSendJob } from "@/lib/jobs/handlers/slack-reminder-send-job";
 import { runSlackReminderSweepJob } from "@/lib/jobs/handlers/slack-reminder-sweep-job";
 import { runSlackUsersSyncJob } from "@/lib/jobs/handlers/slack-users-sync-job";
@@ -128,6 +130,16 @@ export const processJob = async (
         provider: payload.provider,
         connectionId: payload.connectionId,
         since: payload.since ?? null,
+        correlationId: context?.correlationId,
+        logger: context?.logger,
+      });
+    }
+    case "meeting-search-index": {
+      const payload = job.payload as MeetingSearchIndexJobPayload;
+      return runMeetingSearchIndexJob({
+        userId: job.userId,
+        meetingId: payload.meetingId,
+        workspaceId: payload.workspaceId ?? null,
         correlationId: context?.correlationId,
         logger: context?.logger,
       });

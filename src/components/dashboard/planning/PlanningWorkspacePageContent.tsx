@@ -38,10 +38,13 @@ import {
   PLANNING_SECTION_ORDER,
   isPlanningOverviewEmpty,
   normalizePlanningOverview,
+  normalizeUpcomingMeetings,
   type PlanningOverview,
   type PlanningSectionKey,
   type PlanningTask,
+  type UpcomingMeeting,
 } from "./planning-overview";
+import UpcomingMeetingsSection from "./UpcomingMeetingsSection";
 
 // ---------------------------------------------------------------------------
 // Sections grid (pure — exported for tests)
@@ -53,6 +56,13 @@ export interface PlanningSectionsGridProps {
   onRequestAssign: (task: PlanningTask) => void;
   onSetDueDate: (task: PlanningTask, date: Date) => Promise<void> | void;
   onMarkDone: (task: PlanningTask) => Promise<void> | void;
+  /**
+   * Priority 12 empty-state rule: the big "Nothing to plan yet" state only
+   * applies when there are no tasks AND no upcoming meetings. When upcoming
+   * meetings exist the page passes false and an empty task triage renders as
+   * a compact note instead.
+   */
+  showEmptyState?: boolean;
 }
 
 export function PlanningSectionsGrid({
@@ -61,14 +71,24 @@ export function PlanningSectionsGrid({
   onRequestAssign,
   onSetDueDate,
   onMarkDone,
+  showEmptyState = true,
 }: PlanningSectionsGridProps) {
   if (isPlanningOverviewEmpty(overview)) {
+    if (!showEmptyState) {
+      return (
+        <div className="work-inset p-4">
+          <p className="text-sm text-muted-foreground">
+            No open tasks to triage yet.
+          </p>
+        </div>
+      );
+    }
     return (
       <EmptyState
         icon={Lightbulb}
         title="Nothing to plan yet"
         description="Sync meetings or approve tasks first."
-        className="rounded-xl border border-dashed border-border/60 bg-card/40"
+        className="rounded-xl border border-dashed border-border bg-card"
       />
     );
   }
@@ -80,7 +100,7 @@ export function PlanningSectionsGrid({
         const tasks = overview.sections[key];
         const count = overview.counts[key];
         return (
-          <Card key={key} className="border-border/60 bg-card/70">
+          <Card key={key}>
             <CardHeader className="pb-3">
               <CardTitle className="flex items-center justify-between gap-2 text-base">
                 <span>{meta.title}</span>
@@ -132,7 +152,7 @@ function PlanningSectionsSkeleton() {
   return (
     <div className="grid gap-4 md:grid-cols-2">
       {PLANNING_SECTION_ORDER.map((key) => (
-        <Card key={key} className="border-border/60 bg-card/70">
+        <Card key={key}>
           <CardHeader className="pb-3">
             <Skeleton className="h-5 w-32" />
           </CardHeader>
@@ -165,6 +185,10 @@ export default function PlanningWorkspacePageContent() {
   const [mutatingTaskIds, setMutatingTaskIds] = useState<Set<string>>(
     () => new Set()
   );
+  const [upcomingMeetings, setUpcomingMeetings] = useState<UpcomingMeeting[]>(
+    []
+  );
+  const [isLoadingUpcoming, setIsLoadingUpcoming] = useState(true);
 
   const loadOverview = useCallback(
     async (options?: { silent?: boolean }) => {
@@ -176,7 +200,9 @@ export default function PlanningWorkspacePageContent() {
         const response = await apiFetch<{ ok?: boolean; data?: unknown }>(
           "/api/planning/overview"
         );
-        setOverview(normalizePlanningOverview(response?.data));
+        // apiSuccess spreads the payload at the top level ({ok, sections,
+        // counts}); tolerate a nested `data` envelope too.
+        setOverview(normalizePlanningOverview(response?.data ?? response));
       } catch (error) {
         setLoadError(
           error instanceof Error && error.message
@@ -190,9 +216,26 @@ export default function PlanningWorkspacePageContent() {
     []
   );
 
+  const loadUpcomingMeetings = useCallback(async () => {
+    try {
+      const response = await apiFetch<{ ok?: boolean; data?: unknown }>(
+        "/api/planning/upcoming-meetings"
+      );
+      setUpcomingMeetings(
+        normalizeUpcomingMeetings(response?.data ?? response)
+      );
+    } catch (error) {
+      // Non-fatal: the task triage still renders without the meetings feed.
+      console.error("Failed to load upcoming meetings:", error);
+    } finally {
+      setIsLoadingUpcoming(false);
+    }
+  }, []);
+
   useEffect(() => {
     void loadOverview();
-  }, [loadOverview]);
+    void loadUpcomingMeetings();
+  }, [loadOverview, loadUpcomingMeetings]);
 
   useEffect(() => {
     let cancelled = false;
@@ -385,7 +428,11 @@ export default function PlanningWorkspacePageContent() {
 
       <div className="flex-1 overflow-y-auto p-4 sm:p-6">
         <div className="flex flex-col gap-6 xl:flex-row xl:items-start">
-          <div className="min-w-0 flex-1">
+          <div className="min-w-0 flex-1 space-y-4">
+            <UpcomingMeetingsSection
+              meetings={upcomingMeetings}
+              isLoading={isLoadingUpcoming}
+            />
             {isLoading ? (
               <PlanningSectionsSkeleton />
             ) : loadError ? (
@@ -408,12 +455,15 @@ export default function PlanningWorkspacePageContent() {
                 onRequestAssign={setAssignTask}
                 onSetDueDate={handleSetDueDate}
                 onMarkDone={handleMarkDone}
+                showEmptyState={
+                  !isLoadingUpcoming && upcomingMeetings.length === 0
+                }
               />
             )}
           </div>
 
           <aside className="w-full shrink-0 xl:w-[380px]">
-            <Card className="border-border/60 bg-card/70">
+            <Card>
               <CardContent className="p-4">
                 <GeneralChatPanel
                   heroTitle="Plan with AI"

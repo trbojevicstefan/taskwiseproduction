@@ -137,3 +137,89 @@ export const isPlanningOverviewEmpty = (overview: PlanningOverview): boolean =>
   PLANNING_SECTION_ORDER.every((key) => overview.sections[key].length === 0);
 
 export { EMPTY_OVERVIEW as EMPTY_PLANNING_OVERVIEW };
+
+// ---------------------------------------------------------------------------
+// Priority 12 — upcoming meetings (GET /api/planning/upcoming-meetings)
+// ---------------------------------------------------------------------------
+
+export interface UpcomingMeetingAttendee {
+  name: string | null;
+  email: string | null;
+}
+
+export interface UpcomingMeeting {
+  id: string;
+  source: "taskwise" | "google" | "linked";
+  meetingId: string | null;
+  googleEventId: string | null;
+  title: string;
+  startTime: string;
+  endTime: string | null;
+  attendees: UpcomingMeetingAttendee[];
+  hangoutLink: string | null;
+  needsAgenda: boolean;
+  agendaSectionCount: number;
+  openTaskCount: number;
+  openTaskIds: string[];
+}
+
+/** Defensive normalization of the /api/planning/upcoming-meetings payload. */
+export const normalizeUpcomingMeetings = (data: unknown): UpcomingMeeting[] => {
+  const raw = (data && typeof data === "object" ? data : {}) as Record<
+    string,
+    unknown
+  >;
+  const list = Array.isArray(raw.meetings) ? raw.meetings : [];
+  const meetings: UpcomingMeeting[] = [];
+  for (const entry of list) {
+    if (!entry || typeof entry !== "object") continue;
+    const record = entry as Record<string, any>;
+    if (typeof record.id !== "string" || typeof record.startTime !== "string") {
+      continue;
+    }
+    meetings.push({
+      id: record.id,
+      source:
+        record.source === "google" || record.source === "linked"
+          ? record.source
+          : "taskwise",
+      meetingId: typeof record.meetingId === "string" ? record.meetingId : null,
+      googleEventId:
+        typeof record.googleEventId === "string" ? record.googleEventId : null,
+      title: typeof record.title === "string" ? record.title : "Meeting",
+      startTime: record.startTime,
+      endTime: typeof record.endTime === "string" ? record.endTime : null,
+      attendees: Array.isArray(record.attendees)
+        ? record.attendees
+            .filter((a: unknown) => Boolean(a) && typeof a === "object")
+            .map((a: any) => ({
+              name: typeof a.name === "string" ? a.name : null,
+              email: typeof a.email === "string" ? a.email : null,
+            }))
+        : [],
+      hangoutLink:
+        typeof record.hangoutLink === "string" ? record.hangoutLink : null,
+      needsAgenda: record.needsAgenda === true,
+      agendaSectionCount:
+        typeof record.agendaSectionCount === "number"
+          ? record.agendaSectionCount
+          : 0,
+      openTaskCount:
+        typeof record.openTaskCount === "number" ? record.openTaskCount : 0,
+      openTaskIds: Array.isArray(record.openTaskIds)
+        ? record.openTaskIds.filter((id: unknown) => typeof id === "string")
+        : [],
+    });
+  }
+  return meetings;
+};
+
+/**
+ * "Nothing to plan yet" only when there are no triage tasks AND no upcoming
+ * meetings (Priority 12 acceptance criterion).
+ */
+export const isPlanningWorkspaceEmpty = (
+  overview: PlanningOverview,
+  upcomingMeetings: UpcomingMeeting[]
+): boolean =>
+  isPlanningOverviewEmpty(overview) && upcomingMeetings.length === 0;

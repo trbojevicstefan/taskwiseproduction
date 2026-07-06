@@ -1,6 +1,37 @@
+/**
+ * Completion-detection benchmark (Priority 7).
+ *
+ * Runs the LLM Completion Auditor (src/ai/flows/detect-completed-tasks-flow.ts)
+ * over the gold fixture set and reports precision, recall, false positives,
+ * and false negatives per case and in aggregate.
+ *
+ * Usage:
+ *   npm run bench:completion                       # default gold dataset
+ *   npx tsx scripts/benchmark-completion-detection.ts [dataset.json]
+ *   npx tsx scripts/benchmark-completion-detection.ts --help
+ *
+ * Dataset schema (scripts/benchmarks/completion-detection-gold.json):
+ *   [{ id, transcript, candidates: [{ groupId, title, assigneeKey? }],
+ *      expectedCompleted: [groupId, ...] }, ...]
+ *
+ * Environment:
+ *   OPENAI_API_KEY                  required — the auditor calls the live model.
+ *   COMPLETION_BENCH_MIN_PRECISION  minimum precision gate (default 0.85).
+ *     0.85 is the documented floor below which completion auto-apply is not
+ *     trustworthy; it matches COMPLETION_AUTO_APPLY_MIN_CONFIDENCE in
+ *     src/lib/task-completion-sync.ts — auto-apply is only allowed in the
+ *     confidence regime whose precision this gate enforces.
+ *   COMPLETION_BENCH_MIN_RECALL     minimum recall gate (default 0.8).
+ *
+ * Exit codes:
+ *   0 — benchmark ran and both gates passed.
+ *   1 — precision/recall below the documented minimum, missing dataset or
+ *       API key, or a runtime failure. CI can therefore gate on this script.
+ */
+
 import fs from "fs";
 import path from "path";
-import * as detectModule from "../src/ai/flows/detect-completed-tasks-flow";
+import { aggregateMetrics, scoreCase, type CaseScore } from "./benchmarks/completion-metrics";
 
 type BenchmarkCase = {
   id: string;
@@ -13,17 +44,39 @@ type BenchmarkCase = {
   expectedCompleted: string[];
 };
 
-const { detectCompletedTasks } = detectModule as {
-  detectCompletedTasks: (input: {
-    transcript: string;
-    candidates: Array<{ groupId: string; title: string; assigneeKey?: string }>;
-  }) => Promise<{ completed: Array<{ groupId: string }> }>;
-};
+/** Default minimum precision before the gate fails (see header). */
+const DEFAULT_MIN_PRECISION = 0.85;
+/** Default minimum recall before the gate fails (see header). */
+const DEFAULT_MIN_RECALL = 0.8;
+
+const USAGE = `Usage: npx tsx scripts/benchmark-completion-detection.ts [dataset.json]
+
+Runs the completion-detection gold benchmark and reports precision, recall,
+false positives and false negatives. Exits non-zero when precision drops
+below COMPLETION_BENCH_MIN_PRECISION (default ${DEFAULT_MIN_PRECISION}) or recall drops below
+COMPLETION_BENCH_MIN_RECALL (default ${DEFAULT_MIN_RECALL}).
+
+Requires OPENAI_API_KEY (the auditor calls the live model).
+Default dataset: scripts/benchmarks/completion-detection-gold.json`;
+
+if (process.argv.includes("--help") || process.argv.includes("-h")) {
+  console.log(USAGE);
+  process.exit(0);
+}
+
+type DetectCompletedTasksFn = (input: {
+  transcript: string;
+  candidates: Array<{ groupId: string; title: string; assigneeKey?: string }>;
+}) => Promise<{ completed: Array<{ groupId: string }> }>;
 
 const datasetArg =
   process.argv[2] || "scripts/benchmarks/completion-detection-gold.json";
-const minPrecision = Number(process.env.COMPLETION_BENCH_MIN_PRECISION || 0.85);
-const minRecall = Number(process.env.COMPLETION_BENCH_MIN_RECALL || 0.8);
+const minPrecision = Number(
+  process.env.COMPLETION_BENCH_MIN_PRECISION || DEFAULT_MIN_PRECISION
+);
+const minRecall = Number(
+  process.env.COMPLETION_BENCH_MIN_RECALL || DEFAULT_MIN_RECALL
+);
 
 const datasetPath = path.isAbsolute(datasetArg)
   ? datasetArg
@@ -39,24 +92,25 @@ if (!fs.existsSync(datasetPath)) {
   process.exit(1);
 }
 
-if (typeof detectCompletedTasks !== "function") {
-  console.error("detectCompletedTasks flow export not found.");
-  process.exit(1);
-}
-
 const dataset = JSON.parse(fs.readFileSync(datasetPath, "utf8")) as BenchmarkCase[];
 if (!Array.isArray(dataset) || dataset.length === 0) {
   console.error("Benchmark dataset is empty.");
   process.exit(1);
 }
 
-const metrics = {
-  tp: 0,
-  fp: 0,
-  fn: 0,
-};
-
 const run = async () => {
+  // Lazy import: the flow's module graph reaches src/lib/mongodb.ts, which
+  // requires MONGODB_URI at load time. Importing here keeps --help and the
+  // dataset/env validation above usable without a database.
+  const detectModule = await import("../src/ai/flows/detect-completed-tasks-flow");
+  const detectCompletedTasks =
+    detectModule.detectCompletedTasks as DetectCompletedTasksFn;
+  if (typeof detectCompletedTasks !== "function") {
+    console.error("detectCompletedTasks flow export not found.");
+    process.exit(1);
+  }
+
+  const scores: CaseScore[] = [];
   const rows: Array<{
     id: string;
     expected: number;
@@ -71,56 +125,31 @@ const run = async () => {
       transcript: item.transcript,
       candidates: item.candidates,
     });
-    const predicted = new Set(
-      (response.completed || []).map((entry) => String(entry.groupId))
+    const predicted = (response.completed || []).map((entry) =>
+      String(entry.groupId)
     );
-    const expected = new Set(item.expectedCompleted.map(String));
-
-    let tp = 0;
-    let fp = 0;
-    let fn = 0;
-
-    predicted.forEach((groupId) => {
-      if (expected.has(groupId)) {
-        tp += 1;
-      } else {
-        fp += 1;
-      }
-    });
-    expected.forEach((groupId) => {
-      if (!predicted.has(groupId)) {
-        fn += 1;
-      }
-    });
-
-    metrics.tp += tp;
-    metrics.fp += fp;
-    metrics.fn += fn;
+    const score = scoreCase(item.expectedCompleted, predicted);
+    scores.push(score);
     rows.push({
       id: item.id,
-      expected: expected.size,
-      predicted: predicted.size,
-      tp,
-      fp,
-      fn,
+      expected: new Set(item.expectedCompleted.map(String)).size,
+      predicted: new Set(predicted).size,
+      ...score,
     });
   }
 
-  const precision =
-    metrics.tp + metrics.fp > 0 ? metrics.tp / (metrics.tp + metrics.fp) : 0;
-  const recall =
-    metrics.tp + metrics.fn > 0 ? metrics.tp / (metrics.tp + metrics.fn) : 0;
-  const f1 =
-    precision + recall > 0 ? (2 * precision * recall) / (precision + recall) : 0;
+  const metrics = aggregateMetrics(scores);
 
   console.table(rows);
   console.log(
-    `aggregate tp=${metrics.tp} fp=${metrics.fp} fn=${metrics.fn} precision=${precision.toFixed(
-      3
-    )} recall=${recall.toFixed(3)} f1=${f1.toFixed(3)}`
+    `aggregate tp=${metrics.tp} fp=${metrics.fp} fn=${metrics.fn} ` +
+      `falsePositives=${metrics.fp} falseNegatives=${metrics.fn} ` +
+      `precision=${metrics.precision.toFixed(3)} recall=${metrics.recall.toFixed(
+        3
+      )} f1=${metrics.f1.toFixed(3)}`
   );
 
-  if (precision < minPrecision || recall < minRecall) {
+  if (metrics.precision < minPrecision || metrics.recall < minRecall) {
     console.error(
       `Benchmark gate failed (min precision ${minPrecision}, min recall ${minRecall}).`
     );

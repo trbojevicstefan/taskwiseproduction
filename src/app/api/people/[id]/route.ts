@@ -18,6 +18,14 @@ const serializePerson = (person: any) => ({
   company: person.company ?? null,
   nextFollowUpAt:
     person.nextFollowUpAt?.toISOString?.() || person.nextFollowUpAt || null,
+  // Canonical identity fields (additive; absent docs read as active).
+  canonicalPersonId: person.canonicalPersonId ?? null,
+  primarySource: person.primarySource ?? null,
+  sourceIdentities: person.sourceIdentities ?? [],
+  mergeState: person.mergeState ?? "active",
+  mergedIntoPersonId: person.mergedIntoPersonId ?? null,
+  blockedMergePersonIds: person.blockedMergePersonIds ?? [],
+  blockedMergeKeys: person.blockedMergeKeys ?? [],
 });
 
 const patchPersonSchema = z
@@ -35,6 +43,7 @@ const patchPersonSchema = z
     sourceSessionIds: z.array(z.string()).optional(),
     personType: z.enum(["teammate", "client", "unknown"]).optional(),
     company: z.string().nullable().optional(),
+    notes: z.string().max(10_000).nullable().optional(),
     nextFollowUpAt: z
       .string()
       .refine((value) => !Number.isNaN(Date.parse(value)), {
@@ -56,6 +65,15 @@ const patchPersonSchema = z
     personTypeReason: z.unknown().optional(),
     lastMeetingAt: z.unknown().optional(),
     overdueTaskCount: z.unknown().optional(),
+    // Canonical identity fields are server-managed (merge/block/sync flows);
+    // accepted so full-person round-trips don't 400, but never persisted here.
+    canonicalPersonId: z.unknown().optional(),
+    primarySource: z.unknown().optional(),
+    sourceIdentities: z.unknown().optional(),
+    mergeState: z.unknown().optional(),
+    mergedIntoPersonId: z.unknown().optional(),
+    blockedMergePersonIds: z.unknown().optional(),
+    blockedMergeKeys: z.unknown().optional(),
   })
   .strict();
 
@@ -72,6 +90,7 @@ const EDITABLE_PERSON_FIELDS = [
   "sourceSessionIds",
   "personType",
   "company",
+  "notes",
   "nextFollowUpAt",
 ] as const;
 

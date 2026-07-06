@@ -1,8 +1,11 @@
 import {
+  COMPLETION_AUTO_APPLY_REVIEWER,
   applyCompletionTargets,
+  classifyCompletionSuggestion,
   filterTasksForSessionSync,
   mergeCompletionSuggestions,
 } from "@/lib/task-completion-sync";
+import { buildCompletionEvidenceFingerprint } from "@/lib/task-completion-helpers";
 
 describe("task-completion-sync", () => {
   it("merges matching suggestions into the existing task tree", () => {
@@ -165,20 +168,24 @@ describe("task-completion-sync", () => {
     ]);
   });
 
-  it("applies completion targets to direct and session-scoped tasks", async () => {
+  it("auto-applies explicit high-confidence suggestions to direct and session-scoped tasks", async () => {
     const updateMany = jest.fn().mockResolvedValue({ acknowledged: true });
     const db = {
       collection: jest.fn(() => ({
         updateMany,
       })),
     } as any;
+    const fingerprint = buildCompletionEvidenceFingerprint(
+      "We shipped it yesterday."
+    );
 
     await applyCompletionTargets(db, "user-1", [
       {
         id: "suggestion-1",
         title: "Draft brief",
         completionSuggested: true,
-        completionEvidence: [{ snippet: "Done." }],
+        completionConfidence: 0.92,
+        completionEvidence: [{ snippet: "We shipped it yesterday." }],
         completionTargets: [
           { sourceType: "task", sourceSessionId: "task-session", taskId: "task-1" },
           { sourceType: "meeting", sourceSessionId: "meeting-1", taskId: "task-2" },
@@ -192,11 +199,17 @@ describe("task-completion-sync", () => {
       {
         userId: "user-1",
         $or: [{ _id: { $in: ["task-1"] } }, { id: { $in: ["task-1"] } }],
+        // rejected-evidence fingerprints block re-application
+        completionRejectedFingerprints: { $ne: fingerprint },
       },
       expect.objectContaining({
         $set: expect.objectContaining({
           status: "done",
-          completionEvidence: [{ snippet: "Done." }],
+          completionEvidence: [{ snippet: "We shipped it yesterday." }],
+          completionReviewStatus: "auto_applied",
+          completionReviewedBy: COMPLETION_AUTO_APPLY_REVIEWER,
+          completionReviewedAt: expect.any(String),
+          cleanupStatus: "dismissed",
           lastUpdated: expect.any(Date),
         }),
       })
@@ -206,15 +219,117 @@ describe("task-completion-sync", () => {
       expect.objectContaining({
         userId: "user-1",
         sourceSessionType: "meeting",
+        completionRejectedFingerprints: { $ne: fingerprint },
       }),
       expect.objectContaining({
         $set: expect.objectContaining({
           status: "done",
-          completionEvidence: [{ snippet: "Done." }],
+          completionEvidence: [{ snippet: "We shipped it yesterday." }],
           completionSuggested: false,
+          completionReviewStatus: "auto_applied",
           lastUpdated: expect.any(Date),
         }),
       })
     );
+  });
+
+  it("does not auto-apply medium-confidence suggestions", async () => {
+    const updateMany = jest.fn().mockResolvedValue({ acknowledged: true });
+    const db = { collection: jest.fn(() => ({ updateMany })) } as any;
+
+    await applyCompletionTargets(db, "user-1", [
+      {
+        id: "suggestion-1",
+        title: "Draft brief",
+        completionSuggested: true,
+        completionConfidence: 0.7,
+        completionEvidence: [{ snippet: "We shipped it yesterday." }],
+        completionTargets: [
+          { sourceType: "task", sourceSessionId: "task-session", taskId: "task-1" },
+        ],
+      },
+    ] as any);
+
+    expect(updateMany).not.toHaveBeenCalled();
+  });
+
+  it("does not auto-apply high-confidence suggestions without explicit completion evidence", async () => {
+    const updateMany = jest.fn().mockResolvedValue({ acknowledged: true });
+    const db = { collection: jest.fn(() => ({ updateMany })) } as any;
+
+    await applyCompletionTargets(db, "user-1", [
+      {
+        id: "suggestion-1",
+        title: "Book venue",
+        completionSuggested: true,
+        completionConfidence: 0.95,
+        // implicit signal, not an explicit completion statement
+        completionEvidence: [{ snippet: "The venue is booked and ready." }],
+        completionTargets: [
+          { sourceType: "task", sourceSessionId: "task-session", taskId: "task-1" },
+        ],
+      },
+      {
+        id: "suggestion-2",
+        title: "Draft brief",
+        completionSuggested: true,
+        completionConfidence: null,
+        completionEvidence: [{ snippet: "It is done." }],
+        completionTargets: [
+          { sourceType: "task", sourceSessionId: "task-session", taskId: "task-2" },
+        ],
+      },
+    ] as any);
+
+    expect(updateMany).not.toHaveBeenCalled();
+  });
+
+  describe("classifyCompletionSuggestion", () => {
+    it("classifies explicit high-confidence evidence as auto_apply", () => {
+      expect(
+        classifyCompletionSuggestion({
+          completionConfidence: 0.9,
+          completionEvidence: [{ snippet: "I finished the migration." }],
+        })
+      ).toBe("auto_apply");
+    });
+
+    it("classifies high confidence with negated or blocked evidence as suggest", () => {
+      expect(
+        classifyCompletionSuggestion({
+          completionConfidence: 0.9,
+          completionEvidence: [{ snippet: "The migration is not done yet." }],
+        })
+      ).toBe("suggest");
+      expect(
+        classifyCompletionSuggestion({
+          completionConfidence: 0.9,
+          completionEvidence: [
+            { snippet: "Tried to deploy the fix but it failed." },
+          ],
+        })
+      ).toBe("suggest");
+    });
+
+    it("classifies medium confidence as suggest and low/no confidence as ignore", () => {
+      expect(
+        classifyCompletionSuggestion({
+          completionConfidence: 0.65,
+          completionEvidence: [{ snippet: "I finished the migration." }],
+        })
+      ).toBe("suggest");
+      expect(
+        classifyCompletionSuggestion({
+          completionConfidence: 0.4,
+          completionEvidence: [{ snippet: "I finished the migration." }],
+        })
+      ).toBe("ignore");
+      expect(
+        classifyCompletionSuggestion({
+          completionConfidence: null,
+          completionEvidence: [{ snippet: "I finished the migration." }],
+        })
+      ).toBe("ignore");
+    });
   });
 });

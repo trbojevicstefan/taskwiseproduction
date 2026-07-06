@@ -32,11 +32,14 @@ import { useToast } from '@/hooks/use-toast';
 import { apiFetch } from '@/lib/api';
 import { subscribeRealtimeUpdates } from '@/lib/realtime-client';
 import { updatePerson } from '@/lib/data';
+import type { Company } from '@/types/company';
 import type { PersonWithTaskCount } from '@/types/person';
 
 interface ClientGroup {
   key: string;
   name: string;
+  /** First-class company id when the group matches a companies record. */
+  companyId: string | null;
   people: PersonWithTaskCount[];
   openCount: number;
   overdueCount: number;
@@ -191,7 +194,19 @@ function ClientGroupCard({
               <Building2 className="h-4 w-4 text-muted-foreground" />
             </div>
             <div className="min-w-0">
-              <CardTitle className="text-base truncate">{group.name}</CardTitle>
+              {group.companyId ? (
+                <Link
+                  href={`/clients/${group.companyId}`}
+                  className="group/company inline-flex items-center gap-1"
+                >
+                  <CardTitle className="text-base truncate group-hover/company:underline">
+                    {group.name}
+                  </CardTitle>
+                  <ArrowUpRight className="h-4 w-4 text-muted-foreground" />
+                </Link>
+              ) : (
+                <CardTitle className="text-base truncate">{group.name}</CardTitle>
+              )}
               <CardDescription className="text-xs">
                 {group.people.length} {group.people.length === 1 ? 'person' : 'people'}
                 {lastMeeting ? ` · Last meeting ${lastMeeting}` : ' · No meetings yet'}
@@ -229,6 +244,7 @@ export default function ClientsPageContent() {
   const { user } = useAuth();
   const { toast } = useToast();
   const [clients, setClients] = useState<PersonWithTaskCount[]>([]);
+  const [companies, setCompanies] = useState<Company[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isReclassifying, setIsReclassifying] = useState(false);
   const [markingTeammateId, setMarkingTeammateId] = useState<string | null>(null);
@@ -239,6 +255,14 @@ export default function ClientsPageContent() {
       setClients(people.filter((person) => !person.isBlocked));
     } catch (error) {
       console.error('Failed to load clients:', error);
+    }
+    try {
+      // GET /api/companies also resolves-or-creates companies from the
+      // clients' manual company values and email domains (idempotent).
+      const companyList = await apiFetch<Company[]>('/api/companies');
+      setCompanies(Array.isArray(companyList) ? companyList : []);
+    } catch (error) {
+      console.error('Failed to load companies:', error);
     }
   }, []);
 
@@ -268,6 +292,26 @@ export default function ClientsPageContent() {
   }, [user?.uid, refreshClients]);
 
   const groups = useMemo<ClientGroup[]>(() => {
+    // Match a group to a first-class company record: primarily by shared
+    // people ids, falling back to name/alias/domain equality.
+    const companyByPersonId = new Map<string, Company>();
+    companies.forEach((company) => {
+      (company.peopleIds || []).forEach((personId) => {
+        if (!companyByPersonId.has(personId)) {
+          companyByPersonId.set(personId, company);
+        }
+      });
+    });
+    const companyByNameKey = new Map<string, Company>();
+    companies.forEach((company) => {
+      const keys = [company.name, company.domain || '', ...(company.aliases || [])]
+        .map((value) => value.trim().toLowerCase())
+        .filter(Boolean);
+      keys.forEach((key) => {
+        if (!companyByNameKey.has(key)) companyByNameKey.set(key, company);
+      });
+    });
+
     const map = new Map<string, ClientGroup>();
     clients.forEach((person) => {
       const company = person.company?.trim();
@@ -275,8 +319,19 @@ export default function ClientsPageContent() {
       const key = name.toLowerCase();
       let group = map.get(key);
       if (!group) {
-        group = { key, name, people: [], openCount: 0, overdueCount: 0, lastMeetingAt: null };
+        group = {
+          key,
+          name,
+          companyId: companyByNameKey.get(key)?.id ?? null,
+          people: [],
+          openCount: 0,
+          overdueCount: 0,
+          lastMeetingAt: null,
+        };
         map.set(key, group);
+      }
+      if (!group.companyId) {
+        group.companyId = companyByPersonId.get(person.id)?.id ?? null;
       }
       group.people.push(person);
       group.openCount += getOpenTaskCount(person);
@@ -306,7 +361,7 @@ export default function ClientsPageContent() {
         }
         return a.name.localeCompare(b.name);
       });
-  }, [clients]);
+  }, [clients, companies]);
 
   const handleReclassify = async () => {
     setIsReclassifying(true);

@@ -5,10 +5,10 @@
 
 @layer base {
   :root {
-    --background: 0 0% 100%; /* Pure White */
+    --background: 220 14% 96%; /* Off-white app canvas so white cards read against it */
     --foreground: 224 71.4% 4.1%;
 
-    --card: 0 0% 100%;
+    --card: 0 0% 100%; /* True white work surfaces */
     --card-foreground: 224 71.4% 4.1%;
 
     --popover: 0 0% 100%;
@@ -17,11 +17,11 @@
     --primary: 212 80% 58%; /* A clearer, more vibrant blue */
     --primary-foreground: 210 20% 98%;
 
-    --secondary: 220 13% 91%; /* Slightly cooler gray */
+    --secondary: 220 14% 90%; /* Slightly cooler gray */
     --secondary-foreground: 222.2 47.4% 11.2%;
 
-    --muted: 220 13% 91%;
-    --muted-foreground: 215.4 16.3% 46.9%;
+    --muted: 220 14% 90%;
+    --muted-foreground: 215 19% 40%; /* >=4.5:1 on background, card, and muted */
 
     --accent: 220 13% 91%;
     --accent-foreground: 222.2 47.4% 11.2%;
@@ -29,8 +29,8 @@
     --destructive: 0 84.2% 60.2%;
     --destructive-foreground: 210 40% 98%;
 
-    --border: 220 13% 88%; /* Slightly darker border for contrast */
-    --input: 220 13% 88%;
+    --border: 220 13% 82%; /* Darker border so work surfaces are distinguishable */
+    --input: 220 13% 80%;
     --input-bg: 0 0% 100%;
     --ring: 212 80% 58%;
 
@@ -43,13 +43,13 @@
     --chart-5: 220 15% 70%;
 
     /* Light Mode Sidebar */
-    --sidebar-background: 0 0% 97%; /* #f7f7f7 */
+    --sidebar-background: 220 14% 98%; /* Slightly lighter than the app canvas */
     --sidebar-foreground: 224 71.4% 10%;
     --sidebar-primary: 212 80% 58%; /* #4A90E2 - Vibrant Blue */
     --sidebar-primary-foreground: 0 0% 100%; /* White text on active */
     --sidebar-accent: 212 80% 92%; /* Lighter blue for hover */
     --sidebar-accent-foreground: 212 80% 20%;
-    --sidebar-border: 0 0% 90%; /* #e5e5e5 */
+    --sidebar-border: 220 13% 86%;
     --sidebar-ring: 212 80% 58%;
 
     /* Default UI Scale */
@@ -125,6 +125,32 @@
     @apply bg-background text-foreground;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+  }
+}
+
+@layer components {
+  /* Shared work-surface patterns for the logged-in app shell.
+     Prefer these over ad-hoc bg-background/70 + border-border/50 combos:
+     solid, token-driven surfaces keep light and dark themes readable. */
+
+  /* Primary work panel: a solid card surface that reads against the app canvas. */
+  .work-panel {
+    @apply rounded-xl border border-border bg-card text-card-foreground shadow-sm;
+  }
+
+  /* Secondary block inside a panel (settings blocks, evidence, metadata). */
+  .work-inset {
+    @apply rounded-lg border border-border bg-muted/40;
+  }
+
+  /* A single row in a list of records (tasks, people, log entries). */
+  .data-row {
+    @apply rounded-lg border border-border bg-card;
+  }
+
+  /* Compact card for dense lists and kanban columns. */
+  .dense-card {
+    @apply rounded-lg border border-border bg-card p-3 shadow-sm;
   }
 }
 

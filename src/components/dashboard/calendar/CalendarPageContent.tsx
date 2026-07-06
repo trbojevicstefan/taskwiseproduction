@@ -45,6 +45,9 @@ import {
 import MonthView from "./MonthView";
 import WeekView from "./WeekView";
 import AgendaView from "./AgendaView";
+import CalendarEventDetailSheet, {
+  type CalendarDetailSelection,
+} from "./CalendarEventDetailSheet";
 
 type CalendarApiResponse = {
   ok?: boolean;
@@ -119,6 +122,8 @@ export default function CalendarPageContent() {
   const [hasLoaded, setHasLoaded] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [detailSelection, setDetailSelection] =
+    useState<CalendarDetailSelection | null>(null);
 
   const range = useMemo(() => getViewRange(view, anchorDate), [view, anchorDate]);
   const rangeLabel = useMemo(
@@ -221,15 +226,23 @@ export default function CalendarPageContent() {
     [view]
   );
 
+  // Priority 10: meetings and Google events open the in-app detail drawer
+  // first; navigation and external links are explicit actions inside it.
   const handleEntryClick = useCallback(
     (entry: CalendarDayEntry) => {
       if (entry.kind === "meeting") {
-        router.push(`/meetings/${entry.id}`);
+        const meeting = data.meetings.find((item) => item.id === entry.id);
+        if (meeting) {
+          setDetailSelection({ kind: "meeting", meeting });
+        } else {
+          router.push(`/meetings/${entry.id}`);
+        }
         return;
       }
       if (entry.kind === "google") {
-        if (entry.link && typeof window !== "undefined") {
-          window.open(entry.link, "_blank", "noopener,noreferrer");
+        const event = googleEvents.find((item) => item.id === entry.id);
+        if (event) {
+          setDetailSelection({ kind: "google", event });
         }
         return;
       }
@@ -242,8 +255,16 @@ export default function CalendarPageContent() {
         router.push("/review");
       }
     },
-    [router]
+    [router, data.meetings, googleEvents]
   );
+
+  const handleDetailOpenChange = useCallback((open: boolean) => {
+    if (!open) setDetailSelection(null);
+  }, []);
+
+  const handleCalendarChanged = useCallback(() => {
+    refreshRef.current();
+  }, []);
 
   return (
     <div className="flex h-full flex-col">
@@ -321,6 +342,12 @@ export default function CalendarPageContent() {
           />
         )}
       </div>
+      <CalendarEventDetailSheet
+        selection={detailSelection}
+        meetings={data.meetings}
+        onOpenChange={handleDetailOpenChange}
+        onCalendarChanged={handleCalendarChanged}
+      />
     </div>
   );
 }

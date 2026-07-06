@@ -256,6 +256,12 @@ export function normalizeTask(task: any): ExtractedTaskSchema {
       task.completionEvidence === undefined ? null : task.completionEvidence,
     completionTargets:
       task.completionTargets === undefined ? null : task.completionTargets,
+    completionReviewStatus:
+      task.completionReviewStatus === undefined ? null : task.completionReviewStatus,
+    completionReviewedBy:
+      task.completionReviewedBy === undefined ? null : task.completionReviewedBy,
+    completionReviewedAt:
+      task.completionReviewedAt === undefined ? null : task.completionReviewedAt,
     cleanupStatus: task.cleanupStatus === undefined ? null : task.cleanupStatus,
     cleanupCategory:
       task.cleanupCategory === undefined ? null : task.cleanupCategory,

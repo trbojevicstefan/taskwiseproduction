@@ -9,11 +9,11 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
-import { Loader2, UserCheck, UserPlus, Info, Sparkles } from 'lucide-react';
+import { Loader2, UserCheck, UserPlus, Info, Sparkles, Ban } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { cn } from '@/lib/utils';
 import { Badge } from '@/components/ui/badge';
-import { getBestPersonMatch, getRankedPersonMatches, type CandidateMatch } from '@/lib/people-matching';
+import { getBestPersonMatch, getRankedPersonMatches, isMergeBlockedForCandidate, type CandidateMatch } from '@/lib/people-matching';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
 
@@ -21,21 +21,134 @@ interface PeopleDiscoveryDialogProps {
   isOpen: boolean;
   onClose: (peopleToCreate: Partial<Person>[]) => void;
   onMatch?: (payload: { person: Partial<Person>; matchedPerson: Person }) => Promise<void> | void;
+  // Persist a "never merge these two" decision. Defaults to POSTing
+  // /api/people/merge/block, which records the candidate's normalized
+  // name/email keys on the matched person so the pair is never re-suggested.
+  onBlockMatch?: (payload: { person: Partial<Person>; matchedPerson: Person }) => Promise<void> | void;
   discoveredPeople: any[]; // People from AI
   existingPeople: Person[]; // People from directory
 }
 
 const getInitials = (name: string) => name ? name.split(' ').map(n => n[0]).join('').toUpperCase().substring(0, 2) : 'U';
 
+// Default persistence for a blocked merge suggestion (used when the parent
+// does not supply onBlockMatch). Exported for tests.
+export const blockSuggestedMatch = async ({
+  person,
+  matchedPerson,
+}: {
+  person: Partial<Person>;
+  matchedPerson: Person;
+}) => {
+  const response = await fetch('/api/people/merge/block', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      personId: matchedPerson.id,
+      ...(person.name ? { blockedName: person.name } : {}),
+      ...(person.email ? { blockedEmail: person.email } : {}),
+    }),
+  });
+  if (!response.ok) {
+    throw new Error('Failed to block this match.');
+  }
+};
+
+// Pure triage of AI-discovered people against the saved directory. Exported
+// for tests. Blocked pairs never surface as suggestions because the matching
+// helpers skip people whose blockedMergeKeys contain the candidate's
+// name/email key.
+export const triageDiscoveredPeople = (
+  discoveredPeople: any[],
+  existingPeople: Person[],
+  {
+    autoMatchThreshold = 0.9,
+    reviewMatchThreshold = 0.78,
+  }: { autoMatchThreshold?: number; reviewMatchThreshold?: number } = {}
+) => {
+  const blockedNames = new Set(existingPeople.filter(p => p.isBlocked).map(p => p.name.toLowerCase()));
+  const blockedEmails = new Set(existingPeople.filter(p => p.isBlocked && p.email).map(p => p.email!.toLowerCase()));
+
+  const filteredDiscovered = discoveredPeople.filter(dp => {
+    const nameKey = dp.name?.toLowerCase();
+    const emailKey = dp.email?.toLowerCase();
+    if (nameKey && blockedNames.has(nameKey)) return false;
+    if (emailKey && blockedEmails.has(emailKey)) return false;
+    return true;
+  });
+
+  const newPeople: any[] = [];
+  const existingDiscoveredPeople: any[] = [];
+  const potentialMatches: any[] = [];
+
+  filteredDiscovered.forEach(dp => {
+    const nameKey = dp.name?.toLowerCase();
+    const emailKey = dp.email?.toLowerCase();
+    // Exact name/email hits count as "already in directory" — unless the
+    // user explicitly blocked this candidate from matching that person.
+    const exactPerson = existingPeople.find(
+      p =>
+        (nameKey && p.name?.toLowerCase() === nameKey) ||
+        (emailKey && p.email?.toLowerCase() === emailKey)
+    );
+    const isExactMatch =
+      Boolean(exactPerson) &&
+      !isMergeBlockedForCandidate({ name: dp.name, email: dp.email }, exactPerson!);
+
+    if (isExactMatch) {
+      existingDiscoveredPeople.push({ ...dp, matchConfidence: 1 });
+      return;
+    }
+
+    const autoMatch = getBestPersonMatch(
+      { name: dp.name, email: dp.email },
+      existingPeople,
+      autoMatchThreshold
+    );
+    if (autoMatch) {
+      existingDiscoveredPeople.push({
+        ...dp,
+        matchConfidence: autoMatch.confidence,
+        matchedPerson: autoMatch.person,
+      });
+      return;
+    }
+
+    const reviewMatch = getBestPersonMatch(
+      { name: dp.name, email: dp.email },
+      existingPeople,
+      reviewMatchThreshold
+    );
+    if (reviewMatch) {
+      potentialMatches.push({
+        ...dp,
+        matchedPerson: reviewMatch.person,
+        matchConfidence: reviewMatch.confidence,
+        matchReason: reviewMatch.reason,
+      });
+      return;
+    }
+
+    newPeople.push(dp);
+  });
+
+  return { newPeople, existingDiscoveredPeople, potentialMatches };
+};
+
 export default function PeopleDiscoveryDialog({
   isOpen,
   onClose,
   onMatch,
+  onBlockMatch,
   discoveredPeople,
   existingPeople,
 }: PeopleDiscoveryDialogProps) {
   const [peopleToCreate, setPeopleToCreate] = useState<Set<string>>(new Set());
   const [resolvedKeys, setResolvedKeys] = useState<Set<string>>(new Set());
+  // Suggestions the user rejected or blocked: candidate falls back to the
+  // "new people" list instead of merging.
+  const [dismissedMatchKeys, setDismissedMatchKeys] = useState<Set<string>>(new Set());
+  const [blockingKey, setBlockingKey] = useState<string | null>(null);
   const [matchCandidate, setMatchCandidate] = useState<any | null>(null);
   const [matchSuggestions, setMatchSuggestions] = useState<CandidateMatch[]>([]);
   const [selectedMatchId, setSelectedMatchId] = useState<string | null>(null);
@@ -48,72 +161,10 @@ export default function PeopleDiscoveryDialog({
     newPeople,
     existingDiscoveredPeople,
     potentialMatches,
-  } = useMemo(() => {
-    const existingNames = new Set(existingPeople.map(p => p.name.toLowerCase()));
-    const existingEmails = new Set(existingPeople.map(p => p.email?.toLowerCase()).filter(Boolean));
-    const blockedNames = new Set(existingPeople.filter(p => p.isBlocked).map(p => p.name.toLowerCase()));
-    const blockedEmails = new Set(existingPeople.filter(p => p.isBlocked && p.email).map(p => p.email!.toLowerCase()));
-
-    const filteredDiscovered = discoveredPeople.filter(dp => {
-        const nameKey = dp.name?.toLowerCase();
-        const emailKey = dp.email?.toLowerCase();
-        if (nameKey && blockedNames.has(nameKey)) return false;
-        if (emailKey && blockedEmails.has(emailKey)) return false;
-        return true;
-    });
-
-    const autoMatchThreshold = 0.9;
-    const reviewMatchThreshold = 0.78;
-
-    const newPeople: any[] = [];
-    const existingDiscoveredPeople: any[] = [];
-    const potentialMatches: any[] = [];
-
-    filteredDiscovered.forEach(dp => {
-      const nameKey = dp.name?.toLowerCase();
-      const emailKey = dp.email?.toLowerCase();
-      const isExactMatch =
-        (nameKey && existingNames.has(nameKey)) ||
-        (emailKey && existingEmails.has(emailKey));
-
-      if (isExactMatch) {
-        existingDiscoveredPeople.push({ ...dp, matchConfidence: 1 });
-        return;
-      }
-
-      const autoMatch = getBestPersonMatch(
-        { name: dp.name, email: dp.email },
-        existingPeople,
-        autoMatchThreshold
-      );
-      if (autoMatch) {
-        existingDiscoveredPeople.push({
-          ...dp,
-          matchConfidence: autoMatch.confidence,
-          matchedPerson: autoMatch.person,
-        });
-        return;
-      }
-
-      const reviewMatch = getBestPersonMatch(
-        { name: dp.name, email: dp.email },
-        existingPeople,
-        reviewMatchThreshold
-      );
-      if (reviewMatch) {
-        potentialMatches.push({
-          ...dp,
-          matchedPerson: reviewMatch.person,
-          matchConfidence: reviewMatch.confidence,
-        });
-        return;
-      }
-
-      newPeople.push(dp);
-    });
-
-    return { newPeople, existingDiscoveredPeople, potentialMatches };
-  }, [discoveredPeople, existingPeople]);
+  } = useMemo(
+    () => triageDiscoveredPeople(discoveredPeople, existingPeople),
+    [discoveredPeople, existingPeople]
+  );
 
 
   useEffect(() => {
@@ -125,6 +176,8 @@ export default function PeopleDiscoveryDialog({
       setPeopleToCreate(initialKeys);
     }
     setResolvedKeys(new Set());
+    setDismissedMatchKeys(new Set());
+    setBlockingKey(null);
     setMatchCandidate(null);
     setSelectedMatchId(null);
     setMatchSuggestions([]);
@@ -187,8 +240,8 @@ export default function PeopleDiscoveryDialog({
       selectedKeys.has(getPersonKey(p))
     );
     
-    // IMPORTANT: Strip the `isExisting` property before passing it to the parent.
-    const cleanPeopleData = finalPeopleToCreate.map(({ isExisting, matchConfidence, matchedPerson, ...rest }) => rest);
+    // IMPORTANT: Strip match metadata before passing it to the parent.
+    const cleanPeopleData = finalPeopleToCreate.map(({ isExisting, matchConfidence, matchedPerson, matchReason, ...rest }) => rest);
 
     onClose(cleanPeopleData);
   };
@@ -242,6 +295,52 @@ export default function PeopleDiscoveryDialog({
     setSelectedMatchId(suggestions[0]?.person.id || null);
   };
 
+  const markResolved = (candidate: any) => {
+    const key = getPersonKey(candidate);
+    setResolvedKeys((prev) => new Set(prev).add(key));
+    setPeopleToCreate((prev) => {
+      const next = new Set(prev);
+      next.delete(key);
+      return next;
+    });
+  };
+
+  // Reject: keep both profiles separate — the candidate becomes a normal
+  // "new person" (pre-checked so it is created on confirm).
+  const handleRejectSuggestedMatch = (candidate: any) => {
+    const key = getPersonKey(candidate);
+    setDismissedMatchKeys((prev) => new Set(prev).add(key));
+    setPeopleToCreate((prev) => new Set(prev).add(key));
+  };
+
+  // Approve: link the discovered person to the suggested existing profile.
+  const handleApproveSuggestedMatch = async (candidate: any) => {
+    if (!onMatch || !candidate?.matchedPerson) return;
+    setIsMatching(true);
+    try {
+      await onMatch({ person: candidate, matchedPerson: candidate.matchedPerson });
+      markResolved(candidate);
+    } finally {
+      setIsMatching(false);
+    }
+  };
+
+  // Block: persist "never suggest this pair again", then treat as new person.
+  const handleBlockSuggestedMatch = async (candidate: any) => {
+    if (!candidate?.matchedPerson) return;
+    const key = getPersonKey(candidate);
+    setBlockingKey(key);
+    try {
+      const block = onBlockMatch || blockSuggestedMatch;
+      await block({ person: candidate, matchedPerson: candidate.matchedPerson });
+      handleRejectSuggestedMatch(candidate);
+    } catch (error) {
+      console.error('Failed to block suggested match:', error);
+    } finally {
+      setBlockingKey(null);
+    }
+  };
+
   const handleConfirmMatch = async () => {
     if (!matchCandidate || !selectedMatchId || !onMatch) return;
     const matchedPerson = existingPeople.find((person: any) => person.id === selectedMatchId);
@@ -264,11 +363,17 @@ export default function PeopleDiscoveryDialog({
     }
   };
 
-  const visibleNewPeople = newPeople.filter(
-    (person) => !resolvedKeys.has(getPersonKey(person))
-  );
+  const visibleNewPeople = [
+    ...newPeople,
+    // Rejected/blocked suggestions fall back to plain new-person creation.
+    ...potentialMatches.filter((person: any) =>
+      dismissedMatchKeys.has(getPersonKey(person))
+    ),
+  ].filter((person) => !resolvedKeys.has(getPersonKey(person)));
   const visiblePotentialMatches = potentialMatches.filter(
-    (person) => !resolvedKeys.has(getPersonKey(person))
+    (person) =>
+      !resolvedKeys.has(getPersonKey(person)) &&
+      !dismissedMatchKeys.has(getPersonKey(person))
   );
   const visibleExistingMatches = existingDiscoveredPeople.filter(
     (person) => !resolvedKeys.has(getPersonKey(person))
@@ -350,6 +455,43 @@ export default function PeopleDiscoveryDialog({
                                         {renderConfidenceBadge(person.matchConfidence || 0)}
                                       </div>
                                     )}
+                                    <div className="mt-2 flex flex-wrap items-center gap-2">
+                                      {onMatch && person.matchedPerson && (
+                                        <Button
+                                          variant="outline"
+                                          size="xs"
+                                          disabled={isMatching || blockingKey === getPersonKey(person)}
+                                          onClick={() => handleApproveSuggestedMatch(person)}
+                                        >
+                                          <UserCheck className="h-3 w-3 mr-1" />
+                                          Approve merge
+                                        </Button>
+                                      )}
+                                      <Button
+                                        variant="ghost"
+                                        size="xs"
+                                        disabled={blockingKey === getPersonKey(person)}
+                                        onClick={() => handleRejectSuggestedMatch(person)}
+                                      >
+                                        Keep separate
+                                      </Button>
+                                      {person.matchedPerson && (
+                                        <Button
+                                          variant="ghost"
+                                          size="xs"
+                                          className="text-destructive hover:text-destructive"
+                                          disabled={blockingKey === getPersonKey(person)}
+                                          onClick={() => handleBlockSuggestedMatch(person)}
+                                        >
+                                          {blockingKey === getPersonKey(person) ? (
+                                            <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                                          ) : (
+                                            <Ban className="h-3 w-3 mr-1" />
+                                          )}
+                                          Never merge
+                                        </Button>
+                                      )}
+                                    </div>
                                     <p className="text-xs text-muted-foreground mt-1">Leave unchecked to avoid creating a duplicate.</p>
                                   </div>
                               </div>
