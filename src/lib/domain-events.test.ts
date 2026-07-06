@@ -16,6 +16,7 @@ jest.mock("@/lib/services/board-status-sync", () => ({
 
 jest.mock("@/lib/people-sync", () => ({
   upsertPeopleFromAttendees: jest.fn(),
+  resolveMeetingPeopleProvider: jest.fn(() => null),
 }));
 
 jest.mock("@/lib/task-sync", () => ({
@@ -295,6 +296,57 @@ describe("publishDomainEvent", () => {
         }),
       })
     );
+  });
+
+  it("enqueues semantic search chunk indexing for meeting lifecycle events", async () => {
+    const { db } = createFakeDb();
+
+    await publishDomainEvent(db as any, {
+      type: "meeting.ingested",
+      userId: "user-1",
+      payload: {
+        meetingId: "meeting-1",
+        workspaceId: "workspace-1",
+        title: "Weekly Sync",
+        attendees: [],
+        extractedTasks: [],
+      },
+    });
+
+    expect(mockedEnqueueJob).toHaveBeenCalledWith(
+      db,
+      expect.objectContaining({
+        type: "meeting-search-index",
+        userId: "user-1",
+        payload: {
+          meetingId: "meeting-1",
+          workspaceId: "workspace-1",
+        },
+      })
+    );
+  });
+
+  it("does not fail the meeting lifecycle event when chunk-index enqueue fails", async () => {
+    mockedEnqueueJob.mockRejectedValueOnce(new Error("queue down"));
+    const { db } = createFakeDb();
+
+    const result = await publishDomainEvent(db as any, {
+      type: "meeting.ingested",
+      userId: "user-1",
+      payload: {
+        meetingId: "meeting-1",
+        workspaceId: "workspace-1",
+        title: "Weekly Sync",
+        attendees: [],
+        extractedTasks: [],
+      },
+    });
+
+    expect(result).toEqual({
+      people: { created: 0, updated: 0 },
+      tasks: { upserted: 0, deleted: 0 },
+      boardItemsCreated: 0,
+    });
   });
 
   it("handles meeting.updated events with the same side-effect pipeline", async () => {

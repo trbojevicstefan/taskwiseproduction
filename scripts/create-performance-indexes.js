@@ -180,6 +180,27 @@ const indexPlan = [
     ],
   },
   {
+    collection: "meetingSearchChunks",
+    indexes: [
+      {
+        key: { workspaceId: 1, meetingId: 1 },
+        options: { name: "meeting_search_chunks_workspace_meeting" },
+      },
+      {
+        key: { workspaceId: 1, updatedAt: -1 },
+        options: { name: "meeting_search_chunks_workspace_updated" },
+      },
+      {
+        key: { meetingId: 1 },
+        options: { name: "meeting_search_chunks_meeting" },
+      },
+      {
+        key: { userId: 1, updatedAt: -1 },
+        options: { name: "meeting_search_chunks_user_updated" },
+      },
+    ],
+  },
+  {
     collection: "domainEvents",
     indexes: [
       {

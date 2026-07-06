@@ -1,16 +1,38 @@
 /**
- * Workspace retrieval layer for the General AI Chat (Phase 2).
+ * Workspace retrieval layer for the General AI Chat (Phase 2; hybrid
+ * semantic upgrade in the P2 retrieval pass).
  *
- * Keyword-first search/ranking over meetings, transcripts, tasks, and people.
- * Deliberately dependency-free: no embeddings, no LLM calls — pure heuristics
- * (title/summary/attendee/task/person token overlap, phrase bonus, recency
- * boost, structured intents for overdue tasks and clients) so it can run
- * before any model call and keep the LLM context small.
+ * Hybrid search/ranking over meetings, transcripts, tasks, and people:
+ *
+ * - Keyword scoring (title/summary/attendee/task/person token overlap,
+ *   phrase bonus) is the always-available baseline and the tie-breaker.
+ * - Semantic meeting search embeds the question (OpenAI embeddings, see
+ *   src/lib/embeddings.ts) and runs LOCAL cosine similarity against the
+ *   pre-embedded `meetingSearchChunks` collection
+ *   (src/lib/meeting-search-chunks.ts). Candidates are workspace-scoped and
+ *   capped to the CHUNK_CANDIDATE_LIMIT most recently updated chunks (i.e.
+ *   the most recently ingested/updated meetings' chunks) so the scan stays
+ *   cheap without Atlas Vector Search. To adopt Atlas Vector Search later,
+ *   create a cosine vector index on `meetingSearchChunks.embedding` with
+ *   `workspaceId`/`userId` filter fields and swap the capped find+cosine in
+ *   `retrieveSemanticMeetingHits` for a `$vectorSearch` aggregation — the
+ *   rest of the ranking pipeline is unchanged.
+ * - Recency boost and the structured intents (overdue tasks, priorities,
+ *   clients, assignees) are unchanged.
+ *
+ * Degradation: when embeddings are unavailable (no OPENAI_API_KEY, embed
+ * failure, missing chunk collection) the semantic pass silently yields
+ * nothing and results are exactly the previous keyword-only behavior —
+ * never worse, never throwing.
  *
  * Scoping mirrors the existing API routes: workspaceId match plus the legacy
  * fallback used by the people routes (docs without a workspaceId owned by a
  * workspace member).
  */
+
+import { embedText, isEmbeddingAvailable } from "@/lib/embeddings";
+import { MEETING_SEARCH_CHUNKS_COLLECTION } from "@/lib/meeting-search-chunks";
+import { cosineSimilarity } from "@/lib/task-completion-helpers";
 
 export type WorkspaceRetrievalScope = {
   userId: string;
@@ -27,6 +49,8 @@ export type WorkspaceRetrievalOptions = {
 export type TranscriptSnippet = {
   timestamp: string | null;
   snippet: string;
+  /** Set on semantic (chunk-derived) snippets when the chunk had a speaker. */
+  speaker?: string | null;
 };
 
 export type RetrievedMeeting = {
@@ -36,6 +60,8 @@ export type RetrievedMeeting = {
   summarySnippet: string | null;
   transcriptSnippets: TranscriptSnippet[];
   score: number;
+  /** Best chunk cosine similarity (0..1) when the semantic pass matched. */
+  semanticScore?: number | null;
 };
 
 export type RetrievedTask = {
@@ -91,6 +117,16 @@ const ATTENDEE_WEIGHT = 2;
 const PHRASE_BONUS = 2;
 const RECENT_7D_BOOST = 2;
 const RECENT_30D_BOOST = 1;
+
+// Semantic pass: capped local scan over the most recently updated chunks
+// (~ the most recent meetings' chunks; documented in the module header).
+const CHUNK_CANDIDATE_LIMIT = 500;
+const MIN_SEMANTIC_SIMILARITY = 0.3;
+// Similarity (0..1) scaled onto the keyword score's integer range so a
+// strong semantic hit outranks a weak single-token keyword match, while
+// keyword scoring stays the tie-breaker between similar semantic hits.
+const SEMANTIC_SCORE_WEIGHT = 10;
+const MAX_QUESTION_EMBED_CHARS = 2000;
 
 const TASK_TITLE_WEIGHT = 3;
 const TASK_DESCRIPTION_WEIGHT = 1;
@@ -445,27 +481,158 @@ const recencyBoost = (startTime: Date | null, now: Date): number => {
   return 0;
 };
 
+type SemanticChunkHit = {
+  text: string;
+  speaker: string | null;
+  timestamp: string | null;
+  similarity: number;
+};
+
+type SemanticMeetingHit = {
+  meetingId: string;
+  similarity: number;
+  chunks: SemanticChunkHit[];
+};
+
+/**
+ * Semantic pass: embed the question and cosine-score it locally against the
+ * workspace's most recently updated meeting chunks (capped candidate set —
+ * see module header for the Atlas Vector Search migration path). Returns
+ * null whenever embeddings are unavailable or anything fails, so callers
+ * degrade to the keyword-only path. Never throws.
+ */
+const retrieveSemanticMeetingHits = async (
+  db: any,
+  scopeFilter: Record<string, any>,
+  question: string
+): Promise<Map<string, SemanticMeetingHit> | null> => {
+  const trimmed = typeof question === "string" ? question.trim() : "";
+  if (!trimmed || !isEmbeddingAvailable()) return null;
+
+  try {
+    const questionEmbedding = await embedText(
+      trimmed.slice(0, MAX_QUESTION_EMBED_CHARS)
+    );
+    if (!questionEmbedding) return null;
+
+    const chunks: any[] = await db
+      .collection(MEETING_SEARCH_CHUNKS_COLLECTION)
+      .find(
+        { ...scopeFilter },
+        {
+          projection: {
+            _id: 1,
+            meetingId: 1,
+            text: 1,
+            speaker: 1,
+            timestamp: 1,
+            embedding: 1,
+          },
+        }
+      )
+      .sort({ updatedAt: -1, _id: -1 })
+      .limit(CHUNK_CANDIDATE_LIMIT)
+      .toArray();
+
+    const hits = new Map<string, SemanticMeetingHit>();
+    for (const chunk of chunks) {
+      const meetingId = String(chunk?.meetingId ?? "").trim();
+      const embedding = Array.isArray(chunk?.embedding) ? chunk.embedding : [];
+      const text = typeof chunk?.text === "string" ? chunk.text : "";
+      if (!meetingId || !embedding.length || !text.trim()) continue;
+      const similarity = cosineSimilarity(questionEmbedding, embedding);
+      if (similarity < MIN_SEMANTIC_SIMILARITY) continue;
+
+      const chunkHit: SemanticChunkHit = {
+        text,
+        speaker: typeof chunk?.speaker === "string" ? chunk.speaker : null,
+        timestamp: typeof chunk?.timestamp === "string" ? chunk.timestamp : null,
+        similarity,
+      };
+      const existing = hits.get(meetingId);
+      if (existing) {
+        existing.similarity = Math.max(existing.similarity, similarity);
+        existing.chunks.push(chunkHit);
+      } else {
+        hits.set(meetingId, {
+          meetingId,
+          similarity,
+          chunks: [chunkHit],
+        });
+      }
+    }
+
+    for (const hit of hits.values()) {
+      hit.chunks.sort((a, b) => b.similarity - a.similarity);
+      hit.chunks = hit.chunks.slice(0, MAX_SNIPPETS_PER_MEETING);
+    }
+    return hits;
+  } catch {
+    // Any failure (missing collection, driver error) degrades to keyword-only.
+    return null;
+  }
+};
+
+const buildSemanticSnippets = (hit: SemanticMeetingHit): TranscriptSnippet[] =>
+  hit.chunks.map((chunk) => ({
+    timestamp: chunk.timestamp,
+    snippet: chunk.text.slice(0, SNIPPET_MAX_CHARS),
+    speaker: chunk.speaker,
+  }));
+
 const retrieveMeetings = async (
   db: any,
   scopeFilter: Record<string, any>,
   query: QuestionTokens,
   maxMeetings: number,
-  now: Date
+  now: Date,
+  semanticHits: Map<string, SemanticMeetingHit> | null
 ): Promise<RetrievedMeeting[]> => {
-  if (!query.tokens.length && !query.phrases.length) return [];
+  const hasKeywordSignal = query.tokens.length > 0 || query.phrases.length > 0;
+  const hasSemanticSignal = Boolean(semanticHits && semanticHits.size);
+  if (!hasKeywordSignal && !hasSemanticSignal) return [];
 
-  const candidates: any[] = await db
-    .collection("meetings")
-    .find(
-      { ...scopeFilter, isHidden: { $ne: true } },
-      { projection: MEETING_CANDIDATE_PROJECTION }
-    )
-    .sort({ lastActivityAt: -1, _id: -1 })
-    .limit(MEETING_CANDIDATE_LIMIT)
-    .toArray();
+  const candidates: any[] = hasKeywordSignal
+    ? await db
+        .collection("meetings")
+        .find(
+          { ...scopeFilter, isHidden: { $ne: true } },
+          { projection: MEETING_CANDIDATE_PROJECTION }
+        )
+        .sort({ lastActivityAt: -1, _id: -1 })
+        .limit(MEETING_CANDIDATE_LIMIT)
+        .toArray()
+    : [];
+
+  // Semantic hits outside the recent-candidate window still need their
+  // meeting metadata; fetch the missing docs by id with the same scope and
+  // hidden-filter (so chunks of deleted/hidden meetings can never surface).
+  if (hasSemanticSignal) {
+    const candidateIds = new Set(
+      candidates.map((doc) => String(doc?._id ?? ""))
+    );
+    const missingIds = Array.from(semanticHits!.keys()).filter(
+      (id) => !candidateIds.has(id)
+    );
+    if (missingIds.length) {
+      const extraDocs: any[] = await db
+        .collection("meetings")
+        .find(
+          {
+            ...scopeFilter,
+            isHidden: { $ne: true },
+            _id: { $in: missingIds },
+          },
+          { projection: MEETING_CANDIDATE_PROJECTION }
+        )
+        .toArray();
+      candidates.push(...extraDocs);
+    }
+  }
 
   const scored = candidates
     .map((doc) => {
+      const id = String(doc?._id ?? "");
       const title = typeof doc?.title === "string" ? doc.title : "";
       const summary = typeof doc?.summary === "string" ? doc.summary : "";
       const attendeeNames = extractAttendeeNames(doc?.attendees).join(" ");
@@ -482,12 +649,18 @@ const retrieveMeetings = async (
       const summaryMatched =
         summaryTokenScore > 0 || countPhraseMatches(summary, query.phrases) > 0;
 
-      const baseScore = titleScore + summaryScore + attendeeScore + phraseScore;
+      const semanticHit = semanticHits?.get(id) ?? null;
+      const semanticComponent = semanticHit
+        ? semanticHit.similarity * SEMANTIC_SCORE_WEIGHT
+        : 0;
+
+      const baseScore =
+        titleScore + summaryScore + attendeeScore + phraseScore + semanticComponent;
       const startTime = toDate(doc?.startTime) ?? toDate(doc?.lastActivityAt);
       const score = baseScore > 0 ? baseScore + recencyBoost(startTime, now) : 0;
 
       return {
-        id: String(doc?._id ?? ""),
+        id,
         title: title.trim() || "Untitled meeting",
         startTime: toIsoString(doc?.startTime),
         summarySnippet: summaryMatched
@@ -495,6 +668,8 @@ const retrieveMeetings = async (
           : null,
         transcriptSnippets: [] as TranscriptSnippet[],
         score,
+        semanticScore: semanticHit ? semanticHit.similarity : null,
+        semanticHit,
         sortTime: startTime ? startTime.getTime() : 0,
       };
     })
@@ -502,13 +677,29 @@ const retrieveMeetings = async (
     .sort((a, b) => b.score - a.score || b.sortTime - a.sortTime)
     .slice(0, maxMeetings);
 
-  if (scored.length) {
+  // Semantic chunk snippets come first (they are why the meeting matched);
+  // remaining slots are filled with keyword snippets from the transcript.
+  for (const meeting of scored) {
+    if (meeting.semanticHit) {
+      meeting.transcriptSnippets = buildSemanticSnippets(meeting.semanticHit);
+    }
+  }
+
+  const needsKeywordSnippets = hasKeywordSignal
+    ? scored.filter(
+        (meeting) => meeting.transcriptSnippets.length < MAX_SNIPPETS_PER_MEETING
+      )
+    : [];
+  if (needsKeywordSnippets.length) {
     // Fetch full transcripts only for the winning meetings — never for the
     // whole candidate pool.
     const transcriptDocs: any[] = await db
       .collection("meetings")
       .find(
-        { ...scopeFilter, _id: { $in: scored.map((meeting) => meeting.id) } },
+        {
+          ...scopeFilter,
+          _id: { $in: needsKeywordSnippets.map((meeting) => meeting.id) },
+        },
         { projection: { _id: 1, originalTranscript: 1 } }
       )
       .toArray();
@@ -517,12 +708,19 @@ const retrieveMeetings = async (
         .filter((doc) => typeof doc?.originalTranscript === "string")
         .map((doc) => [String(doc._id), doc.originalTranscript as string])
     );
-    for (const meeting of scored) {
-      meeting.transcriptSnippets = extractTranscriptSnippets(
+    for (const meeting of needsKeywordSnippets) {
+      const keywordSnippets = extractTranscriptSnippets(
         transcriptById.get(meeting.id),
         query,
-        MAX_SNIPPETS_PER_MEETING
+        MAX_SNIPPETS_PER_MEETING - meeting.transcriptSnippets.length
       );
+      const seen = new Set(
+        meeting.transcriptSnippets.map((snippet) => snippet.snippet)
+      );
+      for (const snippet of keywordSnippets) {
+        if (seen.has(snippet.snippet)) continue;
+        meeting.transcriptSnippets.push(snippet);
+      }
     }
   }
 
@@ -533,6 +731,7 @@ const retrieveMeetings = async (
     summarySnippet: meeting.summarySnippet,
     transcriptSnippets: meeting.transcriptSnippets,
     score: meeting.score,
+    semanticScore: meeting.semanticScore,
   }));
 };
 
@@ -733,8 +932,11 @@ const retrievePeople = async (
 };
 
 /**
- * Keyword-first retrieval over the workspace's meetings, transcripts, tasks,
- * and people. Returns capped, scored context for the general AI chat.
+ * Hybrid retrieval over the workspace's meetings, transcripts, tasks, and
+ * people: semantic chunk similarity (when embeddings are available) combined
+ * with keyword scoring, recency boost, and structured intents. Returns
+ * capped, scored context for the general AI chat. Degrades to keyword-only
+ * behavior when embeddings are unavailable — never throws.
  */
 export const searchWorkspaceContext = async (
   db: any,
@@ -756,7 +958,10 @@ export const searchWorkspaceContext = async (
   const now = new Date();
 
   const [meetings, tasks, people] = await Promise.all([
-    retrieveMeetings(db, scopeFilter, query, maxMeetings, now),
+    retrieveSemanticMeetingHits(db, scopeFilter, rawQuestion).then(
+      (semanticHits) =>
+        retrieveMeetings(db, scopeFilter, query, maxMeetings, now, semanticHits)
+    ),
     retrieveTasks(
       db,
       scopeFilter,

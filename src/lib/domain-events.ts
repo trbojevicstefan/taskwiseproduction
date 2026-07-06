@@ -183,6 +183,29 @@ const handleMeetingLifecycleEvent = async (
       extractedTasks: payload.extractedTasks as Array<Record<string, unknown>> | undefined,
     },
   });
+
+  // Semantic meeting search: (re-)index this meeting's search chunks via the
+  // job queue so Fathom, Fireflies, Grain, and manual meetings all index
+  // consistently. Best-effort side effect — never fail the lifecycle event.
+  if (payload.meetingId) {
+    try {
+      await enqueueJob(db, {
+        type: "meeting-search-index",
+        userId,
+        correlationId:
+          typeof correlationId === "string" ? correlationId : undefined,
+        payload: {
+          meetingId: payload.meetingId,
+          workspaceId: payload.workspaceId ?? null,
+        },
+      });
+      void import("@/lib/jobs/worker")
+        .then(({ kickJobWorker }) => kickJobWorker())
+        .catch(() => undefined);
+    } catch {
+      // Chunk indexing is best-effort; the backfill script repairs gaps.
+    }
+  }
   return result;
 };
 

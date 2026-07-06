@@ -5,9 +5,31 @@ import {
   tokenize,
 } from "@/lib/workspace-retrieval";
 
+// The embeddings helper records external-API failures through the metrics
+// module, which would otherwise try to reach a real Mongo in tests.
+jest.mock("@/lib/observability-metrics", () => ({
+  recordExternalApiFailure: jest.fn(),
+}));
+
 const DAY_MS = 24 * 60 * 60 * 1000;
 const daysAgo = (days: number) =>
   new Date(Date.now() - days * DAY_MS).toISOString();
+
+// The semantic pass only runs when OPENAI_API_KEY is set; the keyword suites
+// below assert the embeddings-unavailable behavior, so pin the env (the
+// developer shell may carry a real key) and restore it afterwards.
+const originalApiKey = process.env.OPENAI_API_KEY;
+const originalFetch = global.fetch;
+
+beforeEach(() => {
+  delete process.env.OPENAI_API_KEY;
+});
+
+afterAll(() => {
+  if (originalApiKey === undefined) delete process.env.OPENAI_API_KEY;
+  else process.env.OPENAI_API_KEY = originalApiKey;
+  global.fetch = originalFetch;
+});
 
 type FindCall = { filter: any; options: any };
 
@@ -26,11 +48,13 @@ const makeDb = ({
   transcripts = [] as any[],
   tasks = [] as any[],
   people = [] as any[],
+  chunks = null as any[] | null,
 } = {}) => {
-  const calls: Record<"meetings" | "tasks" | "people", FindCall[]> = {
+  const calls: Record<"meetings" | "tasks" | "people" | "chunks", FindCall[]> = {
     meetings: [],
     tasks: [],
     people: [],
+    chunks: [],
   };
   const collections: Record<string, any> = {
     meetings: {
@@ -38,8 +62,15 @@ const makeDb = ({
         calls.meetings.push({ filter, options });
         if (filter?._id?.$in) {
           const ids = filter._id.$in.map(String);
+          // Transcript fetches project originalTranscript; semantic-only
+          // metadata fetches project the candidate fields.
+          if (options?.projection?.originalTranscript) {
+            return makeCursor(
+              transcripts.filter((doc: any) => ids.includes(String(doc._id)))
+            );
+          }
           return makeCursor(
-            transcripts.filter((doc: any) => ids.includes(String(doc._id)))
+            meetings.filter((doc: any) => ids.includes(String(doc._id)))
           );
         }
         return makeCursor(meetings);
@@ -58,6 +89,14 @@ const makeDb = ({
       }),
     },
   };
+  if (chunks) {
+    collections.meetingSearchChunks = {
+      find: jest.fn((filter: any, options?: any) => {
+        calls.chunks.push({ filter, options });
+        return makeCursor(chunks);
+      }),
+    };
+  }
   const db = {
     collection: jest.fn((name: string) => {
       const collection = collections[name];
@@ -575,5 +614,192 @@ describe("searchWorkspaceContext", () => {
     expect(result.meetings).toHaveLength(2);
     expect(result.tasks).toHaveLength(4);
     expect(result.people).toHaveLength(3);
+  });
+});
+
+describe("searchWorkspaceContext (hybrid semantic retrieval)", () => {
+  // Embedding space for the fetch mock: the question embeds to [1, 0], so a
+  // chunk with embedding [1, 0] is a perfect semantic hit and [0, 1] is not.
+  const mockQuestionEmbedding = (embedding = [1, 0]) => {
+    global.fetch = jest.fn(async () => ({
+      ok: true,
+      json: async () => ({
+        data: [{ embedding }],
+        usage: { total_tokens: 1 },
+      }),
+    })) as any;
+    return global.fetch as jest.Mock;
+  };
+
+  const chunkDoc = (overrides: Record<string, any> = {}) => ({
+    _id: "m-sem:transcript:0",
+    workspaceId: "ws-1",
+    meetingId: "m-sem",
+    userId: "user-1",
+    chunkType: "transcript",
+    text: "14:05 - Ana: The client felt the quote was far above their budget.",
+    speaker: "Ana",
+    timestamp: "14:05",
+    embedding: [1, 0],
+    updatedAt: new Date(),
+    ...overrides,
+  });
+
+  afterEach(() => {
+    global.fetch = originalFetch;
+    delete process.env.OPENAI_API_KEY;
+    jest.clearAllMocks();
+  });
+
+  it("finds a meeting semantically when the query wording shares no keywords", async () => {
+    process.env.OPENAI_API_KEY = "test-key";
+    mockQuestionEmbedding();
+    const { db, calls } = makeDb({
+      meetings: [
+        {
+          _id: "m-sem",
+          title: "Weekly checkin",
+          summary: "General project notes",
+          startTime: daysAgo(60),
+        },
+      ],
+      chunks: [chunkDoc()],
+    });
+
+    // "pricing feedback" appears nowhere in the meeting title/summary/chunk
+    // text — only cosine similarity can find it.
+    const result = await searchWorkspaceContext(db, scope, "pricing feedback");
+
+    expect(result.meetings.map((m) => m.id)).toEqual(["m-sem"]);
+    expect(result.meetings[0].semanticScore).toBeCloseTo(1, 5);
+    expect(result.meetings[0].score).toBeGreaterThan(0);
+    expect(result.meetings[0].transcriptSnippets[0]).toMatchObject({
+      timestamp: "14:05",
+      speaker: "Ana",
+    });
+    expect(result.meetings[0].transcriptSnippets[0].snippet).toContain(
+      "above their budget"
+    );
+    expect(result.isEmpty).toBe(false);
+
+    // Chunk candidate query is workspace-scoped and capped.
+    const chunkCall = calls.chunks[0];
+    expect(chunkCall.filter.$or).toEqual(expectedScopeOr);
+  });
+
+  it("drops semantic hits whose meeting is hidden or out of scope", async () => {
+    process.env.OPENAI_API_KEY = "test-key";
+    mockQuestionEmbedding();
+    // No meeting doc matches the chunk's meetingId (deleted meeting).
+    const { db } = makeDb({
+      meetings: [],
+      chunks: [chunkDoc({ meetingId: "m-deleted", _id: "m-deleted:transcript:0" })],
+    });
+
+    const result = await searchWorkspaceContext(db, scope, "pricing feedback");
+    expect(result.meetings).toEqual([]);
+    expect(result.isEmpty).toBe(true);
+  });
+
+  it("combines semantic and keyword scores (hybrid beats keyword-only)", async () => {
+    process.env.OPENAI_API_KEY = "test-key";
+    mockQuestionEmbedding();
+    const { db } = makeDb({
+      meetings: [
+        {
+          _id: "m-keyword",
+          title: "Pricing workshop",
+          summary: "",
+          startTime: daysAgo(60),
+        },
+        {
+          _id: "m-hybrid",
+          title: "Pricing workshop",
+          summary: "",
+          startTime: daysAgo(60),
+        },
+      ],
+      chunks: [
+        chunkDoc({ meetingId: "m-hybrid", _id: "m-hybrid:transcript:0" }),
+      ],
+    });
+
+    const result = await searchWorkspaceContext(db, scope, "pricing");
+    expect(result.meetings.map((m) => m.id)).toEqual(["m-hybrid", "m-keyword"]);
+    expect(result.meetings[0].score).toBeGreaterThan(result.meetings[1].score);
+    expect(result.meetings[0].semanticScore).toBeCloseTo(1, 5);
+    expect(result.meetings[1].semanticScore).toBeNull();
+  });
+
+  it("ignores chunks below the similarity threshold", async () => {
+    process.env.OPENAI_API_KEY = "test-key";
+    mockQuestionEmbedding([1, 0]);
+    const { db } = makeDb({
+      meetings: [
+        {
+          _id: "m-sem",
+          title: "Weekly checkin",
+          summary: "General notes",
+          startTime: daysAgo(60),
+        },
+      ],
+      chunks: [chunkDoc({ embedding: [0, 1] })],
+    });
+
+    const result = await searchWorkspaceContext(db, scope, "pricing feedback");
+    expect(result.meetings).toEqual([]);
+  });
+
+  it("degrades to the keyword path when no OPENAI_API_KEY is set", async () => {
+    const fetchMock = jest.fn();
+    global.fetch = fetchMock as any;
+    // makeDb without chunks: touching meetingSearchChunks would throw, which
+    // proves the semantic pass is fully skipped.
+    const { db } = makeDb({
+      meetings: [
+        { _id: "m-kw", title: "Pricing sync", startTime: daysAgo(2) },
+      ],
+    });
+
+    const result = await searchWorkspaceContext(db, scope, "pricing");
+    expect(result.meetings.map((m) => m.id)).toEqual(["m-kw"]);
+    expect(result.meetings[0].semanticScore).toBeNull();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("degrades to the keyword path when the embeddings call fails", async () => {
+    process.env.OPENAI_API_KEY = "test-key";
+    global.fetch = jest.fn(async () => ({
+      ok: false,
+      status: 500,
+      statusText: "boom",
+      text: async () => "boom",
+    })) as any;
+    const { db, calls } = makeDb({
+      meetings: [
+        { _id: "m-kw", title: "Pricing sync", startTime: daysAgo(2) },
+      ],
+      chunks: [chunkDoc()],
+    });
+
+    const result = await searchWorkspaceContext(db, scope, "pricing");
+    expect(result.meetings.map((m) => m.id)).toEqual(["m-kw"]);
+    expect(calls.chunks).toHaveLength(0);
+  });
+
+  it("returns an empty result for an empty workspace even with embeddings enabled", async () => {
+    process.env.OPENAI_API_KEY = "test-key";
+    mockQuestionEmbedding();
+    const { db } = makeDb({ chunks: [] });
+
+    const result = await searchWorkspaceContext(
+      db,
+      scope,
+      "what did we decide about pricing?"
+    );
+    expect(result.meetings).toEqual([]);
+    expect(result.tasks).toEqual([]);
+    expect(result.people).toEqual([]);
+    expect(result.isEmpty).toBe(true);
   });
 });
