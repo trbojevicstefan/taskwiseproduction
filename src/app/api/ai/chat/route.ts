@@ -523,17 +523,12 @@ export async function POST(request: Request) {
         queryPlan,
         toolResult
       );
-      const data: GeneralChatAnswer =
-        flowResult.confidence === "low" &&
-        flowResult.sources.length === 0 &&
-        operationalFallback
-          ? operationalFallback
-          : {
-              answer: flowResult.answer,
-              confidence: flowResult.confidence,
-              sources: flowResult.sources,
-              suggestedActions: flowResult.suggestedActions,
-            };
+      const data: GeneralChatAnswer = operationalFallback ?? {
+        answer: flowResult.answer,
+        confidence: flowResult.confidence,
+        sources: flowResult.sources,
+        suggestedActions: flowResult.suggestedActions,
+      };
 
       logger.info("api.request.succeeded", {
         status: 200,
