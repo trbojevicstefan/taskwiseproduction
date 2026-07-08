@@ -282,6 +282,9 @@ describe("mcp-workspace-tools", () => {
     expect(data.meetings).toHaveLength(1);
     expect(data.meetings[0]).toMatchObject({
       id: "meeting-1",
+      link: "/meetings/meeting-1",
+      attendees: [{ name: "Casey Client", email: "casey@client.com" }],
+      attendeeCount: 1,
       isClientMeeting: true,
     });
     expect(data.tasks.map((task: any) => task.id)).toEqual(["task-in-range"]);

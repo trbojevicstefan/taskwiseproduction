@@ -8,6 +8,33 @@ export type InternalChatToolResult = {
   answerHint?: string;
 };
 
+const renderAttendeeLabel = (attendee: unknown): string | null => {
+  if (typeof attendee === "string") {
+    const name = attendee.trim();
+    return name || null;
+  }
+  if (!attendee || typeof attendee !== "object") return null;
+  const record = attendee as Record<string, unknown>;
+  const name =
+    typeof record.name === "string" && record.name.trim()
+      ? record.name.trim()
+      : "";
+  const email =
+    typeof record.email === "string" && record.email.trim()
+      ? record.email.trim()
+      : "";
+  if (name && email) return `${name} <${email}>`;
+  return name || email || null;
+};
+
+const renderAgendaAttendees = (meeting: any): string => {
+  const labels = Array.isArray(meeting.attendees)
+    ? meeting.attendees.map(renderAttendeeLabel).filter(Boolean)
+    : [];
+  if (labels.length) return labels.join(", ");
+  return String(meeting.attendeeCount ?? 0);
+};
+
 const renderCalendarAgendaContext = (data: any): string => {
   const lines: string[] = [`AGENDA_RANGE ${data.from} | ${data.to}`];
 
@@ -17,7 +44,9 @@ const renderCalendarAgendaContext = (data: any): string => {
         ? meeting.startTime.slice(0, 10)
         : "unknown";
     lines.push(
-      `MEETING ${meeting.id} | ${meeting.title} | ${day} | attendees=${
+      `MEETING ${meeting.id} | ${meeting.title} | ${day} | link=${
+        meeting.link || `/meetings/${meeting.id}`
+      } | attendees=${renderAgendaAttendees(meeting)} | attendeeCount=${
         meeting.attendeeCount ?? 0
       } | clientMeeting=${Boolean(meeting.isClientMeeting)}`
     );

@@ -132,6 +132,31 @@ const isClientMeeting = (attendees: any[], clients: ClientPersonIndex): boolean 
   });
 };
 
+const serializeAgendaAttendee = (
+  attendee: unknown
+): { name: string; email: string | null } | null => {
+  if (typeof attendee === "string") {
+    const name = attendee.trim();
+    return name ? { name, email: null } : null;
+  }
+  if (!attendee || typeof attendee !== "object") return null;
+  const record = attendee as Record<string, unknown>;
+  const name =
+    typeof record.name === "string" && record.name.trim()
+      ? record.name.trim()
+      : typeof record.email === "string" && record.email.trim()
+        ? record.email.trim()
+        : "";
+  if (!name) return null;
+  return {
+    name,
+    email:
+      typeof record.email === "string" && record.email.trim()
+        ? record.email.trim()
+        : null,
+  };
+};
+
 const findBoardForSnapshot = async (
   db: Db,
   workspaceId: string,
@@ -529,10 +554,15 @@ const WORKSPACE_TOOLS: McpToolDefinition[] = [
       const clients = buildClientPersonIndex(clientPeople);
       const meetings = meetingDocs.map((meeting: any) => {
         const attendees = Array.isArray(meeting.attendees) ? meeting.attendees : [];
+        const id = String(meeting._id);
         return {
-          id: String(meeting._id),
+          id,
           title: meeting.title || "Untitled Meeting",
           startTime: toDateOrNull(meeting.startTime)?.toISOString() ?? null,
+          link: `/meetings/${id}`,
+          attendees: attendees
+            .map(serializeAgendaAttendee)
+            .filter(Boolean),
           attendeeCount: attendees.length,
           isClientMeeting: isClientMeeting(attendees, clients),
         };

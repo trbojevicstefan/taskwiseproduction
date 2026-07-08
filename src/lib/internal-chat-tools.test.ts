@@ -16,6 +16,11 @@ jest.mock("@/lib/mcp-workspace-tools", () => ({
               id: "m1",
               title: "Kickoff",
               startTime: "2026-07-07T10:00:00.000Z",
+              link: "/meetings/m1",
+              attendees: [
+                { name: "Casey Client", email: "casey@client.com" },
+                { name: "Ana Admin", email: null },
+              ],
               attendeeCount: 3,
               isClientMeeting: true,
             },
@@ -59,7 +64,7 @@ describe("runInternalChatTool", () => {
       "AGENDA_RANGE 2026-07-06T00:00:00.000Z | 2026-07-12T23:59:59.999Z"
     );
     expect(result.contextBlocks).toContain(
-      "MEETING m1 | Kickoff | 2026-07-07 | attendees=3 | clientMeeting=true"
+      "MEETING m1 | Kickoff | 2026-07-07 | link=/meetings/m1 | attendees=Casey Client <casey@client.com>, Ana Admin | attendeeCount=3 | clientMeeting=true"
     );
   });
 });
