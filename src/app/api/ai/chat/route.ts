@@ -210,7 +210,11 @@ const renderContextBlocks = (result: WorkspaceRetrievalResult): string => {
     const date = meeting.startTime
       ? meeting.startTime.slice(0, 10)
       : "date unknown";
-    lines.push(`MEETING ${meeting.id} | ${singleLine(meeting.title)} | ${date}`);
+    lines.push(
+      `MEETING ${meeting.id} | ${singleLine(
+        meeting.title
+      )} | ${date} | link=/meetings/${meeting.id}`
+    );
     if (meeting.summarySnippet) {
       lines.push(`  SUMMARY: ${singleLine(meeting.summarySnippet)}`);
     }
@@ -228,6 +232,9 @@ const renderContextBlocks = (result: WorkspaceRetrievalResult): string => {
       `due=${task.dueAt ? task.dueAt.slice(0, 10) : "none"}`,
     ];
     if (task.assigneeName) parts.push(`assignee=${singleLine(task.assigneeName)}`);
+    if (task.sourceSessionId) {
+      parts.push(`sourceMeeting=/meetings/${task.sourceSessionId}`);
+    }
     if (task.overdue) parts.push("OVERDUE");
     lines.push(parts.join(" | "));
   }

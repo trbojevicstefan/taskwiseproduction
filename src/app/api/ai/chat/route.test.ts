@@ -113,7 +113,7 @@ const populatedRetrieval: WorkspaceRetrievalResult = {
       dueAt: "2026-06-30T00:00:00.000Z",
       assigneeName: "Stefan",
       overdue: true,
-      sourceSessionId: null,
+      sourceSessionId: "m1",
       score: 4,
     },
   ],
@@ -123,6 +123,7 @@ const populatedRetrieval: WorkspaceRetrievalResult = {
       name: "Stefan Ionescu",
       email: "stefan@example.com",
       personType: "client",
+      openTaskCount: 2,
       score: 5,
     },
   ],
@@ -551,14 +552,16 @@ describe("POST /api/ai/chat", () => {
     const [flowInput, flowMeta] = mockedAnswerWorkspaceQuestion.mock.calls[0];
     expect(flowInput.question).toBe("What did Stefan say about pricing?");
     expect(flowInput.today).toMatch(/^\d{4}-\d{2}-\d{2}$/);
-    expect(flowInput.contextBlocks).toContain("MEETING m1 | Redesign kickoff | 2026-06-28");
+    expect(flowInput.contextBlocks).toContain(
+      "MEETING m1 | Redesign kickoff | 2026-06-28 | link=/meetings/m1"
+    );
     expect(flowInput.contextBlocks).toContain("SUMMARY: Discussed redesign scope");
     expect(flowInput.contextBlocks).toContain("[12:30]");
     expect(flowInput.contextBlocks).toContain(
-      "TASK t1 | Send updated proposal | status=todo | due=2026-06-30 | assignee=Stefan | OVERDUE"
+      "TASK t1 | Send updated proposal | status=todo | due=2026-06-30 | assignee=Stefan | sourceMeeting=/meetings/m1 | OVERDUE"
     );
     expect(flowInput.contextBlocks).toContain(
-      "PERSON p1 | Stefan Ionescu | client | stefan@example.com"
+      "PERSON p1 | Stefan Ionescu | client | stefan@example.com | openTasks=2"
     );
     expect(flowMeta).toMatchObject({ userId: "user-1" });
     expect(typeof flowMeta?.correlationId).toBe("string");
