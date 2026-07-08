@@ -15,6 +15,10 @@ import { getDb } from "@/lib/db";
 import { getSessionUserId } from "@/lib/server-auth";
 import { resolveWorkspaceScopeForUser } from "@/lib/workspace-scope";
 import { planWorkspaceChatQuestion } from "@/lib/chat-query-planner";
+import {
+  planChatTaskCommand,
+  runChatTaskCommand,
+} from "@/lib/chat-task-commands";
 import { runInternalChatTool } from "@/lib/internal-chat-tools";
 import {
   searchWorkspaceContext,
@@ -86,6 +90,17 @@ const renderHistoryBlock = (
     .join("\n")
     .slice(0, HISTORY_RENDER_MAX_CHARS);
   return rendered || undefined;
+};
+
+const buildRetrievalQuestion = (
+  question: string,
+  historyBlock: string | undefined
+): string => {
+  if (!historyBlock) return question;
+  return `${question}\n\nRecent chat context:\n${historyBlock}`.slice(
+    0,
+    HISTORY_RENDER_MAX_CHARS
+  );
 };
 
 // ---------------------------------------------------------------------------
@@ -454,6 +469,32 @@ export async function POST(request: Request) {
       }
     }
 
+    const taskCommand = planChatTaskCommand(question);
+    if (taskCommand) {
+      const data = await runChatTaskCommand(
+        db,
+        {
+          userId,
+          workspaceId,
+          memberUserIds: workspaceMemberUserIds,
+        },
+        taskCommand
+      );
+
+      logger.info("api.request.succeeded", {
+        status: 200,
+        durationMs: durationMs(),
+        outcome: "task_command_answered",
+        confidence: data.confidence,
+        commandKind: taskCommand.kind,
+      });
+      emitMetric(200, "success", {
+        outcome: "task_command_answered",
+        confidence: data.confidence,
+      });
+      return apiSuccess({ data }, { correlationId });
+    }
+
     if (effectiveMeetingId) {
       const meeting = await loadScopedMeeting(db, effectiveMeetingId, {
         userId,
@@ -619,7 +660,7 @@ export async function POST(request: Request) {
         workspaceId,
         memberUserIds: workspaceMemberUserIds,
       },
-      question
+      buildRetrievalQuestion(question, historyBlock)
     );
 
     if (retrieval.isEmpty) {

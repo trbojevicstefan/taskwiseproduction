@@ -67,10 +67,25 @@ const mockedAnswerMeetingQuestion =
 
 const meetingsFindOne = jest.fn();
 const chatSessionsFindOne = jest.fn();
+const tasksFindToArray = jest.fn();
+const tasksFindLimit = jest.fn(() => ({ toArray: tasksFindToArray }));
+const tasksFindSort = jest.fn(() => ({ limit: tasksFindLimit }));
+const tasksFind = jest.fn(() => ({ sort: tasksFindSort }));
+const tasksFindOne = jest.fn();
+const tasksInsertOne = jest.fn();
+const tasksUpdateOne = jest.fn();
 const fakeDb = {
   collection: jest.fn((name: string) => {
     if (name === "meetings") return { findOne: meetingsFindOne };
     if (name === "chatSessions") return { findOne: chatSessionsFindOne };
+    if (name === "tasks") {
+      return {
+        find: tasksFind,
+        findOne: tasksFindOne,
+        insertOne: tasksInsertOne,
+        updateOne: tasksUpdateOne,
+      };
+    }
     return { findOne: jest.fn() };
   }),
 } as any;
@@ -202,6 +217,10 @@ describe("POST /api/ai/chat", () => {
     mockedAnswerMeetingQuestion.mockResolvedValue(validMeetingFlowResult);
     meetingsFindOne.mockResolvedValue(null);
     chatSessionsFindOne.mockResolvedValue(null);
+    tasksFindToArray.mockResolvedValue([]);
+    tasksFindOne.mockResolvedValue(null);
+    tasksInsertOne.mockResolvedValue({ insertedId: "task-new" });
+    tasksUpdateOne.mockResolvedValue({ matchedCount: 1, modifiedCount: 1 });
   });
 
   it("returns 401 when there is no session", async () => {
@@ -610,6 +629,122 @@ describe("POST /api/ai/chat", () => {
     expect(flowInput.history).toContain(
       "Assistant: Send updated proposal is overdue."
     );
+  });
+
+  it("expands workspace retrieval with recent history for follow-up questions", async () => {
+    const response = await POST(
+      buildRequest({
+        question: "Who attended the first one?",
+        history: [
+          { role: "user", text: "What meetings did we have this week?" },
+          {
+            role: "assistant",
+            text:
+              "You had 2 meetings this week:\n- Redesign kickoff (2026-07-07) - /meetings/m1 - attendees: Ana Admin, Casey Client\n- Planning B (2026-07-08) - /meetings/m2 - attendees: Stefan",
+          },
+        ],
+      })
+    );
+
+    expect(response.status).toBe(200);
+    const retrievalQuery = mockedSearchWorkspaceContext.mock.calls[0][2];
+    expect(retrievalQuery).toContain("Who attended the first one?");
+    expect(retrievalQuery).toContain("Redesign kickoff");
+    expect(retrievalQuery).toContain("Ana Admin");
+    const [flowInput] = mockedAnswerWorkspaceQuestion.mock.calls[0];
+    expect(flowInput.question).toBe("Who attended the first one?");
+  });
+
+  it("creates a workspace task from an explicit chat command without calling the LLM", async () => {
+    const response = await POST(
+      buildRequest({ question: "Create a task to follow up with Casey" })
+    );
+
+    expect(response.status).toBe(200);
+    const payload = await response.json();
+    expect(payload.data.answer).toContain('Created task "Follow up with Casey"');
+    expect(payload.data.sources).toEqual([
+      expect.objectContaining({
+        sourceType: "task",
+        sourceId: expect.any(String),
+        title: "Follow up with Casey",
+      }),
+    ]);
+    expect(payload.data.suggestedActions).toEqual([
+      expect.objectContaining({
+        actionType: "open_task",
+        targetId: expect.any(String),
+      }),
+    ]);
+    expect(tasksInsertOne).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: "Follow up with Casey",
+        status: "todo",
+        priority: "medium",
+        origin: "chat",
+        workspaceId: "workspace-1",
+        userId: "user-1",
+        taskState: "active",
+      })
+    );
+    expect(mockedSearchWorkspaceContext).not.toHaveBeenCalled();
+    expect(mockedAnswerWorkspaceQuestion).not.toHaveBeenCalled();
+  });
+
+  it("edits a single matched workspace task from an explicit chat command", async () => {
+    tasksFindToArray.mockResolvedValue([
+      {
+        _id: "task-1",
+        title: "Follow up with Casey",
+        status: "todo",
+        workspaceId: "workspace-1",
+        userId: "user-1",
+      },
+    ]);
+    tasksFindOne.mockResolvedValue({
+      _id: "task-1",
+      title: "Follow up with Casey",
+      status: "done",
+      workspaceId: "workspace-1",
+      userId: "user-1",
+      lastUpdated: new Date("2026-07-08T12:00:00.000Z"),
+    });
+
+    const response = await POST(
+      buildRequest({ question: "Set task Follow up with Casey to done" })
+    );
+
+    expect(response.status).toBe(200);
+    const payload = await response.json();
+    expect(payload.data.answer).toContain(
+      'Updated task "Follow up with Casey"'
+    );
+    expect(tasksUpdateOne).toHaveBeenCalledWith(
+      expect.objectContaining({ _id: "task-1" }),
+      expect.objectContaining({
+        $set: expect.objectContaining({ status: "done" }),
+      })
+    );
+    expect(mockedSearchWorkspaceContext).not.toHaveBeenCalled();
+    expect(mockedAnswerWorkspaceQuestion).not.toHaveBeenCalled();
+  });
+
+  it("refuses ambiguous chat task edits instead of mutating multiple matches", async () => {
+    tasksFindToArray.mockResolvedValue([
+      { _id: "task-1", title: "Follow up with Casey", status: "todo" },
+      { _id: "task-2", title: "Follow up with Casey at Acme", status: "todo" },
+    ]);
+
+    const response = await POST(
+      buildRequest({ question: "Mark task Casey done" })
+    );
+
+    expect(response.status).toBe(200);
+    const payload = await response.json();
+    expect(payload.data.confidence).toBe("low");
+    expect(payload.data.answer).toMatch(/I found multiple matching tasks/i);
+    expect(tasksUpdateOne).not.toHaveBeenCalled();
+    expect(mockedSearchWorkspaceContext).not.toHaveBeenCalled();
   });
 
   describe("meeting-scoped chat", () => {
