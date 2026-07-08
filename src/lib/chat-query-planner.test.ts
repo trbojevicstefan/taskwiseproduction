@@ -18,6 +18,23 @@ describe("planWorkspaceChatQuestion", () => {
     });
   });
 
+  it("routes weekly meeting overview questions to the calendar agenda tool", () => {
+    const plan = planWorkspaceChatQuestion(
+      "What meetings did we have this week?",
+      new Date("2026-07-07T12:00:00.000Z")
+    );
+
+    expect(plan).toEqual({
+      mode: "workspace_tool",
+      toolName: "get_calendar_agenda",
+      toolArgs: {
+        from: "2026-07-06T00:00:00.000Z",
+        to: "2026-07-12T23:59:59.999Z",
+      },
+      rationale: "weekly_meetings_overview",
+    });
+  });
+
   it("keeps open-ended evidence questions on retrieval mode", () => {
     const plan = planWorkspaceChatQuestion("What did Stefan say about pricing?");
 

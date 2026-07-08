@@ -1,5 +1,8 @@
 const MEETING_COUNT_THIS_WEEK_REGEX =
-  /\bhow many meetings\b.*\bthis week\b|\bmeetings did we have this week\b/i;
+  /\bhow many meetings\b.*\bthis week\b|\bhow many\b.*\bmeetings did we have this week\b/i;
+
+const WEEKLY_MEETING_OVERVIEW_REGEX =
+  /\b(?:what|which|list|show)\b.*\bmeetings?\b.*\bthis week\b|\bmeetings?\b.*\b(?:this week|week)\b/i;
 
 const OPERATIONAL_CALENDAR_REGEX =
   /\bhow many meetings\b|\bthis week\b|\bcalendar\b|\bagenda\b/i;
@@ -39,8 +42,21 @@ export function planWorkspaceChatQuestion(
   now: Date = new Date()
 ): ChatWorkspaceQueryPlan {
   const trimmed = question.trim();
+  const weeklyToolArgs = {
+    from: startOfIsoWeek(now).toISOString(),
+    to: endOfIsoWeek(now).toISOString(),
+  };
+  if (MEETING_COUNT_THIS_WEEK_REGEX.test(trimmed)) {
+    return {
+      mode: "workspace_tool",
+      toolName: "get_calendar_agenda",
+      toolArgs: weeklyToolArgs,
+      rationale: "meeting_count_this_week",
+    };
+  }
+
   if (
-    MEETING_COUNT_THIS_WEEK_REGEX.test(trimmed) ||
+    WEEKLY_MEETING_OVERVIEW_REGEX.test(trimmed) ||
     (OPERATIONAL_CALENDAR_REGEX.test(trimmed) &&
       /\bhow many\b/i.test(trimmed) &&
       /\bmeeting/i.test(trimmed))
@@ -48,11 +64,8 @@ export function planWorkspaceChatQuestion(
     return {
       mode: "workspace_tool",
       toolName: "get_calendar_agenda",
-      toolArgs: {
-        from: startOfIsoWeek(now).toISOString(),
-        to: endOfIsoWeek(now).toISOString(),
-      },
-      rationale: "meeting_count_this_week",
+      toolArgs: weeklyToolArgs,
+      rationale: "weekly_meetings_overview",
     };
   }
 
