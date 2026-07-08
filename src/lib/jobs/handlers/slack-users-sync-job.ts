@@ -4,6 +4,8 @@ import { getDb } from "@/lib/db";
 import { findUserById } from "@/lib/db/users";
 import { recordExternalApiFailure } from "@/lib/observability-metrics";
 import { getValidSlackToken } from "@/lib/slack";
+import { upsertSourceIdentity } from "@/lib/people-matching";
+import { SLACK_TEAMMATE_REASON } from "@/lib/person-classification";
 import {
   createLogger,
   ensureCorrelationId,
@@ -159,6 +161,16 @@ export const runSlackUsersSyncJob = async ({
       email: member.email,
     });
 
+    const now = new Date();
+    const slackIdentity = {
+      provider: "slack" as const,
+      externalId: member.id,
+      email: member.email,
+      name: member.realName,
+      confidence: 1,
+      lastSeenAt: now,
+    };
+
     if (existing) {
       await db.collection("people").updateOne(
         { _id: existing._id, userId },
@@ -168,13 +180,29 @@ export const runSlackUsersSyncJob = async ({
             ...(existing.name ? {} : { name: member.realName }),
             ...(existing.title ? {} : { title: member.title || null }),
             ...(existing.avatarUrl ? {} : { avatarUrl: member.image || null }),
-            lastSeenAt: new Date(),
+            ...(existing.personTypeSource === "manual"
+              ? {}
+              : {
+                  personType: "teammate",
+                  personTypeSource: "auto",
+                  personTypeReason: SLACK_TEAMMATE_REASON,
+                }),
+            // Slack is the canonical source for teammates: it wins over
+            // transcript/meeting provenance, but never over "manual".
+            ...(existing.primarySource === "manual"
+              ? {}
+              : { primarySource: "slack" }),
+            sourceIdentities: upsertSourceIdentity(
+              existing.sourceIdentities,
+              slackIdentity
+            ),
+            ...(existing.mergeState ? {} : { mergeState: "active" }),
+            lastSeenAt: now,
           },
         }
       );
       updated += 1;
     } else {
-      const now = new Date();
       await db.collection("people").insertOne({
         _id: randomUUID(),
         userId,
@@ -187,6 +215,12 @@ export const runSlackUsersSyncJob = async ({
         phantomBusterId: null,
         aliases: [],
         sourceSessionIds: [],
+        personType: "teammate",
+        personTypeSource: "auto",
+        personTypeReason: SLACK_TEAMMATE_REASON,
+        primarySource: "slack",
+        mergeState: "active",
+        sourceIdentities: [slackIdentity],
         createdAt: now,
         lastSeenAt: now,
       });

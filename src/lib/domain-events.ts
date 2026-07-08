@@ -5,6 +5,7 @@ import { createLogger, serializeError } from "@/lib/observability";
 import { queueMeetingWorkflowAutomation } from "@/lib/meeting-workflow-automation";
 import { syncBoardItemsToStatusByTaskRecord } from "@/lib/services/board-status-sync";
 import { applyMeetingIngestionSideEffects } from "@/lib/services/meeting-ingestion-side-effects";
+import { cancelRemindersForTask } from "@/lib/task-reminders";
 import { normalizePersonNameKey } from "@/lib/transcript-utils";
 import type { ExtractedTaskSchema } from "@/types/chat";
 
@@ -133,6 +134,21 @@ const handleTaskStatusChanged = async (
   }
 
   const tasks = await db.collection("tasks").find(filter).toArray();
+
+  if (payload.status === "done") {
+    // Phase 10: completed tasks must not ping anyone — flip any scheduled Slack
+    // reminders to canceled in one cheap updateMany (already-enqueued send
+    // jobs no-op afterwards). Best-effort: never fail the status change.
+    const reminderTaskIds = Array.from(
+      new Set([taskId, ...tasks.map((task: any) => String(task._id))])
+    );
+    try {
+      await cancelRemindersForTask(db, reminderTaskIds, "task_completed");
+    } catch {
+      // Reminder cancelation is a side effect — swallow failures.
+    }
+  }
+
   if (!tasks.length) {
     return { matchedTasks: 0 };
   }
@@ -167,6 +183,29 @@ const handleMeetingLifecycleEvent = async (
       extractedTasks: payload.extractedTasks as Array<Record<string, unknown>> | undefined,
     },
   });
+
+  // Semantic meeting search: (re-)index this meeting's search chunks via the
+  // job queue so Fathom, Fireflies, Grain, and manual meetings all index
+  // consistently. Best-effort side effect — never fail the lifecycle event.
+  if (payload.meetingId) {
+    try {
+      await enqueueJob(db, {
+        type: "meeting-search-index",
+        userId,
+        correlationId:
+          typeof correlationId === "string" ? correlationId : undefined,
+        payload: {
+          meetingId: payload.meetingId,
+          workspaceId: payload.workspaceId ?? null,
+        },
+      });
+      void import("@/lib/jobs/worker")
+        .then(({ kickJobWorker }) => kickJobWorker())
+        .catch(() => undefined);
+    } catch {
+      // Chunk indexing is best-effort; the backfill script repairs gaps.
+    }
+  }
   return result;
 };
 

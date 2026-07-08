@@ -1,4 +1,7 @@
-import { upsertPeopleFromAttendees } from "@/lib/people-sync";
+import {
+  resolveMeetingPeopleProvider,
+  upsertPeopleFromAttendees,
+} from "@/lib/people-sync";
 import { syncTasksForSource } from "@/lib/task-sync";
 import { getWorkspaceIdForUser } from "@/lib/workspace";
 import type { ExtractedTaskSchema } from "@/types/chat";
@@ -85,7 +88,10 @@ export const applyMeetingIngestionSideEffects = async (
       ? payload.workspaceId.trim()
       : null;
 
-  if (!workspaceId) {
+  // Single lookup covers both the workspace fallback and the ingest source
+  // (used to stamp people sourceIdentities with the meeting provider).
+  let ingestSource: string | null = null;
+  if (!workspaceId || attendees.length) {
     const meetingDoc = await db
       .collection("meetings")
       .findOne(
@@ -94,13 +100,17 @@ export const applyMeetingIngestionSideEffects = async (
           $or: [{ _id: meetingId }, { id: meetingId }],
         },
         {
-          projection: { workspaceId: 1 },
+          projection: { workspaceId: 1, ingestSource: 1 },
         }
       );
-    workspaceId =
-      typeof meetingDoc?.workspaceId === "string" && meetingDoc.workspaceId.trim()
-        ? meetingDoc.workspaceId.trim()
-        : null;
+    if (!workspaceId) {
+      workspaceId =
+        typeof meetingDoc?.workspaceId === "string" && meetingDoc.workspaceId.trim()
+          ? meetingDoc.workspaceId.trim()
+          : null;
+    }
+    ingestSource =
+      typeof meetingDoc?.ingestSource === "string" ? meetingDoc.ingestSource : null;
   }
 
   if (!workspaceId) {
@@ -114,6 +124,7 @@ export const applyMeetingIngestionSideEffects = async (
       userId,
       attendees,
       sourceSessionId: meetingId,
+      provider: resolveMeetingPeopleProvider(ingestSource),
     });
   }
 

@@ -75,7 +75,7 @@ async function main() {
     for (const g of groups) {
       const ids = g.ids;
       // Prefer keeping an ObjectId instance if present, else first id
-      let keep = ids.find(id => ObjectId.isValid(String(id)) && id instanceof ObjectId) || ids[0];
+      const keep = ids.find(id => ObjectId.isValid(String(id)) && id instanceof ObjectId) || ids[0];
       const remove = ids.filter(id => id.toString() !== keep.toString());
       if (remove.length === 0) continue;
       const res = await coll.deleteMany({ _id: { $in: remove } });

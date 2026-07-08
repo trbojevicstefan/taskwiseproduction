@@ -35,7 +35,50 @@ const serializePerson = (person: any) => ({
   _id: undefined,
   createdAt: person.createdAt?.toISOString?.() || person.createdAt,
   lastSeenAt: person.lastSeenAt?.toISOString?.() || person.lastSeenAt,
+  personType: person.personType || "unknown",
+  personTypeSource: person.personTypeSource ?? null,
+  personTypeReason: person.personTypeReason ?? null,
+  company: person.company ?? null,
+  nextFollowUpAt:
+    person.nextFollowUpAt?.toISOString?.() || person.nextFollowUpAt || null,
+  // Canonical identity fields (additive; absent docs read as active).
+  canonicalPersonId: person.canonicalPersonId ?? null,
+  primarySource: person.primarySource ?? null,
+  sourceIdentities: person.sourceIdentities ?? [],
+  mergeState: person.mergeState ?? "active",
+  mergedIntoPersonId: person.mergedIntoPersonId ?? null,
+  blockedMergePersonIds: person.blockedMergePersonIds ?? [],
+  blockedMergeKeys: person.blockedMergeKeys ?? [],
 });
+
+const PERSON_TYPES = new Set(["teammate", "client", "unknown"]);
+
+const buildPersonTypeFilter = (typeParam: string | null) => {
+  if (!typeParam || !PERSON_TYPES.has(typeParam)) return null;
+  if (typeParam === "unknown") {
+    return {
+      $or: [
+        { personType: { $exists: false } },
+        { personType: null },
+        { personType: "unknown" },
+      ],
+    };
+  }
+  return { personType: typeParam };
+};
+
+const parseTimestamp = (value: any): number | null => {
+  if (!value) return null;
+  if (value instanceof Date) {
+    const ms = value.getTime();
+    return Number.isNaN(ms) ? null : ms;
+  }
+  if (typeof value === "string" || typeof value === "number") {
+    const ms = new Date(value).getTime();
+    return Number.isNaN(ms) ? null : ms;
+  }
+  return null;
+};
 
 export async function GET(request?: Request) {
   const routeContext = createRouteRequestContext({
@@ -76,9 +119,20 @@ export async function GET(request?: Request) {
       ],
     };
 
+    const typeParam = request?.url
+      ? new URL(request.url).searchParams.get("type")
+      : null;
+    const personTypeFilter = buildPersonTypeFilter(typeParam);
+    // Merged tombstones stay in Mongo for auditability/reversal but are
+    // hidden from every listing.
+    const activeMergeFilter = { mergeState: { $ne: "merged" } };
+    const peopleQuery = personTypeFilter
+      ? { $and: [workspaceFallbackScope, personTypeFilter, activeMergeFilter] }
+      : { $and: [workspaceFallbackScope, activeMergeFilter] };
+
     const people = await db
       .collection("people")
-      .find(workspaceFallbackScope as any)
+      .find(peopleQuery as any)
       .sort({ lastSeenAt: -1 })
       .toArray();
 
@@ -96,6 +150,7 @@ export async function GET(request?: Request) {
       .project({
         _id: 1,
         status: 1,
+        dueAt: 1,
         sourceSessionType: 1,
         sourceSessionId: 1,
         assignee: 1,
@@ -116,7 +171,7 @@ export async function GET(request?: Request) {
           },
         ],
       } as any)
-      .project({ _id: 1, extractedTasks: 1 })
+      .project({ _id: 1, extractedTasks: 1, startTime: 1 })
       .toArray();
     const chatSessions = await db
       .collection("chatSessions")
@@ -143,12 +198,14 @@ export async function GET(request?: Request) {
     });
 
     const statusCounts = new Map<string, ReturnType<typeof emptyCounts>>();
+    const overdueCounts = new Map<string, number>();
     const emailToId = new Map<string, string>();
     const nameToId = new Map<string, string>();
 
     people.forEach((person: any) => {
       const personId = String(person._id);
       statusCounts.set(personId, emptyCounts());
+      overdueCounts.set(personId, 0);
       if (person.email) {
         const emailKey = person.email.toLowerCase();
         if (!emailToId.has(emailKey)) emailToId.set(emailKey, personId);
@@ -224,10 +281,16 @@ export async function GET(request?: Request) {
       return null;
     };
 
+    const nowMs = Date.now();
     const matchTaskToPerson = (task: any) => {
       const personId = resolvePersonId(task);
       if (!personId) return;
-      increment(personId, normalizeStatus(task?.status));
+      const status = normalizeStatus(task?.status);
+      increment(personId, status);
+      const dueAtMs = parseTimestamp(task?.dueAt);
+      if (status !== "done" && dueAtMs !== null && dueAtMs < nowMs) {
+        overdueCounts.set(personId, (overdueCounts.get(personId) || 0) + 1);
+      }
     };
 
     const flattenExtractedTasks = (items: ExtractedTaskSchema[] = []) => {
@@ -257,8 +320,13 @@ export async function GET(request?: Request) {
       matchTaskToPerson(task);
     });
 
+    const meetingStartTimes = new Map<string, number>();
     meetings.forEach((meeting: any) => {
       const meetingId = String(meeting._id ?? meeting.id);
+      const startMs = parseTimestamp(meeting.startTime);
+      if (startMs !== null) {
+        meetingStartTimes.set(meetingId, startMs);
+      }
       if (meetingSessionsWithTasks.has(meetingId)) return;
       const flattened = flattenExtractedTasks(meeting.extractedTasks || []);
       flattened.forEach(matchTaskToPerson);
@@ -271,12 +339,28 @@ export async function GET(request?: Request) {
       flattened.forEach(matchTaskToPerson);
     });
 
+    const resolveLastMeetingAt = (person: any): string | null => {
+      let maxMs: number | null = null;
+      const sessionIds = Array.isArray(person.sourceSessionIds)
+        ? person.sourceSessionIds
+        : [];
+      sessionIds.forEach((sessionId: any) => {
+        const startMs = meetingStartTimes.get(String(sessionId));
+        if (startMs !== undefined && (maxMs === null || startMs > maxMs)) {
+          maxMs = startMs;
+        }
+      });
+      return maxMs === null ? null : new Date(maxMs).toISOString();
+    };
+
     const peopleWithCounts = people.map((person: any) => {
       const counts = statusCounts.get(String(person._id)) || emptyCounts();
       return {
         ...serializePerson(person),
         taskCount: counts.open,
         taskCounts: counts,
+        lastMeetingAt: resolveLastMeetingAt(person),
+        overdueTaskCount: overdueCounts.get(String(person._id)) || 0,
       };
     });
 
@@ -402,6 +486,10 @@ export async function POST(request: Request) {
       );
     }
 
+    // People created through this route either come from the manual "Add
+    // Person" flow (sourceSessionId literal "manual") or from a transcript /
+    // chat discovery flow (sourceSessionId is a session id).
+    const isManualCreation = !sourceSessionId || sourceSessionId === "manual";
     const person = {
       _id: randomUUID(),
       userId,
@@ -416,6 +504,19 @@ export async function POST(request: Request) {
       aliases: body.aliases || [],
       isBlocked: Boolean(body.isBlocked),
       sourceSessionIds: sourceSessionId ? [sourceSessionId] : [],
+      primarySource: isManualCreation ? "manual" : "transcript",
+      mergeState: "active",
+      sourceIdentities: isManualCreation
+        ? [
+            {
+              provider: "manual",
+              ...(body.email ? { email: String(body.email).toLowerCase() } : {}),
+              name,
+              confidence: 1,
+              lastSeenAt: now,
+            },
+          ]
+        : [],
       createdAt: now,
       lastSeenAt: now,
     };

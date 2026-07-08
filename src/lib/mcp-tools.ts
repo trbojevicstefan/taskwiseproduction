@@ -1,35 +1,35 @@
 import type { Db } from "mongodb";
+import { McpToolCallError } from "@/lib/mcp-read-tools";
 import {
-  executeMcpReadTool,
-  listMcpReadTools,
-  type McpReadToolExecutionResult,
-  McpToolCallError,
-} from "@/lib/mcp-read-tools";
-import {
-  executeMcpWriteTool,
-  getMcpWriteToolNames,
-  listMcpWriteTools,
-  type McpWriteToolExecutionResult,
-} from "@/lib/mcp-write-tools";
+  executeRegisteredMcpTool,
+  listRegisteredMcpTools,
+  resolveToolScope,
+  type McpToolResult,
+} from "@/lib/mcp-registry";
+import { registerAllMcpDefinitions } from "@/lib/mcp-register-all";
 
-export type McpToolExecutionResult =
-  | McpReadToolExecutionResult
-  | McpWriteToolExecutionResult;
+// Facade over the central MCP registry (src/lib/mcp-registry.ts). Export names and
+// signatures are frozen — the transport route tests mock exactly this module shape.
+registerAllMcpDefinitions();
+
+export type McpToolExecutionResult = McpToolResult;
 
 export { McpToolCallError };
 
-const writeToolNameSet = new Set<string>(getMcpWriteToolNames());
-const readToolNameSet = new Set<string>(listMcpReadTools().map((tool) => tool.name));
-
-export const listMcpTools = () => [...listMcpReadTools(), ...listMcpWriteTools()];
+export const listMcpTools = () =>
+  listRegisteredMcpTools().map((definition) => ({
+    name: definition.name,
+    description: definition.description,
+    inputSchema: definition.jsonSchema,
+  }));
 
 export const resolveMcpToolScopeRequirement = (toolName: string) => {
-  if (writeToolNameSet.has(toolName)) {
-    return "mcp:write";
+  const scope = resolveToolScope(toolName);
+  if (scope) {
+    return scope;
   }
-  if (readToolNameSet.has(toolName)) {
-    return "mcp:read";
-  }
+  // Defensive fallback kept from the pre-registry facade: unregistered
+  // action_items.update_* names still classify as writes.
   if (toolName.startsWith("action_items.update_")) {
     return "mcp:write";
   }
@@ -41,12 +41,5 @@ export const executeMcpTool = async (
   workspaceId: string,
   toolName: string,
   rawArgs?: Record<string, unknown>
-): Promise<McpToolExecutionResult> => {
-  if (writeToolNameSet.has(toolName)) {
-    return executeMcpWriteTool(db, workspaceId, toolName, rawArgs);
-  }
-  if (readToolNameSet.has(toolName)) {
-    return executeMcpReadTool(db, workspaceId, toolName, rawArgs);
-  }
-  throw new McpToolCallError("tool_not_found", `Tool not found: ${toolName}`);
-};
+): Promise<McpToolExecutionResult> =>
+  executeRegisteredMcpTool({ db, workspaceId }, toolName, rawArgs);

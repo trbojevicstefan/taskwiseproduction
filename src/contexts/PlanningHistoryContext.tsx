@@ -165,7 +165,7 @@ export const PlanningHistoryProvider = ({ children }: { children: ReactNode }) =
   
   const updatePlanningSession = useCallback(async (sessionId: string, updatedFields: Partial<Omit<PlanningSession, 'id' | 'userId' | 'createdAt' | 'lastActivityAt'>>) => {
     if (!user?.uid) return;
-    let fieldsToUpdate = { ...updatedFields };
+    const fieldsToUpdate = { ...updatedFields };
     if (fieldsToUpdate.extractedTasks) {
         fieldsToUpdate.extractedTasks = (fieldsToUpdate.extractedTasks || []).map(task => normalizeTask(task as ExtractedTaskSchema));
     }

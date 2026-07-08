@@ -1,17 +1,17 @@
 // src/app/explore/page.tsx
 import DashboardPageLayout from '@/components/layouts/DashboardPageLayout';
-import ExplorePageContent from '@/components/dashboard/explore/ExplorePageContent';
+import CalendarPageContent from '@/components/dashboard/calendar/CalendarPageContent';
 import type { Metadata } from 'next';
 
 export const metadata: Metadata = {
-  title: 'Explore | TaskWiseAI',
-  description: 'Visually explore and interact with your sessions and tasks over time.',
+  title: 'Calendar | TaskWiseAI',
+  description: 'See what happened, what is due, and who needs a reminder.',
 };
 
 export default function ExplorePage() {
   return (
     <DashboardPageLayout>
-        <ExplorePageContent />
+        <CalendarPageContent />
     </DashboardPageLayout>
   );
 }

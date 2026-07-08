@@ -2,6 +2,12 @@ import { NextResponse } from "next/server";
 import { apiError } from "@/lib/api-route";
 import { getDb } from "@/lib/db";
 import { getSessionUserId } from "@/lib/server-auth";
+import { kickJobWorker } from "@/lib/jobs/worker";
+import { computeTaskPriority } from "@/lib/task-priority";
+import {
+  cancelRemindersForTask,
+  enqueueReminderSweepJob,
+} from "@/lib/task-reminders";
 import { normalizePersonNameKey } from "@/lib/transcript-utils";
 import { syncTasksForSource } from "@/lib/task-sync";
 import { publishDomainEvent } from "@/lib/domain-events";
@@ -13,6 +19,16 @@ import {
 } from "@/lib/services/session-task-sync";
 import type { ExtractedTaskSchema } from "@/types/chat";
 
+// Body fields that feed the deterministic priority scorer — touching any of
+// them triggers an inline recompute for this task (Phase 9).
+const PRIORITY_INPUT_FIELDS = [
+  "dueAt",
+  "priority",
+  "assignee",
+  "assigneeName",
+  "status",
+] as const;
+
 const serializeTask = (task: any) => ({
   ...task,
   id: task._id,
@@ -20,6 +36,14 @@ const serializeTask = (task: any) => ({
   createdAt: task.createdAt?.toISOString?.() || task.createdAt,
   lastUpdated: task.lastUpdated?.toISOString?.() || task.lastUpdated,
 });
+
+// dueAt is schemaless (Date | ISO string | null) — normalize before comparing
+// so a Phase 10 reminder reschedule only fires on a REAL due-date change.
+const toDueIso = (value: unknown): string | null => {
+  if (!value) return null;
+  const date = value instanceof Date ? value : new Date(String(value));
+  return Number.isNaN(date.getTime()) ? null : date.toISOString();
+};
 
 const applyTaskUpdate = (existing: ExtractedTaskSchema, source: any) => {
   const next: ExtractedTaskSchema = { ...existing };
@@ -335,6 +359,30 @@ export async function PATCH(
     userId,
     $or: [{ _id: id }, { id }],
   };
+
+  // Inline priority recompute (Phase 9): when the body touches a scoring
+  // input, rescore the merged task (existing doc + this update) so the
+  // stored priority never lags the edit. Uses a cheap { now }-only context —
+  // POST /api/tasks/priority/recompute refines scores with client-impact and
+  // workload signals across the whole workspace.
+  const touchesPriorityInputs = PRIORITY_INPUT_FIELDS.some((field) =>
+    Object.prototype.hasOwnProperty.call(body, field)
+  );
+  let existing: any = null;
+  if (touchesPriorityInputs) {
+    existing = await db.collection("tasks").findOne(filter);
+    if (existing) {
+      const merged = { ...existing, ...update };
+      const now = new Date();
+      const { priorityScore, priorityLabel, priorityReason } =
+        computeTaskPriority(merged, { now });
+      update.priorityScore = priorityScore;
+      update.priorityLabel = priorityLabel;
+      update.priorityReason = priorityReason;
+      update.priorityUpdatedAt = now.toISOString();
+    }
+  }
+
   await db.collection("tasks").updateOne(filter, { $set: update });
 
   const task = await db.collection("tasks").findOne(filter);
@@ -366,6 +414,31 @@ export async function PATCH(
           : undefined,
       },
     });
+  }
+  // Phase 10: a changed dueAt invalidates every scheduled Slack reminder for
+  // this task (their taskDueAt snapshot no longer matches) — cancel them in
+  // one cheap updateMany and enqueue a duplicate-pending-guarded sweep so the
+  // task re-enrolls from the new date. Best-effort: never fail the PATCH.
+  // `existing` is always loaded here because dueAt is a priority input.
+  const hasDueAt = Object.prototype.hasOwnProperty.call(body, "dueAt");
+  if (hasDueAt && toDueIso(existing?.dueAt) !== toDueIso(body.dueAt)) {
+    try {
+      const reminderTaskIds = Array.from(
+        new Set(
+          [String(task._id ?? id), task.id ? String(task.id) : null].filter(
+            (value): value is string => Boolean(value)
+          )
+        )
+      );
+      await cancelRemindersForTask(db, reminderTaskIds, "due_date_changed");
+      await enqueueReminderSweepJob(db, {
+        workspaceId: task.workspaceId ? String(task.workspaceId) : null,
+        userId,
+      });
+      void kickJobWorker();
+    } catch (error) {
+      console.error("Failed to reschedule Slack reminders after dueAt change:", error);
+    }
   }
   await syncTaskUpdateToSource(db, userId, task);
   return NextResponse.json(serializeTask(task));

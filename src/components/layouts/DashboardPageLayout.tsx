@@ -65,6 +65,19 @@ const DashboardContentWrapper = ({ children }: { children: ReactNode }) => {
   );
 };
 
+const SIDEBAR_STATE_COOKIE = 'sidebar_state';
+
+// The shadcn sidebar writes a `sidebar_state` cookie on toggle; read it so the
+// collapse state survives navigation (the shell remounts on every route change).
+const readSidebarStateCookie = (): boolean => {
+  if (typeof document === 'undefined') return true;
+  const entry = document.cookie
+    .split('; ')
+    .find((part) => part.startsWith(`${SIDEBAR_STATE_COOKIE}=`));
+  if (!entry) return true;
+  return entry.slice(SIDEBAR_STATE_COOKIE.length + 1) !== 'false';
+};
+
 const SidebarLogo = () => {
   const { state } = useSidebar();
   const isCollapsed = state === "collapsed";
@@ -93,7 +106,7 @@ const SidebarHeaderContent = () => {
 export default function DashboardPageLayout({ children }: { children: ReactNode }) {
   return (
     <DashboardContentWrapper>
-      <SidebarProvider defaultOpen={true}>
+      <SidebarProvider defaultOpen={readSidebarStateCookie()}>
         <div className="flex h-screen bg-muted/30">
           <Sidebar variant="sidebar" collapsible="icon" side="left">
             <SidebarHeaderContent />

@@ -1,10 +1,10 @@
 import Link from "next/link";
 import { ArrowRight } from "lucide-react";
 
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { BrandIcon } from "@/components/landing/BrandIcon";
 import { MarketingPageShell } from "@/components/landing/MarketingPageShell";
+import { PanoramicHero } from "@/components/landing/PanoramicHero";
 import { MarketingSection } from "@/components/landing/MarketingSection";
 import { integrationCards } from "@/components/landing/marketing-content";
 
@@ -13,47 +13,40 @@ export default function IntegrationsPage() {
 
   return (
     <MarketingPageShell>
-      <section className="relative overflow-hidden">
-        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(900px_420px_at_15%_15%,rgba(255,120,80,0.20),transparent_60%),radial-gradient(820px_380px_at_85%_20%,rgba(255,170,60,0.18),transparent_60%),linear-gradient(180deg,rgba(255,255,255,0.03),transparent_30%)]" />
-        <div className="relative mx-auto w-full max-w-7xl px-4 py-16 sm:px-6 sm:py-20 lg:px-8 lg:py-24">
-          <div className="max-w-3xl space-y-6">
-            <div className="flex flex-wrap items-center gap-2">
-              <Badge className="border-white/10 bg-white/10 text-white/90">Connected systems</Badge>
-              <Badge className="border-white/10 bg-white/5 text-white/70">Public integrations page</Badge>
-            </div>
-            <div className="space-y-4">
-              <h1 className="text-4xl font-semibold leading-[1.02] tracking-tight text-white sm:text-5xl lg:text-6xl">
-                The integrations behind TaskwiseAI.
-              </h1>
-              <p className="max-w-3xl text-base leading-7 text-white/72 sm:text-lg">
-                TaskwiseAI keeps the live provider story honest: Fathom, Fireflies, Grain, Slack,
-                Google Workspace, manual paste, and the board sync layer all stay visible.
-              </p>
-            </div>
-            <div className="flex flex-wrap items-center gap-3">
-              <Button
-                size="lg"
-                className="gem-button bg-gradient-to-r from-[#FF4D4D] via-[#FF9900] to-[#FF2E97] text-white"
-                asChild
-              >
-                <Link href="/signup">Get started</Link>
-              </Button>
-              <Button
-                size="lg"
-                variant="secondary"
-                className="border border-white/10 bg-white/10 text-white hover:bg-white/20"
-                asChild
-              >
-                <Link href="/mcp">Open MCP</Link>
-              </Button>
-            </div>
-          </div>
-        </div>
-      </section>
+      <PanoramicHero
+        label="Connected systems"
+        title={
+          <>
+            The integrations behind <span className="text-white/90">TaskwiseAI</span>
+          </>
+        }
+        subtitle={
+          <>
+            TaskwiseAI keeps the live provider story honest: Fathom, Fireflies, Grain, Slack,
+            Google Workspace, manual paste, and the board sync layer all stay visible.
+          </>
+        }
+        primaryHref="/signup"
+        primaryLabel="Get started"
+        secondaryHref="/mcp"
+        secondaryLabel="Open MCP"
+      />
 
       <MarketingSection
-        title="Live integrations"
-        subtitle="These are the surfaces that are currently part of the public product story."
+        title={
+          <>
+            <span className="bg-gradient-to-r from-[#FFB257] via-[#FF8A3D] to-[#FF2E97] bg-clip-text text-transparent">
+              Active
+            </span>{" "}
+            integrations
+          </>
+        }
+        subtitle={
+          <span>
+            These are the surfaces that are part of the public product story, including{" "}
+            <span className="text-white/88">Trello</span> as an active board sync option.
+          </span>
+        }
       >
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
           {visibleIntegrations.map((card) => {
@@ -64,15 +57,6 @@ export default function IntegrationsPage() {
               >
                 <div className="mb-4 flex items-center justify-between gap-3">
                   <BrandIcon src={card.iconSrc} alt={card.iconAlt} />
-                  {card.isDisabled ? (
-                    <span className="rounded-full border border-white/10 bg-white/10 px-2 py-0.5 text-[10px] uppercase tracking-[0.18em] text-white/60">
-                      Disabled
-                    </span>
-                  ) : (
-                    <span className="rounded-full border border-emerald-500/20 bg-emerald-500/10 px-2 py-0.5 text-[10px] uppercase tracking-[0.18em] text-emerald-100">
-                      Live
-                    </span>
-                  )}
                 </div>
                 <p className="text-xs uppercase tracking-[0.2em] text-white/45">{card.name}</p>
                 <h2 className="mt-2 text-lg font-medium text-white">{card.title}</h2>
@@ -84,8 +68,20 @@ export default function IntegrationsPage() {
       </MarketingSection>
 
       <MarketingSection
-        title="MCP stays on its own page"
-        subtitle="The integrations story is for connected systems. The operator story belongs in MCP, where keys, replay, and audit logs live."
+        title={
+          <>
+            MCP stays on its{" "}
+            <span className="bg-gradient-to-r from-[#FF5C4D] via-[#FF9900] to-[#FFB257] bg-clip-text text-transparent">
+              own page
+            </span>
+          </>
+        }
+        subtitle={
+          <span>
+            The integrations story is for connected systems. The operator story belongs in MCP,
+            where keys, replay, and audit logs live.
+          </span>
+        }
       >
         <div className="flex flex-wrap gap-3">
           <Button

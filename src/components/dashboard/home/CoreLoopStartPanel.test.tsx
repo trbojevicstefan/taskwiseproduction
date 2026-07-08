@@ -4,6 +4,10 @@ import CoreLoopStartPanel from "@/components/dashboard/home/CoreLoopStartPanel";
 import { usePasteAction } from "@/contexts/PasteActionContext";
 import { isManualMeetingIngestEnabled } from "@/lib/simplification-flags";
 
+jest.mock("@/contexts/IntegrationsContext", () => ({
+  useIntegrations: jest.fn(),
+}));
+
 jest.mock("@/contexts/PasteActionContext", () => ({
   usePasteAction: jest.fn(),
 }));
@@ -12,6 +16,7 @@ jest.mock("@/lib/simplification-flags", () => ({
   isManualMeetingIngestEnabled: jest.fn(),
 }));
 
+const mockedUseIntegrations = jest.requireMock("@/contexts/IntegrationsContext").useIntegrations as jest.Mock;
 const mockedUsePasteAction = usePasteAction as jest.MockedFunction<typeof usePasteAction>;
 const mockedIsManualMeetingIngestEnabled =
   isManualMeetingIngestEnabled as jest.MockedFunction<typeof isManualMeetingIngestEnabled>;
@@ -19,6 +24,9 @@ const mockedIsManualMeetingIngestEnabled =
 describe("CoreLoopStartPanel", () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    mockedUseIntegrations.mockReturnValue({
+      isFathomConnected: false,
+    });
     mockedUsePasteAction.mockReturnValue({
       openPasteDialog: jest.fn(),
     } as any);

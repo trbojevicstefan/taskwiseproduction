@@ -38,6 +38,10 @@ const indexPlan = [
         key: { userId: 1, assigneeNameKey: 1, status: 1 },
         options: { name: "tasks_user_assignee_status" },
       },
+      {
+        key: { userId: 1, dueAt: 1 },
+        options: { name: "tasks_user_due_at" },
+      },
     ],
   },
   {
@@ -50,6 +54,10 @@ const indexPlan = [
       {
         key: { userId: 1, chatSessionId: 1 },
         options: { name: "meetings_user_chat_session" },
+      },
+      {
+        key: { userId: 1, startTime: 1 },
+        options: { name: "meetings_user_start_time" },
       },
     ],
   },
@@ -118,6 +126,100 @@ const indexPlan = [
           unique: true,
           partialFilterExpression: { taskId: { $type: "string" } },
         },
+      },
+    ],
+  },
+  {
+    collection: "taskReminders",
+    indexes: [
+      {
+        key: { workspaceId: 1, dedupKey: 1 },
+        options: {
+          name: "task_reminders_workspace_dedup_unique",
+          unique: true,
+          partialFilterExpression: { dedupKey: { $type: "string" } },
+        },
+      },
+      {
+        key: { workspaceId: 1, status: 1, runAt: 1 },
+        options: { name: "task_reminders_workspace_status_run_at" },
+      },
+      {
+        key: { taskId: 1, status: 1 },
+        options: { name: "task_reminders_task_status" },
+      },
+      {
+        key: { userId: 1, status: 1, runAt: 1 },
+        options: { name: "task_reminders_user_status_run_at" },
+      },
+    ],
+  },
+  {
+    collection: "meetingConnections",
+    indexes: [
+      {
+        key: { workspaceId: 1, provider: 1 },
+        options: {
+          name: "meeting_connections_workspace_provider_unique",
+          unique: true,
+        },
+      },
+      {
+        key: { webhookToken: 1 },
+        options: {
+          name: "meeting_connections_webhook_token_unique",
+          unique: true,
+          sparse: true,
+          partialFilterExpression: { webhookToken: { $type: "string" } },
+        },
+      },
+      {
+        key: { provider: 1, status: 1 },
+        options: { name: "meeting_connections_provider_status" },
+      },
+    ],
+  },
+  {
+    collection: "companies",
+    indexes: [
+      {
+        key: { workspaceId: 1, nameKey: 1 },
+        options: {
+          name: "companies_workspace_name_key_unique",
+          unique: true,
+        },
+      },
+      {
+        key: { workspaceId: 1, domain: 1 },
+        options: {
+          name: "companies_workspace_domain",
+          partialFilterExpression: { domain: { $type: "string" } },
+        },
+      },
+      {
+        key: { workspaceId: 1, peopleIds: 1 },
+        options: { name: "companies_workspace_people" },
+      },
+    ],
+  },
+  {
+    collection: "meetingSearchChunks",
+    indexes: [
+      {
+        key: { workspaceId: 1, meetingId: 1 },
+        options: { name: "meeting_search_chunks_workspace_meeting" },
+      },
+      {
+        key: { workspaceId: 1, updatedAt: -1 },
+        options: { name: "meeting_search_chunks_workspace_updated" },
+      },
+      {
+        key: { meetingId: 1 },
+        options: { name: "meeting_search_chunks_meeting" },
+      },
+      {
+        key: { userId: 1, updatedAt: -1 },
+        options: { name: "meeting_search_chunks_user_updated" },
       },
     ],
   },

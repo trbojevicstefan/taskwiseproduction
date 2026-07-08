@@ -2,7 +2,7 @@
 
 import React, { useState } from "react";
 import Link from "next/link";
-import { ClipboardPaste, PlayCircle, Settings2, Sparkles, Video } from "lucide-react";
+import { ClipboardPaste, PlayCircle, Settings2, Sparkles, Video, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -21,8 +21,11 @@ import {
 } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
 import { usePasteAction } from "@/contexts/PasteActionContext";
+import { useIntegrations } from "@/contexts/IntegrationsContext";
 import { isManualMeetingIngestEnabled } from "@/lib/simplification-flags";
 import { cn } from "@/lib/utils";
+
+const DISMISS_KEY = "taskwise_start_here_dismissed";
 
 const SAMPLE_MEETING_TRANSCRIPT = [
   "Taskwise sample meeting: Customer onboarding review",
@@ -42,9 +45,17 @@ export default function CoreLoopStartPanel({
   compact?: boolean;
 }) {
   const { openPasteDialog } = usePasteAction();
+  const { isFathomConnected } = useIntegrations();
   const [isPasteOpen, setIsPasteOpen] = useState(false);
   const [draftText, setDraftText] = useState("");
+  const [dismissed, setDismissed] = useState(() => {
+    if (typeof window !== "undefined") return localStorage.getItem(DISMISS_KEY) === "true";
+    return false;
+  });
   const manualIngestEnabled = isManualMeetingIngestEnabled();
+
+  // Auto-hide if user already has Fathom connected or dismissed manually
+  if (dismissed || isFathomConnected) return null;
 
   const handleProcessDraft = () => {
     const text = draftText.trim();
@@ -57,7 +68,12 @@ export default function CoreLoopStartPanel({
   return (
     <>
       <Card className={cn("border-border/70 shadow-sm", className)}>
-        <CardHeader className={compact ? "pb-3" : undefined}>
+        <CardHeader className={cn("relative", compact ? "pb-3" : undefined)}>
+          <button
+            onClick={() => { localStorage.setItem(DISMISS_KEY, "true"); setDismissed(true); }}
+            className="absolute top-3 right-3 rounded-md p-1 text-muted-foreground hover:text-foreground hover:bg-muted transition"
+            aria-label="Dismiss"
+          ><X className="h-4 w-4" /></button>
           <div className="flex items-center gap-2 text-sm font-medium text-primary">
             <Sparkles className="h-4 w-4" />
             Start here

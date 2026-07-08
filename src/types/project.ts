@@ -1,6 +1,15 @@
 // src/types/project.ts
 import type { AppUser } from '@/contexts/AuthContext';
-import type { CompletionTarget, TaskComment, TaskEvidence } from '@/types/chat';
+import type {
+  CompletionReviewStatus,
+  CompletionTarget,
+  TaskCleanupCategory,
+  TaskCleanupEvidence,
+  TaskCleanupStatus,
+  TaskComment,
+  TaskEvidence,
+  TaskPriorityLabel,
+} from '@/types/chat';
 
 export interface Project {
   id: string; // Document ID
@@ -38,7 +47,28 @@ export interface Task {
   completionConfidence?: number | null;
   completionEvidence?: TaskEvidence[] | null;
   completionTargets?: CompletionTarget[] | null;
+  // Priority 7 completion-review state (review-owned; kept OUT of
+  // buildTaskRecords so meeting re-sync can never clobber review decisions).
+  completionReviewStatus?: CompletionReviewStatus | null;
+  completionReviewedBy?: string | null;
+  completionReviewedAt?: string | null;
   taskState?: "active" | "suggested" | "archived" | null;
   researchBrief?: string | null;
   aiAssistanceText?: string | null;
+  // Task cleanup metadata (Phase 3). Absent cleanupStatus === 'active'.
+  cleanupStatus?: TaskCleanupStatus | null;
+  cleanupCategory?: TaskCleanupCategory | null;
+  cleanupReason?: string | null;
+  cleanupConfidence?: number | null;
+  cleanupEvidence?: TaskCleanupEvidence[] | null;
+  expiresAt?: string | null;
+  duplicateOfTaskId?: string | null;
+  cleanupReviewedAt?: string | null;
+  cleanupReviewedBy?: string | null;
+  // Task prioritization metadata (Phase 9). Computed deterministically by
+  // src/lib/task-priority.ts.
+  priorityScore?: number | null;
+  priorityLabel?: TaskPriorityLabel | null;
+  priorityReason?: string | null;
+  priorityUpdatedAt?: string | null;
 }

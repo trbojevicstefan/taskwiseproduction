@@ -9,7 +9,9 @@ import {
   Clock,
   RefreshCw,
   Search,
+  Sparkles,
 } from "lucide-react";
+import EmptyState from "@/components/common/EmptyState";
 import DashboardHeader from "@/components/dashboard/DashboardHeader";
 import DashboardScreenSkeleton from "@/components/dashboard/DashboardScreenSkeleton";
 import CoreLoopStartPanel from "@/components/dashboard/home/CoreLoopStartPanel";
@@ -63,17 +65,17 @@ const statusMeta: Record<
   needs_review: {
     label: "Needs review",
     icon: ClipboardCheck,
-    className: "border-amber-500/30 bg-amber-500/10 text-amber-700",
+    className: "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300",
   },
   reviewed: {
     label: "Reviewed",
     icon: CheckCircle2,
-    className: "border-emerald-500/30 bg-emerald-500/10 text-emerald-700",
+    className: "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300",
   },
   processing: {
     label: "Processing",
     icon: Clock,
-    className: "border-sky-500/30 bg-sky-500/10 text-sky-700",
+    className: "border-sky-500/30 bg-sky-500/10 text-sky-700 dark:text-sky-300",
   },
   failed: {
     label: "Failed",
@@ -194,15 +196,20 @@ export default function ReviewTasksPageContent() {
       <DashboardHeader
         pageIcon={ClipboardCheck}
         pageTitle={<h1 className="text-2xl font-bold font-headline">Review Tasks</h1>}
+        description="Approve, fix, or discard AI-extracted tasks before they reach your board."
       >
+        <Button variant="ghost" size="sm" onClick={() => router.push("/review/cleanup")}>
+          <Sparkles className="mr-2 h-4 w-4" />
+          Cleanup suggestions
+        </Button>
         <Button variant="outline" size="sm" onClick={() => void refreshMeetings()}>
           <RefreshCw className="mr-2 h-4 w-4" />
           Refresh
         </Button>
       </DashboardHeader>
 
-      <div className="flex-1 overflow-hidden">
-        <div className="grid h-full grid-cols-1 gap-0 lg:grid-cols-[360px_1fr]">
+      <div className="flex-1 min-h-0">
+        <div className="grid h-full grid-cols-1 gap-0 lg:grid-cols-[300px_1fr]">
           <aside className="border-r bg-muted/20">
             <div className="space-y-4 p-4">
               {reviewHomeEnabled ? <CoreLoopStartPanel compact /> : null}
@@ -291,22 +298,26 @@ export default function ReviewTasksPageContent() {
 
           <main className="h-full overflow-auto">
             {selectedMeeting ? (
-              <MeetingDetailSheet
+              <>
+                <div className="sticky top-0 z-10 flex items-center gap-2 border-b bg-background/95 backdrop-blur px-4 py-3">
+                  <Button variant="ghost" size="sm" onClick={() => setSelectedMeetingId(null)}>
+                    ← Back to meetings
+                  </Button>
+                </div>
+                <MeetingDetailSheet
                 id={selectedMeeting.id}
                 onClose={() => setSelectedMeetingId(null)}
                 onNavigateToChat={() => router.push("/chat")}
                 variant="page"
               />
+              </>
             ) : (
-              <div className="flex h-full items-center justify-center p-8">
-                <div className="max-w-md text-center">
-                  <ClipboardCheck className="mx-auto mb-4 h-10 w-10 text-muted-foreground" />
-                  <h2 className="text-lg font-semibold">Select a meeting</h2>
-                  <p className="mt-2 text-sm text-muted-foreground">
-                    Choose a meeting from the queue to review suggested tasks, owners, due dates, and status.
-                  </p>
-                </div>
-              </div>
+              <EmptyState
+                className="h-full"
+                icon={ClipboardCheck}
+                title="Select a meeting"
+                description="Choose a meeting from the queue to review suggested tasks, owners, due dates, and status."
+              />
             )}
           </main>
         </div>

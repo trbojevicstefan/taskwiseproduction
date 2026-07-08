@@ -109,6 +109,24 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 const ACTIVE_WORKSPACE_STORAGE_KEY = "taskwise.activeWorkspaceId";
 
+export const isPublicPath = (pathname: string | null | undefined) => {
+  if (!pathname) {
+    return false;
+  }
+
+  const isInvitePage = pathname.startsWith("/invite/");
+  const isDocsPage = pathname === "/docs" || pathname.startsWith("/docs/");
+  const isMarketingPage =
+    pathname === "/" ||
+    pathname === "/privacy" ||
+    pathname === "/terms" ||
+    pathname === "/features" ||
+    pathname === "/integrations" ||
+    pathname === "/mcp";
+
+  return isMarketingPage || isInvitePage || isDocsPage;
+};
+
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [user, setUser] = useState<AppUser | null>(null);
   const [loading, setLoading] = useState(true);
@@ -259,14 +277,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     }
 
     const isAuthPage = pathname === '/login' || pathname === '/signup';
-    const isInvitePage = pathname?.startsWith('/invite/');
-    const isDocsPage = pathname === '/docs' || pathname?.startsWith('/docs/');
-    const isPublicPage =
-      pathname === '/' ||
-      pathname === '/privacy' ||
-      pathname === '/terms' ||
-      isInvitePage ||
-      isDocsPage;
+    const isPublicPage = isPublicPath(pathname);
 
     if (user && isAuthPage) {
       const callbackUrl = searchParams?.get('callbackUrl');

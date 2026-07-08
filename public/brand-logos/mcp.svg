@@ -1,7 +1,14 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" role="img" aria-label="MCP">
-  <path fill="none" stroke="#F5F5F5" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M12 3.5 19 7v10l-7 3.5L5 17V7l7-3.5Z"/>
-  <path fill="none" stroke="#F5F5F5" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M12 12.2V6.8"/>
-  <path fill="none" stroke="#F5F5F5" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M12 12.2 16.5 9.8"/>
-  <path fill="none" stroke="#F5F5F5" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M12 12.2 7.5 9.8"/>
-  <circle cx="12" cy="12.2" r="1.2" fill="#F5F5F5"/>
+  <defs>
+    <linearGradient id="mcpGrad" x1="4" y1="4" x2="20" y2="20" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FF7A18"/>
+      <stop offset="0.55" stop-color="#FFB300"/>
+      <stop offset="1" stop-color="#FF2E97"/>
+    </linearGradient>
+  </defs>
+  <path fill="none" stroke="url(#mcpGrad)" stroke-linecap="round" stroke-linejoin="round" stroke-width="2.2" d="M12 3.5 19 7v10l-7 3.5L5 17V7l7-3.5Z"/>
+  <path fill="none" stroke="url(#mcpGrad)" stroke-linecap="round" stroke-linejoin="round" stroke-width="2.2" d="M12 12.2V6.8"/>
+  <path fill="none" stroke="url(#mcpGrad)" stroke-linecap="round" stroke-linejoin="round" stroke-width="2.2" d="M12 12.2 16.5 9.8"/>
+  <path fill="none" stroke="url(#mcpGrad)" stroke-linecap="round" stroke-linejoin="round" stroke-width="2.2" d="M12 12.2 7.5 9.8"/>
+  <circle cx="12" cy="12.2" r="1.4" fill="url(#mcpGrad)"/>
 </svg>

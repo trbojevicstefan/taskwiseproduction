@@ -1,3 +1,4 @@
+import { createHash } from "crypto";
 import { normalizeTitleKey } from "@/lib/ai-utils";
 
 type CompletionSnippet = {
@@ -27,6 +28,56 @@ const COMPLETION_NEGATION_REGEX =
   /\b(?:not|never|no|hasn't|haven't|didn't|isn't|wasn't|can't|cannot|won't)\b[^.]{0,32}\b(?:done|complete|completed|finished|resolved|fixed|handled|taken care of|bought|purchased|ready|live|shipped|delivered|launched|approved)\b/i;
 const GENERIC_COMPLETION_REGEX =
   /\b(?:that|it|this|task)\b.*\b(?:done|complete|completed|finished|resolved|fixed)\b/i;
+
+// EXPLICIT completion cues — a strict subset of COMPLETION_CUE_REGEX. These are
+// unambiguous "the work is finished" verbs; implicit signals like "ready",
+// "booked", "in place", or "scheduled" are deliberately excluded because they
+// often describe state that predates or merely enables the task. Only evidence
+// matching this list may drive completion auto-apply (Priority 7 policy).
+const EXPLICIT_COMPLETION_REGEX =
+  /\b(done|complete|completed|finished|finalized|resolved|closed|closed out|wrapped up|shipped|delivered|deployed|published|released|launched|merged|submitted|signed off|already did|already done|already handled)\b/i;
+// Blocker/failure language always disqualifies evidence from auto-apply, even
+// when an explicit cue is present ("tried to deploy it but it failed").
+const COMPLETION_BLOCKER_REGEX =
+  /\b(blocked|blocker|failed|failing|failure|error(?:s|ed)?|broken|stuck|retry(?:ing)?|rolled back|reverted|still need|needs? to|have to|going to|will (?:do|finish|complete|ship|deploy)|next week|tomorrow)\b/i;
+
+/**
+ * True only when the evidence snippet explicitly states the work is finished:
+ * an explicit completion verb, no negation ("not done yet"), and no
+ * blocker/failure/future-intent language. Used to gate completion auto-apply.
+ */
+export const isExplicitCompletionEvidence = (snippet?: string | null): boolean => {
+  const text = typeof snippet === "string" ? snippet.trim() : "";
+  if (!text) return false;
+  if (!EXPLICIT_COMPLETION_REGEX.test(text)) return false;
+  if (COMPLETION_NEGATION_REGEX.test(text)) return false;
+  if (COMPLETION_BLOCKER_REGEX.test(text)) return false;
+  return true;
+};
+
+/**
+ * Stable fingerprint for a piece of completion evidence, used as rejection
+ * memory: when a reviewer rejects a completion suggestion, the fingerprints of
+ * its evidence snippets are stored on the task
+ * (`completionRejectedFingerprints`, a DB-internal field like `embedding`) and
+ * the same evidence is never suggested again for that task.
+ *
+ * The fingerprint is a sha256 of the punctuation/case/whitespace-insensitive
+ * snippet text (via normalizeTitleKey) — deliberately NOT scoped to a meeting
+ * id: the suggestion pipeline runs on some ingest paths before the meeting doc
+ * exists (so a meeting-scoped hash could not be recomputed at check time), and
+ * re-ingests/duplicate webhooks of the same transcript must hit the same
+ * fingerprint. Scoping is provided by storing fingerprints per task.
+ */
+export const buildCompletionEvidenceFingerprint = (
+  snippet?: string | null
+): string => {
+  const normalized = normalizeTitleKey(
+    typeof snippet === "string" ? snippet : ""
+  );
+  if (!normalized) return "";
+  return createHash("sha256").update(normalized).digest("hex");
+};
 
 export const normalizeEmail = (value?: string | null) =>
   value ? value.trim().toLowerCase() : "";

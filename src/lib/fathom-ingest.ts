@@ -19,6 +19,7 @@ import { finalizeExistingFathomMeetingReanalysis } from "@/lib/fathom-ingest/exi
 import { buildCreatedFathomMeetingRecords } from "@/lib/fathom-ingest/meeting-builder";
 import { extractFathomMeetingTasks } from "@/lib/fathom-ingest/task-extraction";
 import { parseFathomMeetingWebhookPayload } from "@/lib/fathom-ingest/webhook-parser";
+import { upsertMeetingIdempotently } from "@/lib/meeting-providers/ingest-pipeline";
 import { resolveSummaryText } from "@/lib/fathom-ingest-summary";
 import { runMeetingIngestionCommand } from "@/lib/services/meeting-ingestion-command";
 import { postMeetingAutomationToSlack } from "@/lib/slack-automation";
@@ -36,16 +37,6 @@ const DUPLICATE_REANALYZE_MAX_AGE_MS = Math.max(
   0,
   Number(process.env.FATHOM_DUPLICATE_REANALYZE_MAX_AGE_MS || 1000 * 60 * 60 * 24)
 );
-
-const isDuplicateKeyError = (error: any) => {
-  if (!error) return false;
-  if (error.code === 11000) return true;
-  if (Array.isArray(error.writeErrors)) {
-    return error.writeErrors.some((entry: any) => entry?.code === 11000);
-  }
-  const message = String(error.message || "");
-  return message.includes("E11000 duplicate key error");
-};
 
 export const ingestFathomMeeting = async ({
   user,
@@ -457,41 +448,13 @@ export const ingestFathomMeeting = async ({
         },
       ],
     };
-    const resolveCanonicalMeetingId = async () => {
-      const existingMeeting = await meetingsCollection.findOne(filter, {
-        projection: { _id: 1 },
-      });
-      return existingMeeting?._id ? String(existingMeeting._id) : null;
-    };
-
-    try {
-      const { _id: insertId } = meeting;
-      const setFields: Record<string, any> = { ...meeting };
-      delete setFields._id;
-      // Avoid conflicting updates when using $setOnInsert for createdAt
-      delete setFields.createdAt;
-      const upsertResult = await meetingsCollection.updateOne(
-        filter,
-        { $set: setFields, $setOnInsert: { createdAt: meeting.createdAt, _id: insertId } },
-        { upsert: true }
-      );
-
-      if (upsertResult.upsertedId) {
-        insertedMeeting = true;
-        canonicalMeetingId = String(upsertResult.upsertedId);
-      } else {
-        canonicalMeetingId = (await resolveCanonicalMeetingId()) || canonicalMeetingId;
-      }
-    } catch (error) {
-      if (isDuplicateKeyError(error)) {
-        canonicalMeetingId = (await resolveCanonicalMeetingId()) || canonicalMeetingId;
-      } else {
-        // Fallback to a plain insert if something unexpected happens
-        console.error("Meeting upsert failed, falling back to insert:", error);
-        await meetingsCollection.insertOne(meeting);
-        insertedMeeting = true;
-      }
-    }
+    const upsertOutcome = await upsertMeetingIdempotently({
+      meetingsCollection,
+      filter,
+      meeting,
+    });
+    insertedMeeting = upsertOutcome.insertedMeeting;
+    canonicalMeetingId = upsertOutcome.canonicalMeetingId;
   } else {
     await meetingsCollection.insertOne(meeting);
     insertedMeeting = true;
