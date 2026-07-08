@@ -370,6 +370,63 @@ describe("POST /api/ai/chat", () => {
     expect(payload.data.confidence).toBe("high");
   });
 
+  it("answers weekly meeting overviews with titles, links, and attendees", async () => {
+    mockedPlanWorkspaceChatQuestion.mockReturnValue({
+      mode: "workspace_tool",
+      toolName: "get_calendar_agenda",
+      toolArgs: {
+        from: "2026-07-06T00:00:00.000Z",
+        to: "2026-07-12T23:59:59.999Z",
+      },
+      rationale: "weekly_meetings_overview",
+    });
+    mockedRunInternalChatTool.mockResolvedValue({
+      summary: "Agenda 2026-07-06 -> 2026-07-12: 2 meeting(s).",
+      contextBlocks: [
+        "AGENDA_RANGE 2026-07-06T00:00:00.000Z | 2026-07-12T23:59:59.999Z",
+        "MEETING m1 | Discovery A | 2026-07-06 | link=/meetings/m1 | attendees=Casey Client <casey@client.com>, Ana Admin | attendeeCount=2 | clientMeeting=true",
+        "MEETING m2 | Planning B | 2026-07-07 | link=/meetings/m2 | attendees=Stefan Ionescu | attendeeCount=1 | clientMeeting=false",
+      ].join("\n"),
+      answerHint:
+        "Use the agenda rows to answer operational questions deterministically.",
+    });
+    mockedAnswerWorkspaceQuestion.mockResolvedValue({
+      answer: "You had some meetings this week.",
+      confidence: "high",
+      sources: [],
+      suggestedActions: [],
+    });
+
+    const response = await POST(
+      buildRequest({ question: "What meetings did we have this week?" })
+    );
+
+    expect(response.status).toBe(200);
+    const payload = await response.json();
+    expect(payload.data.answer).toContain("You had 2 meetings this week");
+    expect(payload.data.answer).toContain("Discovery A");
+    expect(payload.data.answer).toContain("/meetings/m1");
+    expect(payload.data.answer).toContain("Casey Client <casey@client.com>");
+    expect(payload.data.answer).toContain("Planning B");
+    expect(payload.data.answer).toContain("/meetings/m2");
+    expect(payload.data.sources).toEqual([
+      expect.objectContaining({
+        sourceType: "meeting",
+        sourceId: "m1",
+        title: "Discovery A",
+      }),
+      expect.objectContaining({
+        sourceType: "meeting",
+        sourceId: "m2",
+        title: "Planning B",
+      }),
+    ]);
+    expect(payload.data.suggestedActions).toEqual([
+      { label: "Open Discovery A", actionType: "open_meeting", targetId: "m1" },
+      { label: "Open Planning B", actionType: "open_meeting", targetId: "m2" },
+    ]);
+  });
+
   it("returns a deterministic no-evidence answer without calling the flow when retrieval is empty", async () => {
     mockedSearchWorkspaceContext.mockResolvedValue(emptyRetrieval);
 

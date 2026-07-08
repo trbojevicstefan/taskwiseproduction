@@ -317,21 +317,81 @@ const buildOperationalFallbackAnswer = (
   queryPlan: { rationale: string },
   toolResult: { contextBlocks: string }
 ): GeneralChatAnswer | null => {
-  if (queryPlan.rationale !== "meeting_count_this_week") {
+  if (
+    queryPlan.rationale !== "meeting_count_this_week" &&
+    queryPlan.rationale !== "weekly_meetings_overview"
+  ) {
     return null;
   }
 
-  const count = (toolResult.contextBlocks.match(/^MEETING /gm) || []).length;
+  const meetings = toolResult.contextBlocks
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line.startsWith("MEETING "))
+    .map((line) => {
+      const parts = line
+        .slice("MEETING ".length)
+        .split("|")
+        .map((part) => part.trim());
+      const id = parts[0] || "";
+      const title = parts[1] || id || "Untitled meeting";
+      const date = parts[2] || "date unknown";
+      const attrs = new Map<string, string>();
+      for (const part of parts.slice(3)) {
+        const idx = part.indexOf("=");
+        if (idx <= 0) continue;
+        attrs.set(part.slice(0, idx).trim(), part.slice(idx + 1).trim());
+      }
+      return {
+        id,
+        title,
+        date,
+        link: attrs.get("link") || (id ? `/meetings/${id}` : ""),
+        attendees: attrs.get("attendees") || attrs.get("attendeeCount") || "0",
+        attendeeCount: attrs.get("attendeeCount") || "",
+        clientMeeting: attrs.get("clientMeeting") === "true",
+        rawLine: line,
+      };
+    })
+    .filter((meeting) => meeting.id);
+  const count = meetings.length;
+  if (count === 0) {
+    return {
+      answer:
+        "You had no meetings this week based on the workspace calendar data I could access.",
+      confidence: "high",
+      sources: [],
+      suggestedActions: [],
+    };
+  }
+
+  const meetingLines = meetings.map((meeting) => {
+    const attendeeText =
+      meeting.attendees && meeting.attendees !== "0"
+        ? meeting.attendees
+        : `${meeting.attendeeCount || "0"} attendee(s)`;
+    const clientText = meeting.clientMeeting ? " - client meeting" : "";
+    return `- ${meeting.title} (${meeting.date}) - ${meeting.link} - attendees: ${attendeeText}${clientText}`;
+  });
+
   return {
-    answer:
-      count === 0
-        ? "You had no meetings this week based on the workspace calendar data I could access."
-        : `You had ${count} meeting${
-            count === 1 ? "" : "s"
-          } this week based on the workspace calendar data I could access.`,
+    answer: `You had ${count} meeting${
+      count === 1 ? "" : "s"
+    } this week based on the workspace calendar data I could access:\n${meetingLines.join(
+      "\n"
+    )}`,
     confidence: "high",
-    sources: [],
-    suggestedActions: [],
+    sources: meetings.map((meeting) => ({
+      sourceType: "meeting" as const,
+      sourceId: meeting.id,
+      title: meeting.title,
+      snippet: meeting.rawLine,
+    })),
+    suggestedActions: meetings.slice(0, 5).map((meeting) => ({
+      label: `Open ${meeting.title}`.slice(0, 80),
+      actionType: "open_meeting" as const,
+      targetId: meeting.id,
+    })),
   };
 };
 
