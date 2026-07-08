@@ -14,6 +14,8 @@ import {
 import { getDb } from "@/lib/db";
 import { getSessionUserId } from "@/lib/server-auth";
 import { resolveWorkspaceScopeForUser } from "@/lib/workspace-scope";
+import { planWorkspaceChatQuestion } from "@/lib/chat-query-planner";
+import { runInternalChatTool } from "@/lib/internal-chat-tools";
 import {
   searchWorkspaceContext,
   type WorkspaceRetrievalResult,
@@ -472,6 +474,47 @@ export async function POST(request: Request) {
         confidence,
         sourceCount: sources.length,
         droppedSourceCount,
+      });
+      return apiSuccess({ data }, { correlationId });
+    }
+
+    const queryPlan = planWorkspaceChatQuestion(question);
+
+    if (queryPlan.mode === "workspace_tool") {
+      const toolResult = await runInternalChatTool({
+        db,
+        workspaceId,
+        toolName: queryPlan.toolName,
+        toolArgs: queryPlan.toolArgs,
+      });
+      const today = new Date().toISOString().slice(0, 10);
+      const contextBlocks = toolResult.answerHint
+        ? `${toolResult.contextBlocks}\nHINT ${toolResult.answerHint}`
+        : toolResult.contextBlocks;
+
+      const flowResult = await answerWorkspaceQuestion(
+        { question, contextBlocks, today, history: historyBlock },
+        { correlationId, userId }
+      );
+
+      const data: GeneralChatAnswer = {
+        answer: flowResult.answer,
+        confidence: flowResult.confidence,
+        sources: flowResult.sources,
+        suggestedActions: flowResult.suggestedActions,
+      };
+
+      logger.info("api.request.succeeded", {
+        status: 200,
+        durationMs: durationMs(),
+        outcome: "workspace_tool_answered",
+        confidence: data.confidence,
+        toolName: queryPlan.toolName,
+        rationale: queryPlan.rationale,
+      });
+      emitMetric(200, "success", {
+        outcome: "workspace_tool_answered",
+        confidence: data.confidence,
       });
       return apiSuccess({ data }, { correlationId });
     }

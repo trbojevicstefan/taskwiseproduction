@@ -3,6 +3,8 @@ import { getDb } from "@/lib/db";
 import { getSessionUserId } from "@/lib/server-auth";
 import { resolveWorkspaceScopeForUser } from "@/lib/workspace-scope";
 import { searchWorkspaceContext } from "@/lib/workspace-retrieval";
+import { planWorkspaceChatQuestion } from "@/lib/chat-query-planner";
+import { runInternalChatTool } from "@/lib/internal-chat-tools";
 import {
   answerMeetingQuestion,
   answerWorkspaceQuestion,
@@ -25,6 +27,14 @@ jest.mock("@/lib/workspace-retrieval", () => ({
   searchWorkspaceContext: jest.fn(),
 }));
 
+jest.mock("@/lib/chat-query-planner", () => ({
+  planWorkspaceChatQuestion: jest.fn(),
+}));
+
+jest.mock("@/lib/internal-chat-tools", () => ({
+  runInternalChatTool: jest.fn(),
+}));
+
 jest.mock("@/ai/flows/general-chat-flow", () => ({
   answerWorkspaceQuestion: jest.fn(),
   answerMeetingQuestion: jest.fn(),
@@ -43,6 +53,13 @@ const mockedResolveScope = resolveWorkspaceScopeForUser as jest.MockedFunction<
 >;
 const mockedSearchWorkspaceContext =
   searchWorkspaceContext as jest.MockedFunction<typeof searchWorkspaceContext>;
+const mockedPlanWorkspaceChatQuestion =
+  planWorkspaceChatQuestion as jest.MockedFunction<
+    typeof planWorkspaceChatQuestion
+  >;
+const mockedRunInternalChatTool = runInternalChatTool as jest.MockedFunction<
+  typeof runInternalChatTool
+>;
 const mockedAnswerWorkspaceQuestion =
   answerWorkspaceQuestion as jest.MockedFunction<typeof answerWorkspaceQuestion>;
 const mockedAnswerMeetingQuestion =
@@ -177,6 +194,9 @@ describe("POST /api/ai/chat", () => {
       workspaceMemberUserIds: ["user-1", "user-2"],
     } as any);
     mockedSearchWorkspaceContext.mockResolvedValue(populatedRetrieval);
+    mockedPlanWorkspaceChatQuestion.mockReturnValue({
+      mode: "workspace_retrieval",
+    });
     mockedAnswerWorkspaceQuestion.mockResolvedValue(validFlowResult);
     mockedAnswerMeetingQuestion.mockResolvedValue(validMeetingFlowResult);
     meetingsFindOne.mockResolvedValue(null);
@@ -224,6 +244,55 @@ describe("POST /api/ai/chat", () => {
       },
       "What did Stefan say about pricing?"
     );
+  });
+
+  it("answers weekly meeting-count questions from internal MCP tool data", async () => {
+    mockedPlanWorkspaceChatQuestion.mockReturnValue({
+      mode: "workspace_tool",
+      toolName: "get_calendar_agenda",
+      toolArgs: {
+        from: "2026-07-06T00:00:00.000Z",
+        to: "2026-07-12T23:59:59.999Z",
+      },
+      rationale: "meeting_count_this_week",
+    });
+    mockedRunInternalChatTool.mockResolvedValue({
+      summary:
+        "Agenda 2026-07-06 -> 2026-07-12: 3 meeting(s), 2 due task(s), 1 reminder(s).",
+      contextBlocks: [
+        "AGENDA_RANGE 2026-07-06T00:00:00.000Z | 2026-07-12T23:59:59.999Z",
+        "MEETING m1 | Kickoff | 2026-07-07 | attendees=3 | clientMeeting=true",
+        "MEETING m2 | Retro | 2026-07-08 | attendees=4 | clientMeeting=false",
+        "MEETING m3 | Planning | 2026-07-09 | attendees=2 | clientMeeting=false",
+      ].join("\n"),
+      answerHint:
+        "Use the agenda rows to answer operational questions deterministically.",
+    });
+    mockedAnswerWorkspaceQuestion.mockResolvedValue({
+      answer: "You had 3 meetings this week.",
+      confidence: "high",
+      sources: [],
+      suggestedActions: [],
+    });
+
+    const response = await POST(
+      buildRequest({ question: "How many meetings did we have this week?" })
+    );
+
+    expect(response.status).toBe(200);
+    const payload = await response.json();
+    expect(payload.data.answer).toMatch(/3 meeting/i);
+    expect(payload.data.confidence).not.toBe("low");
+    expect(mockedRunInternalChatTool).toHaveBeenCalledWith({
+      db: fakeDb,
+      workspaceId: "workspace-1",
+      toolName: "get_calendar_agenda",
+      toolArgs: {
+        from: "2026-07-06T00:00:00.000Z",
+        to: "2026-07-12T23:59:59.999Z",
+      },
+    });
+    expect(mockedSearchWorkspaceContext).not.toHaveBeenCalled();
   });
 
   it("returns a deterministic no-evidence answer without calling the flow when retrieval is empty", async () => {
