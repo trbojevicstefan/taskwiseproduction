@@ -18,8 +18,10 @@ const mockedDetectCompletedTasks = detectCompletedTasks as jest.MockedFunction<
 
 describe("task-completion-detection", () => {
   const originalFetch = global.fetch;
+  const originalOpenAiApiKey = process.env.OPENAI_API_KEY;
 
   beforeEach(() => {
+    process.env.OPENAI_API_KEY = "test-openai-key";
     process.env.OPENAI_EMBEDDINGS_MODEL = "text-embedding-3-small";
     mockedDetectCompletedTasks.mockResolvedValue({ completed: [] } as any);
     global.fetch = jest.fn().mockResolvedValue({
@@ -33,6 +35,11 @@ describe("task-completion-detection", () => {
 
   afterEach(() => {
     global.fetch = originalFetch;
+    if (originalOpenAiApiKey === undefined) {
+      delete process.env.OPENAI_API_KEY;
+    } else {
+      process.env.OPENAI_API_KEY = originalOpenAiApiKey;
+    }
     jest.clearAllMocks();
   });
 
