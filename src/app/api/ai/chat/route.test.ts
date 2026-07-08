@@ -691,6 +691,37 @@ describe("POST /api/ai/chat", () => {
     expect(mockedAnswerWorkspaceQuestion).not.toHaveBeenCalled();
   });
 
+  it("creates a contextual task from a typo-heavy follow-up instead of retrieving unrelated meetings", async () => {
+    const response = await POST(
+      buildRequest({
+        question: "createt me thtat task step by step",
+        history: [
+          { role: "user", text: "how can i make pancakes" },
+          {
+            role: "assistant",
+            text:
+              "I don't have information on how to make pancakes. You might want to check a cooking resource or recipe website.",
+          },
+        ],
+      })
+    );
+
+    expect(response.status).toBe(200);
+    const payload = await response.json();
+    expect(payload.data.answer).toContain('Created task "Make pancakes"');
+    expect(tasksInsertOne).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: "Make pancakes",
+        description: expect.stringContaining("how can i make pancakes"),
+        origin: "chat",
+        workspaceId: "workspace-1",
+        userId: "user-1",
+      })
+    );
+    expect(mockedSearchWorkspaceContext).not.toHaveBeenCalled();
+    expect(mockedAnswerWorkspaceQuestion).not.toHaveBeenCalled();
+  });
+
   it("edits a single matched workspace task from an explicit chat command", async () => {
     tasksFindToArray.mockResolvedValue([
       {

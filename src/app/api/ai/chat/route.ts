@@ -469,7 +469,7 @@ export async function POST(request: Request) {
       }
     }
 
-    const taskCommand = planChatTaskCommand(question);
+    const taskCommand = planChatTaskCommand(question, new Date(), history);
     if (taskCommand) {
       const data = await runChatTaskCommand(
         db,

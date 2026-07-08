@@ -7,6 +7,7 @@ export type ChatTaskCommand =
       kind: "create";
       title: string;
       dueAt: string | null;
+      description?: string;
     }
   | {
       kind: "update";
@@ -23,6 +24,11 @@ export type ChatTaskScope = {
   userId: string;
   workspaceId?: string | null;
   memberUserIds?: string[];
+};
+
+export type ChatTaskHistoryEntry = {
+  role: "user" | "assistant";
+  text: string;
 };
 
 const MAX_TASK_MATCHES = 25;
@@ -82,6 +88,67 @@ const parseCreateCommand = (
     kind: "create",
     title,
     dueAt: parseDueDate(match[1], now) ?? null,
+  };
+};
+
+const isContextualCreateRequest = (question: string): boolean => {
+  const normalized = singleLine(question).toLowerCase();
+  const hasCreateIntent = /\b(?:create\w*|creat\w*|add|make)\b/.test(
+    normalized
+  );
+  const hasTaskIntent = /\b(?:task|todo)\b/.test(normalized);
+  const hasContextPronoun = /\b(?:that|thtat|this|it)\b/.test(normalized);
+  return hasCreateIntent && hasTaskIntent && hasContextPronoun;
+};
+
+const isTaskCommandLike = (text: string): boolean =>
+  /\b(?:create\w*|creat\w*|add|make|set|mark|update|change|edit|rename|retitle)\b.*\b(?:task|todo)\b/i.test(
+    text
+  );
+
+const inferTaskTitleFromHistory = (
+  history: ChatTaskHistoryEntry[] | undefined
+): { title: string; sourceText: string } | null => {
+  const source = [...(history ?? [])]
+    .reverse()
+    .find(
+      (entry) =>
+        entry.role === "user" &&
+        typeof entry.text === "string" &&
+        entry.text.trim() &&
+        !isTaskCommandLike(entry.text)
+    );
+  if (!source) return null;
+
+  const sourceText = singleLine(source.text).replace(/[?!.]+$/g, "");
+  const normalized = sourceText
+    .replace(/^(?:please\s+)?(?:can you|could you|would you)\s+/i, "")
+    .replace(/^how\s+(?:can|do|would|should)\s+i\s+/i, "")
+    .replace(/^how\s+to\s+/i, "")
+    .replace(/^what(?:'s| is)?\s+the\s+(?:best\s+)?way\s+to\s+/i, "")
+    .replace(/^help\s+me\s+(?:to\s+)?/i, "")
+    .replace(/^(?:i\s+need\s+to|i\s+want\s+to)\s+/i, "")
+    .trim();
+
+  const title = capitalizeFirst(normalized);
+  return title ? { title, sourceText } : null;
+};
+
+const parseContextualCreateCommand = (
+  question: string,
+  history: ChatTaskHistoryEntry[] | undefined
+): ChatTaskCommand | null => {
+  if (!isContextualCreateRequest(question)) return null;
+  const inferred = inferTaskTitleFromHistory(history);
+  if (!inferred) return null;
+  const wantsSteps = /\bstep\s+by\s+step\b|\bsteps\b/i.test(question);
+  return {
+    kind: "create",
+    title: inferred.title,
+    dueAt: null,
+    description: wantsSteps
+      ? `Created from chat follow-up. Original request: ${inferred.sourceText}. Requested as a step-by-step task.`
+      : `Created from chat follow-up. Original request: ${inferred.sourceText}.`,
   };
 };
 
@@ -174,10 +241,15 @@ const parseUpdateCommand = (
 
 export const planChatTaskCommand = (
   question: string,
-  now: Date = new Date()
+  now: Date = new Date(),
+  history?: ChatTaskHistoryEntry[]
 ): ChatTaskCommand | null => {
   const normalized = singleLine(question);
-  return parseCreateCommand(normalized, now) ?? parseUpdateCommand(normalized, now);
+  return (
+    parseCreateCommand(normalized, now) ??
+    parseContextualCreateCommand(normalized, history) ??
+    parseUpdateCommand(normalized, now)
+  );
 };
 
 const serializeTaskDates = (task: any) => ({
@@ -273,7 +345,7 @@ export const runChatTaskCommand = async (
     const task = {
       _id: randomUUID(),
       title: command.title,
-      description: "",
+      description: command.description || "",
       status: "todo",
       priority: "medium",
       dueAt: command.dueAt,
