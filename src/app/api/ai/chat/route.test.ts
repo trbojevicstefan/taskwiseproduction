@@ -295,6 +295,45 @@ describe("POST /api/ai/chat", () => {
     expect(mockedSearchWorkspaceContext).not.toHaveBeenCalled();
   });
 
+  it("returns a deterministic count answer when tool context exists but the model gives no grounded answer", async () => {
+    mockedPlanWorkspaceChatQuestion.mockReturnValue({
+      mode: "workspace_tool",
+      toolName: "get_calendar_agenda",
+      toolArgs: {
+        from: "2026-07-06T00:00:00.000Z",
+        to: "2026-07-12T23:59:59.999Z",
+      },
+      rationale: "meeting_count_this_week",
+    });
+    mockedRunInternalChatTool.mockResolvedValue({
+      summary:
+        "Agenda 2026-07-06 -> 2026-07-12: 3 meeting(s), 2 due task(s), 1 reminder(s).",
+      contextBlocks: [
+        "AGENDA_RANGE 2026-07-06T00:00:00.000Z | 2026-07-12T23:59:59.999Z",
+        "MEETING m1 | Kickoff | 2026-07-07 | attendees=3 | clientMeeting=true",
+        "MEETING m2 | Retro | 2026-07-08 | attendees=4 | clientMeeting=false",
+        "MEETING m3 | Planning | 2026-07-09 | attendees=2 | clientMeeting=false",
+      ].join("\n"),
+      answerHint:
+        "Use the agenda rows to answer operational questions deterministically.",
+    });
+    mockedAnswerWorkspaceQuestion.mockResolvedValue({
+      answer: "I am not sure.",
+      confidence: "low",
+      sources: [],
+      suggestedActions: [],
+    });
+
+    const response = await POST(
+      buildRequest({ question: "How many meetings did we have this week?" })
+    );
+
+    expect(response.status).toBe(200);
+    const payload = await response.json();
+    expect(payload.data.answer).toMatch(/3 meetings?/i);
+    expect(payload.data.confidence).toBe("high");
+  });
+
   it("returns a deterministic no-evidence answer without calling the flow when retrieval is empty", async () => {
     mockedSearchWorkspaceContext.mockResolvedValue(emptyRetrieval);
 

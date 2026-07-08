@@ -313,6 +313,28 @@ const filterSuggestedActions = (
     }
   });
 
+const buildOperationalFallbackAnswer = (
+  queryPlan: { rationale: string },
+  toolResult: { contextBlocks: string }
+): GeneralChatAnswer | null => {
+  if (queryPlan.rationale !== "meeting_count_this_week") {
+    return null;
+  }
+
+  const count = (toolResult.contextBlocks.match(/^MEETING /gm) || []).length;
+  return {
+    answer:
+      count === 0
+        ? "You had no meetings this week based on the workspace calendar data I could access."
+        : `You had ${count} meeting${
+            count === 1 ? "" : "s"
+          } this week based on the workspace calendar data I could access.`,
+    confidence: "high",
+    sources: [],
+    suggestedActions: [],
+  };
+};
+
 export async function POST(request: Request) {
   const routeContext = createRouteRequestContext({
     request,
@@ -497,12 +519,21 @@ export async function POST(request: Request) {
         { correlationId, userId }
       );
 
-      const data: GeneralChatAnswer = {
-        answer: flowResult.answer,
-        confidence: flowResult.confidence,
-        sources: flowResult.sources,
-        suggestedActions: flowResult.suggestedActions,
-      };
+      const operationalFallback = buildOperationalFallbackAnswer(
+        queryPlan,
+        toolResult
+      );
+      const data: GeneralChatAnswer =
+        flowResult.confidence === "low" &&
+        flowResult.sources.length === 0 &&
+        operationalFallback
+          ? operationalFallback
+          : {
+              answer: flowResult.answer,
+              confidence: flowResult.confidence,
+              sources: flowResult.sources,
+              suggestedActions: flowResult.suggestedActions,
+            };
 
       logger.info("api.request.succeeded", {
         status: 200,
