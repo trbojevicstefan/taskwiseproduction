@@ -599,9 +599,19 @@ const HISTORY_MAX_ENTRIES = 12;
 /** Prior turns sent to /api/ai/chat so follow-ups keep their context. */
 export const buildChatHistoryPayload = (
   messages: PanelMessage[]
-): Array<{ role: 'user' | 'assistant'; text: string }> =>
+): Array<{
+  role: 'user' | 'assistant';
+  text: string;
+  sources?: GeneralChatSource[];
+}> =>
   messages
-    .reduce<Array<{ role: 'user' | 'assistant'; text: string }>>(
+    .reduce<
+      Array<{
+        role: 'user' | 'assistant';
+        text: string;
+        sources?: GeneralChatSource[];
+      }>
+    >(
       (entries, message) => {
         if (message.role === 'user') {
           entries.push({
@@ -609,10 +619,18 @@ export const buildChatHistoryPayload = (
             text: message.text.slice(0, MAX_QUESTION_LENGTH),
           });
         } else if (message.role === 'assistant') {
-          entries.push({
+          const assistantEntry: {
+            role: 'assistant';
+            text: string;
+            sources?: GeneralChatSource[];
+          } = {
             role: 'assistant',
             text: message.answer.answer.slice(0, MAX_QUESTION_LENGTH),
-          });
+          };
+          if (message.answer.sources.length > 0) {
+            assistantEntry.sources = message.answer.sources;
+          }
+          entries.push(assistantEntry);
         }
         return entries;
       },
@@ -741,7 +759,11 @@ export default function GeneralChatPanel({
   const runQuestion = useCallback(
     async (
       question: string,
-      history: Array<{ role: 'user' | 'assistant'; text: string }>
+      history: Array<{
+        role: 'user' | 'assistant';
+        text: string;
+        sources?: GeneralChatSource[];
+      }>
     ) => {
       setIsLoading(true);
       try {

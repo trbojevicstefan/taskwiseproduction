@@ -275,4 +275,55 @@ describe("buildChatHistoryPayload", () => {
     });
     expect(history.every((entry) => entry.text.length <= 2000)).toBe(true);
   });
+
+  it("preserves assistant grounded sources for follow-up resolution", () => {
+    const history = buildChatHistoryPayload([
+      { id: "u1", role: "user", text: "What meetings did we have this week?" },
+      {
+        id: "a1",
+        role: "assistant",
+        answer: {
+          answer: "You had 2 meetings.",
+          confidence: "high",
+          sources: [
+            {
+              sourceType: "meeting",
+              sourceId: "m1",
+              title: "Kickoff",
+              snippet: "Kickoff details",
+            },
+            {
+              sourceType: "meeting",
+              sourceId: "m2",
+              title: "Retro",
+              snippet: "Retro details",
+            },
+          ],
+          suggestedActions: [],
+        },
+      },
+    ]);
+
+    expect(history).toEqual([
+      { role: "user", text: "What meetings did we have this week?" },
+      {
+        role: "assistant",
+        text: "You had 2 meetings.",
+        sources: [
+          {
+            sourceType: "meeting",
+            sourceId: "m1",
+            title: "Kickoff",
+            snippet: "Kickoff details",
+          },
+          {
+            sourceType: "meeting",
+            sourceId: "m2",
+            title: "Retro",
+            snippet: "Retro details",
+          },
+        ],
+      },
+    ]);
+  });
 });

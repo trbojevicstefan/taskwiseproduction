@@ -24,6 +24,10 @@ import {
   searchWorkspaceContext,
   type WorkspaceRetrievalResult,
 } from "@/lib/workspace-retrieval";
+import {
+  buildThreadContext,
+  resolveThreadFollowUp,
+} from "@/lib/chat-thread-context";
 import type {
   GeneralChatAnswer,
   GeneralChatSource,
@@ -44,6 +48,18 @@ const MAX_RAW_TRANSCRIPT_CHARS = 200_000;
 const historyEntrySchema = z.object({
   role: z.enum(["user", "assistant"]),
   text: z.string().trim().min(1).max(MAX_HISTORY_ENTRY_CHARS),
+  sources: z
+    .array(
+      z.object({
+        sourceType: z.enum(["meeting", "transcript", "task", "person", "client"]),
+        sourceId: z.string().trim().min(1).max(200),
+        title: z.string().trim().min(1).max(400),
+        snippet: z.string().trim().min(1).max(1000),
+        timestamp: z.string().trim().max(100).optional(),
+      })
+    )
+    .max(10)
+    .optional(),
 });
 
 const requestSchema = z.object({
@@ -451,6 +467,26 @@ export async function POST(request: Request) {
       });
 
     const historyBlock = renderHistoryBlock(history);
+    const threadContext = buildThreadContext(history);
+    const followUpResolution = resolveThreadFollowUp(question, threadContext);
+
+    if (followUpResolution.kind === "ambiguous") {
+      const answerTarget =
+        followUpResolution.entityType === "meeting"
+          ? "meeting"
+          : followUpResolution.entityType;
+      return apiSuccess(
+        {
+          data: {
+            answer: `I can help with that, but I need you to specify which ${answerTarget} you mean.`,
+            confidence: "low",
+            sources: [],
+            suggestedActions: [],
+          } satisfies GeneralChatAnswer,
+        },
+        { correlationId }
+      );
+    }
 
     // Resolve the meeting context: an explicit meetingId wins; otherwise a
     // sessionId whose chat session carries sourceMeetingId keeps the whole
@@ -467,6 +503,9 @@ export async function POST(request: Request) {
       if (session?.sourceMeetingId) {
         effectiveMeetingId = String(session.sourceMeetingId);
       }
+    }
+    if (!effectiveMeetingId && followUpResolution.kind === "meeting") {
+      effectiveMeetingId = followUpResolution.meetingId;
     }
 
     const taskCommand = planChatTaskCommand(question, new Date(), history);
@@ -653,6 +692,14 @@ export async function POST(request: Request) {
       return apiSuccess({ data }, { correlationId });
     }
 
+    const retrievalQuestion =
+      followUpResolution.kind === "retrieval_enrichment"
+        ? `${followUpResolution.enrichedQuestion}\n\n${buildRetrievalQuestion(
+            question,
+            historyBlock
+          )}`.slice(0, HISTORY_RENDER_MAX_CHARS)
+        : buildRetrievalQuestion(question, historyBlock);
+
     const retrieval = await searchWorkspaceContext(
       db,
       {
@@ -660,7 +707,7 @@ export async function POST(request: Request) {
         workspaceId,
         memberUserIds: workspaceMemberUserIds,
       },
-      buildRetrievalQuestion(question, historyBlock)
+      retrievalQuestion
     );
 
     if (retrieval.isEmpty) {

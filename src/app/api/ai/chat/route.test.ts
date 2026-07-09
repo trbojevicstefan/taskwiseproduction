@@ -631,6 +631,104 @@ describe("POST /api/ai/chat", () => {
     );
   });
 
+  it("routes a grounded 'first one' follow-up into meeting mode", async () => {
+    meetingsFindOne.mockResolvedValue(transcriptMeeting);
+
+    const response = await POST(
+      buildRequest({
+        question: "Who attended the first one?",
+        history: [
+          {
+            role: "assistant",
+            text: "You had 2 meetings this week.",
+            sources: [
+              {
+                sourceType: "meeting",
+                sourceId: "m1",
+                title: "Redesign kickoff",
+                snippet: "Kickoff",
+              },
+              {
+                sourceType: "meeting",
+                sourceId: "m2",
+                title: "Planning B",
+                snippet: "Planning",
+              },
+            ],
+          },
+        ],
+      })
+    );
+
+    expect(response.status).toBe(200);
+    expect(mockedAnswerMeetingQuestion).toHaveBeenCalledTimes(1);
+    expect(mockedSearchWorkspaceContext).not.toHaveBeenCalled();
+    const [flowInput] = mockedAnswerMeetingQuestion.mock.calls[0];
+    expect(flowInput.meetingId).toBe("m1");
+  });
+
+  it("enriches retrieval for person follow-ups using the last grounded person", async () => {
+    const response = await POST(
+      buildRequest({
+        question: "What tasks does he own?",
+        history: [
+          {
+            role: "assistant",
+            text: "Stefan raised pricing concerns.",
+            sources: [
+              {
+                sourceType: "person",
+                sourceId: "p1",
+                title: "Stefan Ionescu",
+                snippet: "Stefan Ionescu",
+              },
+            ],
+          },
+        ],
+      })
+    );
+
+    expect(response.status).toBe(200);
+    expect(mockedSearchWorkspaceContext).toHaveBeenCalledTimes(1);
+    const retrievalQuery = mockedSearchWorkspaceContext.mock.calls[0][2];
+    expect(retrievalQuery).toContain("Stefan Ionescu");
+    expect(retrievalQuery).toContain("What tasks does he own?");
+  });
+
+  it("refuses ambiguous grounded meeting follow-ups instead of guessing", async () => {
+    const response = await POST(
+      buildRequest({
+        question: "What happened in that meeting?",
+        history: [
+          {
+            role: "assistant",
+            text: "You had 2 meetings this week.",
+            sources: [
+              {
+                sourceType: "meeting",
+                sourceId: "m1",
+                title: "Redesign kickoff",
+                snippet: "Kickoff",
+              },
+              {
+                sourceType: "meeting",
+                sourceId: "m2",
+                title: "Planning B",
+                snippet: "Planning",
+              },
+            ],
+          },
+        ],
+      })
+    );
+
+    expect(response.status).toBe(200);
+    const payload = await response.json();
+    expect(payload.data.confidence).toBe("low");
+    expect(payload.data.answer).toMatch(/which meeting/i);
+    expect(mockedAnswerMeetingQuestion).not.toHaveBeenCalled();
+  });
+
   it("expands workspace retrieval with recent history for follow-up questions", async () => {
     const response = await POST(
       buildRequest({
