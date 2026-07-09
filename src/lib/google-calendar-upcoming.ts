@@ -6,10 +6,11 @@
 // without going through HTTP.
 //
 // Contract notes:
-// - By default only events with a resolvable meeting link (hangoutLink /
-//   conference entry point / URL in location or description) are returned —
-//   the Meeting Planner depends on this. Pass `includeAllEvents: true` to get
-//   every non-cancelled event (the `?allEvents=1` opt-in of the route).
+// - By default only actual meeting events are returned: timed events with an
+//   explicit meeting link (hangoutLink or conference entry point) and the
+//   default Google Calendar event type. Pass `includeAllEvents: true` to get
+//   every non-cancelled event (the `?allEvents=1` opt-in remains available for
+//   internal callers that truly need the broader feed).
 // - `connected: false` means no Google access token for the user (the route
 //   maps this to 404 "Google not connected.").
 // - Google API failures throw; callers decide whether that is fatal.
@@ -45,10 +46,14 @@ export type FetchGoogleUpcomingEventsResult = {
   events: GoogleUpcomingEvent[];
 };
 
-const extractUrl = (value?: string | null) => {
-  if (!value) return null;
-  const match = value.match(/https?:\/\/\S+/i);
-  return match ? match[0].replace(/[),.]+$/, "") : null;
+const isTimedDefaultMeeting = (item: any) => {
+  const isAllDay = Boolean(item.start?.date && !item.start?.dateTime);
+  const eventType = item.eventType || "default";
+  const conferenceLink = item.conferenceData?.entryPoints?.find(
+    (entry: any) => entry.uri
+  )?.uri;
+
+  return eventType === "default" && !isAllDay && Boolean(item.hangoutLink || conferenceLink);
 };
 
 export async function fetchGoogleUpcomingEvents(
@@ -89,21 +94,18 @@ export async function fetchGoogleUpcomingEvents(
   const items = Array.isArray(data.items) ? data.items : [];
 
   const events: GoogleUpcomingEvent[] = items
-    .filter((item: any) => item.status !== "cancelled")
+    .filter(
+      (item: any) =>
+        item.status !== "cancelled" &&
+        (includeAllEvents || isTimedDefaultMeeting(item))
+    )
     .map((item: any) => {
       const start = item.start?.dateTime || item.start?.date;
       const end = item.end?.dateTime || item.end?.date;
       const conferenceLink = item.conferenceData?.entryPoints?.find(
         (entry: any) => entry.uri
       )?.uri;
-      const locationLink = extractUrl(item.location);
-      const descriptionLink = extractUrl(item.description);
-      const hangoutLink =
-        item.hangoutLink ||
-        conferenceLink ||
-        locationLink ||
-        descriptionLink ||
-        null;
+      const hangoutLink = item.hangoutLink || conferenceLink || null;
 
       return {
         id: item.id,
@@ -122,12 +124,7 @@ export async function fetchGoogleUpcomingEvents(
             }))
           : [],
       };
-    })
-    .filter(
-      (event: any) =>
-        Boolean(event.startTime) &&
-        (includeAllEvents || Boolean(event.hangoutLink))
-    );
+    });
 
   return { connected: true, events };
 }

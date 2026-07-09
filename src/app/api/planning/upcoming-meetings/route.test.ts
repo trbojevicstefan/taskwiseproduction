@@ -208,11 +208,10 @@ describe("GET /api/planning/upcoming-meetings", () => {
 
     expect(payload.counts).toEqual({ total: 3, needsAgenda: 2 });
 
-    // Google fetch: allEvents opt-in, window from now.
+    // Google fetch: meeting-only default, window from now.
     expect(mockedFetchGoogleUpcomingEvents).toHaveBeenCalledWith("user-1", {
       start: NOW,
       end: new Date("2026-07-20T12:00:00.000Z"),
-      includeAllEvents: true,
     });
 
     // Open-task query mirrors the planning overview scope.

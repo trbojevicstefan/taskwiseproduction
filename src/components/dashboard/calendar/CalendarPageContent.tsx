@@ -162,7 +162,7 @@ export default function CalendarPageContent() {
           const response = await apiFetch<{
             events?: GoogleCalendarOverlayEvent[];
           }>(
-            `/api/google/calendar/upcoming?start=${encodeURIComponent(fromIso)}&end=${encodeURIComponent(toIso)}&allEvents=1`
+            `/api/google/calendar/upcoming?start=${encodeURIComponent(fromIso)}&end=${encodeURIComponent(toIso)}`
           );
           if (active) {
             setGoogleEvents(

@@ -77,7 +77,7 @@ export interface GoogleCalendarOverlayEvent {
   htmlLink?: string | null;
   location?: string | null;
   organizer?: string | null;
-  /** Present when the overlay is loaded with ?allEvents=1 (Calendar page). */
+  /** Present when the overlay loads the broader Google Calendar event feed. */
   description?: string | null;
   attendees?: Array<{
     email?: string | null;

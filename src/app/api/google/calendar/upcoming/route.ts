@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
-import { getSessionUserId } from "@/lib/server-auth";
 import { fetchGoogleUpcomingEvents } from "@/lib/google-calendar-upcoming";
+import { getSessionUserId } from "@/lib/server-auth";
 
 export async function GET(request: Request) {
   const userId = await getSessionUserId();
@@ -11,9 +11,6 @@ export async function GET(request: Request) {
   const url = new URL(request.url);
   const startParam = url.searchParams.get("start");
   const endParam = url.searchParams.get("end");
-  // Opt-in escape hatch for the Calendar page: skip the hangoutLink-only
-  // filter. Default behavior (video meetings only) is unchanged —
-  // Meeting Planner depends on it.
   const allEventsParam = url.searchParams.get("allEvents");
   const includeAllEvents = allEventsParam === "1" || allEventsParam === "true";
   const now = new Date();

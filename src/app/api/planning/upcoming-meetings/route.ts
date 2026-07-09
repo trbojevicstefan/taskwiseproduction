@@ -14,8 +14,7 @@
  *  - Taskwise meetings with startTime >= now within the window (workspace
  *    fallback scope, hidden excluded; startTime is schemaless so the range
  *    query covers Date and ISO-string storage).
- *  - Google Calendar events via fetchGoogleUpcomingEvents with the allEvents
- *    opt-in (default hangoutLink-only contract untouched). Google being
+ *  - Google Calendar events via fetchGoogleUpcomingEvents. Google being
  *    disconnected or erroring never fails the request.
  *
  * Each item carries needsAgenda (no `agenda` sections yet) and the count of
@@ -179,7 +178,6 @@ export async function GET(request: Request) {
       const googleResult = await fetchGoogleUpcomingEvents(userId, {
         start: now,
         end: windowEnd,
-        includeAllEvents: true,
       });
       googleConnected = googleResult.connected;
       googleEvents = googleResult.events;
