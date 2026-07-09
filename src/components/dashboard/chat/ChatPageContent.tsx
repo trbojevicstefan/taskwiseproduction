@@ -12,6 +12,7 @@ import { Badge } from '@/components/ui/badge';
 import { useAuth } from '@/contexts/AuthContext';
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { extractTasksFromChat } from '@/ai/flows/extract-tasks';
+import { answerMeetingChat } from '@/ai/flows/meeting-chat-flow';
 import type { OrchestratorInput, OrchestratorOutput } from '@/ai/flows/schemas';
 import { simplifyTaskBranch } from '@/ai/flows/simplify-task-branch-flow';
 import { useToast } from "@/hooks/use-toast";
@@ -173,7 +174,7 @@ const isTranscriptLike = (text: string): boolean =>
 
 
 // Helper to convert nulls to undefineds for AI schema compatibility
-const sanitizeTasksForAI = (tasks: ExtractedTaskSchema[]): any[] => {
+const sanitizeTasksForAI = (tasks: any[]): any[] => {
   return tasks.map(task => {
     const sanitizedTask: any = { ...task };
     for (const key in sanitizedTask) {
@@ -1386,6 +1387,50 @@ export default function ChatPageContent() {
               people: currentSession.people?.length ? currentSession.people : sourceMeeting.attendees || [],
             });
           }
+        }
+
+        if (sourceMeeting) {
+          const meetingChatResult = await answerMeetingChat({
+            message: promptText,
+            transcript: sourceTranscript || "",
+            meetingTasks: sanitizedCurrentTasks.length > 0
+              ? sanitizedCurrentTasks
+              : sanitizeTasksForAI(sourceMeeting.extractedTasks || []),
+            selectedTaskIds: Array.from(selectedTaskIds),
+            selectedTasks: selectedAITasks.length > 0 ? selectedAITasks : undefined,
+            requestedDetailLevel,
+          });
+
+          if (activeSessionId) {
+            const messagePayload: Omit<ChatMessageType, 'sender' | 'timestamp' | 'name'> = {
+              id: `ai-msg-${Date.now()}`,
+              text: '',
+            };
+
+            if (meetingChatResult.kind === "task_update") {
+              const newTasks = meetingChatResult.updatedTasks.map((task: any) =>
+                normalizeTask(task as ExtractedTaskSchema)
+              );
+              applyTaskUpdate(newTasks);
+            }
+
+            messagePayload.text = meetingChatResult.answerText;
+            if ("sources" in meetingChatResult && meetingChatResult.sources) {
+              messagePayload.sources = meetingChatResult.sources;
+            }
+            await addMessageToActiveSession({
+              ...messagePayload,
+              sender: 'ai',
+              timestamp: Date.now(),
+              name: aiName,
+            });
+          }
+
+          setSelectedTaskIds(new Set());
+          if (meetingChatResult.kind === "task_update" && activeSidePanel !== 'tasks') {
+            setActiveSidePanel('tasks');
+          }
+          return;
         }
 
             const orchestratorInput: OrchestratorInput = {
