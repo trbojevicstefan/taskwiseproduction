@@ -13,6 +13,12 @@ import { attachCorrelationIdHeader, serializeError } from "@/lib/observability";
 import { getSessionUserId } from "@/lib/server-auth";
 import { withTimeout } from "@/lib/api-timeout";
 import { resolveWorkspaceScopeForUser } from "@/lib/workspace-scope";
+import {
+  assertChatScopeAccess,
+  buildChatSessionVisibilityFilter,
+  resolveSessionChatScope,
+} from "@/lib/chat-scope";
+import { ChatScopeSchema } from "@/types/general-chat";
 
 const ROUTE = "/api/chat-sessions";
 
@@ -27,6 +33,7 @@ const createChatSessionSchema = z
     people: z.array(z.any()).optional(),
     folderId: z.string().nullable().optional(),
     sourceMeetingId: z.string().nullable().optional(),
+    scope: ChatScopeSchema.optional(),
     allTaskLevels: z.any().nullable().optional(),
   })
   .passthrough();
@@ -37,6 +44,8 @@ const serializeSession = (session: any) => ({
   _id: undefined,
   createdAt: session.createdAt?.toISOString?.() || session.createdAt,
   lastActivityAt: session.lastActivityAt?.toISOString?.() || session.lastActivityAt,
+  memoryUpdatedAt:
+    session.memoryUpdatedAt?.toISOString?.() || session.memoryUpdatedAt || null,
 });
 
 const MAX_CHAT_SESSIONS_PAGE_SIZE = 200;
@@ -119,15 +128,11 @@ export async function GET(request?: Request) {
       adminVisibilityKey: "chatSessions",
       includeMemberUserIds: true,
     });
-    const filters: Record<string, any> = {
-      $or: [
-        { workspaceId },
-        {
-          workspaceId: { $exists: false },
-          userId: { $in: workspaceMemberUserIds },
-        },
-      ],
-    };
+    const filters: Record<string, any> = buildChatSessionVisibilityFilter({
+      workspaceId,
+      userId,
+      memberUserIds: workspaceMemberUserIds,
+    });
     if (paginateRequested && cursor) {
       filters.$and = [
         {
@@ -263,8 +268,21 @@ export async function POST(request: Request) {
     );
     const now = new Date();
     const db = await getDb();
-    const { workspaceId } = await resolveWorkspaceScopeForUser(db, userId, {
-      minimumRole: "member",
+    const { workspaceId, workspaceMemberUserIds } =
+      await resolveWorkspaceScopeForUser(db, userId, {
+        minimumRole: "member",
+        includeMemberUserIds: true,
+      });
+    const requestedScope = resolveSessionChatScope(
+      body.scope,
+      body.sourceMeetingId
+    );
+    const scope = await assertChatScopeAccess({
+      db,
+      userId,
+      workspaceId,
+      memberUserIds: workspaceMemberUserIds,
+      scope: requestedScope,
     });
     const session = {
       _id: randomUUID(),
@@ -278,7 +296,12 @@ export async function POST(request: Request) {
       taskRevisions: body.taskRevisions || [],
       people: body.people || [],
       folderId: body.folderId ?? null,
-      sourceMeetingId: body.sourceMeetingId ?? null,
+      sourceMeetingId:
+        scope.type === "meeting" ? scope.meetingId : body.sourceMeetingId ?? null,
+      scope,
+      memorySummary: null,
+      memorySummarizedThroughMessageId: null,
+      memoryUpdatedAt: null,
       allTaskLevels: body.allTaskLevels ?? null,
       createdAt: now,
       lastActivityAt: now,
@@ -347,4 +370,3 @@ export async function POST(request: Request) {
     });
   }
 }
-

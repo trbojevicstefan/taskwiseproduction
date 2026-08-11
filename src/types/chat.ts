@@ -3,6 +3,7 @@ import { z } from 'zod';
 import type { AppUser } from '@/contexts/AuthContext';
 import { PersonSchema, TranscriptQAOutputSchema } from '@/ai/flows/schemas';
 import type { TaskTypeCategory } from '@/lib/task-types';
+import type { ChatScope, GeneralChatAnswer } from '@/types/general-chat';
 
 type AIPersonSchema = z.infer<typeof PersonSchema> & { role?: 'attendee' | 'mentioned' };
 
@@ -154,6 +155,7 @@ export interface Message {
   avatar?: string;
   name?: string;
   sources?: z.infer<typeof TranscriptQAOutputSchema>['sources'];
+  chatAnswer?: GeneralChatAnswer;
 }
 
 export interface BaseSession {
@@ -172,6 +174,10 @@ export interface ChatSession extends BaseSession {
   suggestedTasks: ExtractedTaskSchema[];
   people?: AIPersonSchema[];
   sourceMeetingId?: string | null;
+  scope?: ChatScope;
+  memorySummary?: string | null;
+  memorySummarizedThroughMessageId?: string | null;
+  memoryUpdatedAt?: string | Date | null;
   originalAiTasks?: ExtractedTaskSchema[] | null;
   originalAllTaskLevels?: {
     light: ExtractedTaskSchema[];

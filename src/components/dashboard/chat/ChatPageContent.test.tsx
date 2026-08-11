@@ -36,6 +36,15 @@ describe("resolveChatPanelContext", () => {
     });
   });
 
+  it("keeps the persisted meeting scope when a different linked fallback exists", () => {
+    expect(
+      resolveChatPanelContext({ sourceMeetingId: "persisted-meeting" }, "fallback-meeting")
+    ).toEqual({
+      mode: "meeting",
+      meetingId: "persisted-meeting",
+    });
+  });
+
   it("defaults to workspace mode without any meeting linkage", () => {
     expect(resolveChatPanelContext(undefined)).toEqual({ mode: "workspace" });
     expect(resolveChatPanelContext({ sourceMeetingId: null }, null)).toEqual({

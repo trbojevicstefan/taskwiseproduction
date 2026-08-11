@@ -1,9 +1,24 @@
 import { NextResponse } from "next/server";
+import { z } from "zod";
 import { apiError } from "@/lib/api-route";
 import { getDb } from "@/lib/db";
 import { getSessionUserId } from "@/lib/server-auth";
 import { normalizeTask } from "@/lib/data";
 import { syncTasksForSource } from "@/lib/task-sync";
+import {
+  assertChatScopeAccess,
+  buildChatSessionVisibilityFilter,
+  resolveSessionChatScope,
+} from "@/lib/chat-scope";
+import { resolveWorkspaceScopeForUser } from "@/lib/workspace-scope";
+import { ChatScopeSchema, type ChatScope } from "@/types/general-chat";
+
+const patchScopeFieldsSchema = z
+  .object({
+    sourceMeetingId: z.string().trim().min(1).max(200).nullable().optional(),
+    scope: ChatScopeSchema.optional(),
+  })
+  .passthrough();
 
 const serializeSession = (session: any) => ({
   ...session,
@@ -11,6 +26,8 @@ const serializeSession = (session: any) => ({
   _id: undefined,
   createdAt: session.createdAt?.toISOString?.() || session.createdAt,
   lastActivityAt: session.lastActivityAt?.toISOString?.() || session.lastActivityAt,
+  memoryUpdatedAt:
+    session.memoryUpdatedAt?.toISOString?.() || session.memoryUpdatedAt || null,
 });
 
 const collectSessionIds = (session: any, fallbackId?: string | null) => {
@@ -43,9 +60,26 @@ export async function PATCH(
   }
 
   const body = await request.json().catch(() => ({}));
+  const parsedScopeFields = patchScopeFieldsSchema.safeParse(body);
+  if (!parsedScopeFields.success) {
+    return apiError(
+      400,
+      "invalid_payload",
+      "Invalid chat session payload.",
+      parsedScopeFields.error.flatten()
+    );
+  }
   const avoidTimestampUpdate = Boolean(body.avoidTimestampUpdate);
   const update = { ...body };
   delete update.avoidTimestampUpdate;
+  delete update._id;
+  delete update.id;
+  delete update.userId;
+  delete update.workspaceId;
+  delete update.createdAt;
+  delete update.memorySummary;
+  delete update.memorySummarizedThroughMessageId;
+  delete update.memoryUpdatedAt;
   let normalizedTasks: any[] | null = null;
   if (Array.isArray(update.suggestedTasks)) {
     normalizedTasks = update.suggestedTasks.map((task: any) =>
@@ -59,14 +93,46 @@ export async function PATCH(
   }
 
   const db = await getDb();
-  const filter = {
+  const { workspaceId, workspaceMemberUserIds } =
+    await resolveWorkspaceScopeForUser(db, userId, {
+      minimumRole: "member",
+      adminVisibilityKey: "chatSessions",
+      includeMemberUserIds: true,
+    });
+  const visibilityFilter = buildChatSessionVisibilityFilter({
+    workspaceId,
     userId,
-    $or: [{ _id: id }, { id }],
+    memberUserIds: workspaceMemberUserIds,
+  });
+  const filter = {
+    $and: [{ $or: [{ _id: id }, { id }] }, visibilityFilter],
   };
   // Fetch session first to get context for sync
   const getCurrent = await db.collection("chatSessions").findOne(filter);
+  if (!getCurrent) {
+    return apiError(404, "request_error", "Chat session not found.");
+  }
+  const effectiveSourceMeetingId =
+    update.sourceMeetingId !== undefined
+      ? update.sourceMeetingId
+      : getCurrent.sourceMeetingId;
+  const requestedScope = resolveSessionChatScope(
+    (update.scope as ChatScope | undefined) ?? getCurrent.scope,
+    effectiveSourceMeetingId
+  );
+  const scope = await assertChatScopeAccess({
+    db,
+    userId,
+    workspaceId,
+    memberUserIds: workspaceMemberUserIds,
+    scope: requestedScope,
+  });
+  update.scope = scope;
+  update.sourceMeetingId =
+    scope.type === "meeting" ? scope.meetingId : effectiveSourceMeetingId ?? null;
   const sessionTitle = getCurrent?.title || body.title || "Chat Session";
-  const sourceMeetingId = getCurrent?.sourceMeetingId;
+  const sourceMeetingId = update.sourceMeetingId;
+  const sessionOwnerUserId = String(getCurrent.userId || userId);
 
   if (normalizedTasks) {
     try {
@@ -78,7 +144,7 @@ export async function PATCH(
       // But 'sourceSessionId' is meeting. 
 
       const syncResult = await syncTasksForSource(db, normalizedTasks, {
-        userId,
+        userId: sessionOwnerUserId,
         sourceSessionId: targetSessionId,
         sourceSessionType: targetSessionType,
         sourceSessionName: isLinkedToMeeting ? "Meeting" : sessionTitle, // Fetch meeting title? 
@@ -106,7 +172,7 @@ export async function PATCH(
       if (sourceMeetingId) {
         const meetingId = String(sourceMeetingId);
         const meetingFilter = {
-          userId,
+          userId: sessionOwnerUserId,
           $or: [{ _id: meetingId }, { id: meetingId }],
         };
         // Update meeting with the SAME references (since they share the task list in this context)
@@ -120,8 +186,8 @@ export async function PATCH(
         // But the user is editing the CHAT. So 'chat' origin is correct for the edit.
         // The meeting view will reference the canonical tasks.
       }
-    } catch (error) {
-      console.error("Failed to sync chat tasks after update:", error);
+    } catch {
+      console.error("Failed to sync chat tasks after updating a session.");
     }
   }
 
@@ -131,7 +197,7 @@ export async function PATCH(
   const session = await db.collection("chatSessions").findOne(filter);
 
   if (session?.sourceMeetingId) {
-    await cleanupChatTasksForSession(db, userId, session);
+    await cleanupChatTasksForSession(db, sessionOwnerUserId, session);
   }
   return NextResponse.json(serializeSession(session));
 }
@@ -147,9 +213,19 @@ export async function DELETE(
   }
 
   const db = await getDb();
-  const filter = {
+  const { workspaceId, workspaceMemberUserIds } =
+    await resolveWorkspaceScopeForUser(db, userId, {
+      minimumRole: "member",
+      adminVisibilityKey: "chatSessions",
+      includeMemberUserIds: true,
+    });
+  const visibilityFilter = buildChatSessionVisibilityFilter({
+    workspaceId,
     userId,
-    $or: [{ _id: id }, { id }],
+    memberUserIds: workspaceMemberUserIds,
+  });
+  const filter = {
+    $and: [{ $or: [{ _id: id }, { id }] }, visibilityFilter],
   };
   const result = await db
     .collection("chatSessions")
@@ -160,5 +236,3 @@ export async function DELETE(
 
   return NextResponse.json({ ok: true });
 }
-
-
