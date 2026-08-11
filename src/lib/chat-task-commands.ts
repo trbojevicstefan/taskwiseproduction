@@ -2,6 +2,7 @@ import type { Db } from "mongodb";
 import "@/lib/mcp-register-all";
 import { executeRegisteredMcpTool } from "@/lib/mcp-registry";
 import { McpToolCallError } from "@/lib/mcp-read-tools";
+import { escapeRegexPattern } from "@/lib/mcp-tool-helpers";
 import type { GeneralChatAnswer } from "@/types/general-chat";
 
 export type ChatTaskCommand =
@@ -168,6 +169,41 @@ const quotedText = (value: string): string | null => {
 
 const hasSelectedTaskReference = (value: string): boolean =>
   /\b(?:the\s+)?selected\s+(?:task|todo)\b/i.test(value);
+
+const parseSafeQuotedRenameCommand = (
+  question: string
+): ChatTaskCommand | null => {
+  const selectedMatch =
+    /^\s*(?:please\s+)?(?:rename|retitle)\s+(?:the\s+)?selected\s+(?:task|todo)\s+(?:to|as)\s+["“]([^"”]{1,300})["”]\s*[.!]?\s*$/i.exec(
+      question
+    );
+  if (selectedMatch) {
+    const title = capitalizeFirst(selectedMatch[1]);
+    return title
+      ? {
+          kind: "update",
+          matchText: "selected task",
+          updates: { title },
+          changeLabel: "renamed",
+        }
+      : null;
+  }
+
+  const namedMatch =
+    /^\s*(?:please\s+)?(?:rename|retitle)\s+(?:the\s+)?(?:task|todo)\s+["“]([^"”]{2,300})["”]\s+(?:to|as)\s+["“]([^"”]{1,300})["”]\s*[.!]?\s*$/i.exec(
+      question
+    );
+  if (!namedMatch) return null;
+  const matchText = singleLine(namedMatch[1]);
+  const title = capitalizeFirst(namedMatch[2]);
+  if (!matchText || !title) return null;
+  return {
+    kind: "update",
+    matchText,
+    updates: { title },
+    changeLabel: "renamed",
+  };
+};
 
 const parseUnsafeTaskCommand = (question: string): ChatTaskCommand | null => {
   if (!/\b(?:tasks?|todos?)\b/i.test(question)) return null;
@@ -377,6 +413,7 @@ export const planChatTaskCommand = (
   return (
     parseCreateCommand(normalized, now) ??
     parseContextualCreateCommand(normalized, history) ??
+    parseSafeQuotedRenameCommand(normalized) ??
     parseUnsafeTaskCommand(normalized) ??
     parseUpdateCommand(normalized, now)
   );
@@ -432,7 +469,10 @@ const findTaskMatch = async (
   const normalizedNeedle = normalizeForMatch(matchText);
   if (!normalizedNeedle) return { status: "none" };
 
-  const titlePattern = normalizedNeedle.split(" ").join("[^a-z0-9]+");
+  const titlePattern = normalizedNeedle
+    .split(" ")
+    .map(escapeRegexPattern)
+    .join("[^a-z0-9]+");
   const queryMatches = (pattern: string): Promise<any[]> =>
     db
       .collection("tasks")
@@ -445,7 +485,9 @@ const findTaskMatch = async (
       .limit(2)
       .toArray();
 
-  const exact = await queryMatches(`^${titlePattern}$`);
+  const exact = await queryMatches(
+    `^[^a-z0-9]*${titlePattern}[^a-z0-9]*$`
+  );
   if (exact.length === 1) return { status: "matched", task: exact[0] };
   if (exact.length > 1) return { status: "ambiguous", matches: exact };
 

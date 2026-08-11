@@ -321,25 +321,58 @@ describe("chat-task-commands", () => {
     );
   });
 
-  it("blocks destructive language anywhere in a non-create command", async () => {
-    const { db } = buildDb({
+  it.each([
+    {
+      label: "quoted source title",
+      question: 'Rename task "Archive old notes" to "Filed notes"',
+      selectedTaskIds: undefined,
       rows: [
         {
           _id: "canonical-1",
-          title: "Archive old meeting notes",
+          title: "Archive old notes",
           status: "todo",
         },
       ],
+      expectedArgs: { taskId: "canonical-1", title: "Filed notes" },
+    },
+    {
+      label: "quoted selected-task destination title",
+      question: 'Rename the selected task to "Archive old notes"',
+      selectedTaskIds: ["source-1"],
+      rows: [
+        {
+          _id: "canonical-1",
+          sourceTaskId: "source-1",
+          title: "Old notes",
+          status: "todo",
+        },
+      ],
+      expectedArgs: { taskId: "canonical-1", title: "Archive old notes" },
+    },
+  ])("allows a safe rename with a $label", async ({ question, selectedTaskIds, rows, expectedArgs }) => {
+    const { db } = buildDb({ rows });
+    mockedExecuteRegisteredMcpTool.mockResolvedValue({
+      toolName: "action_items.update_title",
+      summary: "Title updated.",
+      data: {
+        task: {
+          id: "canonical-1",
+          title: expectedArgs.title,
+          status: "todo",
+        },
+      },
     });
-    const planned = command(
-      "Rename task Archive old meeting notes to File old meeting notes"
+
+    const result = await runChatTaskCommand(db, scope, command(question), {
+      selectedTaskIds,
+    });
+
+    expect(result.confidence).toBe("high");
+    expect(mockedExecuteRegisteredMcpTool).toHaveBeenCalledWith(
+      { db, workspaceId: "workspace-1" },
+      "action_items.update_title",
+      expectedArgs
     );
-    expect(planned.kind).toBe("clarify");
-
-    const result = await runChatTaskCommand(db, scope, planned);
-
-    expect(result.confidence).toBe("low");
-    expect(mockedExecuteRegisteredMcpTool).not.toHaveBeenCalled();
   });
 
   it("clarifies multi-selection without reading or writing", async () => {
@@ -426,7 +459,7 @@ describe("chat-task-commands", () => {
     expect(mockedExecuteRegisteredMcpTool).not.toHaveBeenCalled();
   });
 
-  it("finds ambiguity beyond the former 25-task scan without an unbounded read", async () => {
+  it("finds normalized punctuation/case/spacing ambiguity in older tasks with a bounded query", async () => {
     const rows = [
       { _id: "task-1", title: "Follow up with Casey", status: "todo" },
       ...Array.from({ length: 24 }, (_, index) => ({
@@ -434,7 +467,11 @@ describe("chat-task-commands", () => {
         title: `Unrelated task ${index}`,
         status: "todo",
       })),
-      { _id: "task-older", title: "Follow up with Casey", status: "todo" },
+      {
+        _id: "task-older",
+        title: "  FOLLOW---up   with CASEY!!!  ",
+        status: "todo",
+      },
     ];
     const { db, find, updateOne } = buildDb({ rows });
     mockedExecuteRegisteredMcpTool.mockResolvedValue({
@@ -455,6 +492,7 @@ describe("chat-task-commands", () => {
         title: expect.objectContaining({ $regex: expect.any(String) }),
       })
     );
+    expect(find.mock.results[0]?.value.limit).toHaveBeenCalledWith(2);
     expect(updateOne).not.toHaveBeenCalled();
     expect(mockedExecuteRegisteredMcpTool).not.toHaveBeenCalled();
   });
@@ -463,6 +501,9 @@ describe("chat-task-commands", () => {
     "Mark task Foo done and then delete it",
     "Delete task Foo and remove task Foo due date",
     "Mark task Foo done and task Bar done",
+    'Rename task "Foo" to "Bar" and delete it',
+    "Rename task Foo to Bar and purge it",
+    'Rename task "Foo" and task "Bar" to "Baz"',
   ])("blocks mixed or multi-target task writes with zero registry calls: %s", async (question) => {
     const { db, findOne, insertOne, updateOne } = buildDb({
       findOne: { _id: "task-foo", title: "Foo", workspaceId: "workspace-1" },
