@@ -13,6 +13,8 @@
     "typecheck": "tsc --noEmit",
     "test": "jest",
     "test:routes:smoke": "jest --runInBand src/app/api/routes-smoke.test.ts",
+    "eval:chat-rag": "tsx scripts/eval-chat-rag.ts",
+    "test:openai-mcp-chat": "tsx scripts/test-openai-mcp-chat.ts",
     "db:indexes:perf": "node scripts/create-performance-indexes.js",
     "usage:openai": "node scripts/openai-usage-report.js",
     "metrics:core-first:baseline": "node scripts/core-first-baseline-report.js",

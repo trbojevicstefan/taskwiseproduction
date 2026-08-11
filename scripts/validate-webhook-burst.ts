@@ -1,6 +1,11 @@
 import crypto from "crypto";
 import dotenv from "dotenv";
 import { MongoClient, ObjectId } from "mongodb";
+import {
+  buildWebhookBurstFixture,
+  ensureWebhookBurstLookupIndex,
+} from "./validate-webhook-burst-fixture";
+import type { FathomConnectionDoc } from "../src/lib/fathom-connections";
 
 dotenv.config({ path: ".env.local" });
 dotenv.config({ path: ".env" });
@@ -156,29 +161,27 @@ const main = async () => {
   const recordingPrefix = `burst-${Date.now()}-${Math.random().toString(16).slice(2)}`;
   const client = new MongoClient(uri);
   const userId = new ObjectId();
+  const connectionId = crypto.randomUUID();
+  const workspaceId = crypto.randomUUID();
 
   try {
     await client.connect();
     appClient = await clientPromise;
     const db = client.db(dbName);
+    await ensureWebhookBurstLookupIndex(db);
 
-    const testUser = {
-      _id: userId,
-      email: `burst+${token}@example.com`,
-      name: "Webhook Burst Probe",
-      passwordHash: "not-used",
-      avatarUrl: null,
-      sourceSessionIds: [],
-      createdAt: new Date(),
-      lastUpdated: new Date(),
-      lastSeenAt: new Date(),
-      onboardingCompleted: true,
-      workspace: { id: crypto.randomUUID(), name: "Burst Workspace" },
-      firefliesWebhookToken: null,
-      fathomWebhookToken: token,
-      fathomConnected: true,
-    };
-    await db.collection("users").insertOne(testUser);
+    const fixture = buildWebhookBurstFixture({
+      userId,
+      workspaceId,
+      connectionId,
+      webhookToken: token,
+    });
+    await Promise.all([
+      db.collection("users").insertOne(fixture.user),
+      db
+        .collection<FathomConnectionDoc>("fathomConnections")
+        .insertOne(fixture.connection),
+    ]);
 
     const perRound: RoundResult[] = [];
     for (let round = 1; round <= rounds; round += 1) {
@@ -266,6 +269,9 @@ const main = async () => {
     const db = client.db(dbName);
     await Promise.all([
       db.collection("users").deleteMany({ _id: userId }),
+      db
+        .collection<FathomConnectionDoc>("fathomConnections")
+        .deleteMany({ _id: connectionId }),
       db
         .collection("jobs")
         .deleteMany({ userId: userId.toString(), type: "fathom-webhook-ingest" }),

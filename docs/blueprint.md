@@ -17,7 +17,10 @@ The default app experience should privilege the core loop. Advanced controls sta
 - NextAuth-based authentication and session handling.
 - MongoDB persistence for users, workspaces, meetings, canonical tasks, board items, people, integrations, jobs, domain events, workflows, webhook deliveries, MCP keys, and audit logs.
 - Workspace-aware authorization helpers for membership, role, and admin visibility checks.
-- AI meeting/task flows through Genkit/OpenAI-style flow modules.
+- AI meeting/task flows use Genkit schemas with OpenAI Responses execution.
+- Unified chat uses the central MCP registry for scoped read tools, hybrid
+  Atlas-first RAG, and typed deterministic task commands. Durable MongoDB chat
+  sessions preserve scope and rolling grounded memory across reloads.
 - Meeting ingestion side effects sync attendees and suggested canonical tasks. Board projection is explicit and happens when a user approves selected tasks or moves a task to a board.
 - Job worker support handles async Fathom sync/webhook ingest, domain-event dispatch, and workflow webhook delivery.
 - Realtime refresh uses domain event/SSE infrastructure.
@@ -88,6 +91,18 @@ Before release:
 - `npm run validate:core-first:remaining`
 
 Known stability gates include webhook burst p95, worker recovery, SSE latency, Fathom multi-connection end-to-end checks, MCP real-client read/write validation, and rollback/recovery runbook validation.
+
+Unified chat adds two release gates:
+
+- `npm run eval:chat-rag` runs the deterministic offline multilingual/scoping,
+  memory, loop-bound, authorization, and zero-write corpus.
+- `npm run test:openai-mcp-chat` uses synthetic data to verify that the
+  configured OpenAI model performs English and Serbian Responses function
+  calling and accepts exact `function_call_output` continuation.
+
+See [Unified Chat RAG Runbook](./unified-chat-runbook.md) for supported scopes,
+session authority, read/write policy, Atlas index and bounded fallback setup,
+failure behavior, observability, and the complete release sequence.
 
 ## Design Direction
 
