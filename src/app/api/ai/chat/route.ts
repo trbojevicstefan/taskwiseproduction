@@ -117,17 +117,29 @@ const mergeAuthorizedHistory = (
   durableHistory: ChatHistoryEntry[],
   requestHistory: ChatHistoryEntry[] | undefined
 ): ChatHistoryEntry[] => {
-  const merged: ChatHistoryEntry[] = [];
-  const seen = new Set<string>();
-  for (const entry of [...durableHistory, ...(requestHistory ?? [])]) {
-    const key = `${entry.role}:${singleLine(entry.text)}:${(entry.sources ?? [])
-      .map((source) => `${source.sourceType}:${source.sourceId}`)
-      .join(",")}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    merged.push(entry);
+  const requested = requestHistory ?? [];
+  const sameEntry = (left: ChatHistoryEntry, right: ChatHistoryEntry) =>
+    left.role === right.role &&
+    left.text === right.text &&
+    JSON.stringify(left.sources ?? []) === JSON.stringify(right.sources ?? []);
+  let overlap = 0;
+  for (
+    let length = Math.min(durableHistory.length, requested.length);
+    length > 0;
+    length -= 1
+  ) {
+    if (
+      durableHistory
+        .slice(-length)
+        .every((entry, index) => sameEntry(entry, requested[index]))
+    ) {
+      overlap = length;
+      break;
+    }
   }
-  return merged.slice(-HISTORY_RENDER_ENTRIES);
+  return [...durableHistory, ...requested.slice(overlap)].slice(
+    -HISTORY_RENDER_ENTRIES
+  );
 };
 
 const buildRetrievalQuestion = (
@@ -254,11 +266,16 @@ const filterMeetingSuggestedActions = (
 
 const filterAgentAnswerForScope = (
   answer: GeneralChatAnswer,
-  scope: ChatScope
+  scope: ChatScope,
+  canonicalMeetingId?: string
 ): GeneralChatAnswer => {
   if (scope.type !== "meeting") return answer;
 
-  const meetingIds = new Set([scope.meetingId]);
+  const meetingIds = new Set(
+    [scope.meetingId, canonicalMeetingId].filter(
+      (meetingId): meetingId is string => Boolean(meetingId)
+    )
+  );
   const sources = filterMeetingSources(answer.sources, meetingIds);
   const suggestedActions = filterMeetingSuggestedActions(
     answer.suggestedActions,
@@ -631,7 +648,21 @@ export async function POST(request: Request) {
       today,
     });
     if (agentAnswer) {
-      const data = filterAgentAnswerForScope(agentAnswer, effectiveScope);
+      const scopedMeeting = effectiveMeetingId
+        ? await loadScopedMeeting(db, effectiveMeetingId, {
+            userId,
+            workspaceId,
+            memberUserIds: workspaceMemberUserIds,
+          })
+        : null;
+      const canonicalMeetingId = scopedMeeting?._id
+        ? String(scopedMeeting._id)
+        : undefined;
+      const data = filterAgentAnswerForScope(
+        agentAnswer,
+        effectiveScope,
+        canonicalMeetingId
+      );
       logger.info("api.request.succeeded", {
         status: 200,
         durationMs: durationMs(),

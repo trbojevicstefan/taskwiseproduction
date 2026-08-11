@@ -3,6 +3,7 @@ import { extractJsonValue } from "@/ai/flows/parse-json-output";
 import {
   executeScopedMcpTool,
   getOpenAiReadToolsForScope,
+  prepareScopedMcpToolCall,
 } from "@/lib/openai-responses-tools";
 import {
   GeneralChatAnswerSchema,
@@ -29,7 +30,7 @@ type OpenAiFunctionCall = {
   type: "function_call";
   call_id: string;
   name: string;
-  arguments: string;
+  arguments: unknown;
 };
 
 type EvidenceIds = Record<GeneralChatSourceType, Set<string>>;
@@ -377,9 +378,20 @@ export async function runScopedChatAgent(input: {
       toolCallCount += 1;
 
       const parsedArgs = safeArguments(call.arguments);
-      const signature = `${call.name}:${
-        parsedArgs.ok ? stableJson(parsedArgs.args) : call.arguments.trim()
-      }`;
+      const prepared = parsedArgs.ok
+        ? prepareScopedMcpToolCall({
+            scope: input.scope,
+            name: call.name,
+            args: parsedArgs.args,
+          })
+        : null;
+      const signatureArgs =
+        prepared?.ok === true
+          ? prepared.args
+          : parsedArgs.ok
+            ? parsedArgs.args
+            : call.arguments;
+      const signature = `${call.name}:${stableJson(signatureArgs)}`;
       if (seenCalls.has(signature)) return null;
       seenCalls.add(signature);
 
@@ -398,8 +410,8 @@ export async function runScopedChatAgent(input: {
             db: input.db,
             workspaceId: input.workspaceId,
             scope: input.scope,
-            name: call.name,
-            args: parsedArgs.args,
+            name: prepared?.ok === true ? prepared.name : call.name,
+            args: prepared?.ok === true ? prepared.args : parsedArgs.args,
           }),
           parsePositiveInt(
             process.env.OPENAI_CHAT_TOOL_TIMEOUT_MS,

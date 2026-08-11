@@ -45,12 +45,14 @@ const validAnswer = {
   ],
 };
 
-const runAgent = () =>
+const runAgent = (
+  scope: Parameters<typeof runScopedChatAgent>[0]["scope"] = { type: "workspace" }
+) =>
   runScopedChatAgent({
     db: {} as any,
     workspaceId: "workspace-1",
     userId: "user-1",
-    scope: { type: "workspace" },
+    scope,
     question: "What did we decide about pricing?",
     history: [{ role: "user", text: "Focus on the kickoff." }],
     memorySummary: "Earlier grounded discussion referenced meeting-1.",
@@ -261,6 +263,74 @@ describe("runScopedChatAgent", () => {
     expect(mockedExecuteRegisteredMcpTool).toHaveBeenCalledTimes(1);
   });
 
+  it.each([
+    {
+      label: "knowledge scope",
+      scope: { type: "meeting", meetingId: "meeting-1" } as const,
+      name: "search_workspace_knowledge",
+      firstArgs: {
+        query: "pricing",
+        scopeType: "workspace",
+        scopeId: "other-meeting-1",
+      },
+      secondArgs: {
+        query: "pricing",
+        scopeType: "client",
+        scopeId: "other-meeting-2",
+      },
+    },
+    {
+      label: "meeting id",
+      scope: { type: "meeting", meetingId: "meeting-1" } as const,
+      name: "get_meeting",
+      firstArgs: { meetingId: "other-meeting-1" },
+      secondArgs: { meetingId: "other-meeting-2" },
+    },
+    {
+      label: "person id",
+      scope: { type: "person", personId: "person-1" } as const,
+      name: "get_client_commitments",
+      firstArgs: { personId: "other-person-1", includeDone: true },
+      secondArgs: { personId: "other-person-2", includeDone: true },
+    },
+  ])(
+    "rejects repeated effective calls when the model varies $label authority fields",
+    async ({ scope, name, firstArgs, secondArgs }) => {
+      global.fetch = jest
+        .fn()
+        .mockImplementationOnce(() =>
+          jsonResponse({
+            id: "response-1",
+            output: [
+              {
+                type: "function_call",
+                call_id: "call-1",
+                name,
+                arguments: JSON.stringify(firstArgs),
+              },
+            ],
+          })
+        )
+        .mockImplementationOnce(() =>
+          jsonResponse({
+            id: "response-2",
+            output: [
+              {
+                type: "function_call",
+                call_id: "call-2",
+                name,
+                arguments: JSON.stringify(secondArgs),
+              },
+            ],
+          })
+        ) as any;
+
+      await expect(runAgent(scope)).resolves.toBeNull();
+      expect(mockedExecuteRegisteredMcpTool).toHaveBeenCalledTimes(1);
+      expect(global.fetch).toHaveBeenCalledTimes(2);
+    }
+  );
+
   it("executes at most twelve calls and six response rounds", async () => {
     const calls = Array.from({ length: 13 }, (_, index) => ({
       type: "function_call",
@@ -389,6 +459,58 @@ describe("runScopedChatAgent", () => {
     expect(outputs[0].output).toContain("invalid_arguments");
     expect(outputs[1].output).toContain("tool_timeout");
   });
+
+  it.each([
+    { label: "missing", argumentsValue: undefined },
+    { label: "null", argumentsValue: null },
+    { label: "object", argumentsValue: { query: "pricing" } },
+  ])(
+    "turns $label function-call arguments into a safe output",
+    async ({ argumentsValue }) => {
+      const fetchMock = jest
+        .fn()
+        .mockImplementationOnce(() =>
+          jsonResponse({
+            id: "response-1",
+            output: [
+              {
+                type: "function_call",
+                call_id: "malformed-call",
+                name: "search_workspace_knowledge",
+                ...(argumentsValue === undefined
+                  ? {}
+                  : { arguments: argumentsValue }),
+              },
+            ],
+          })
+        )
+        .mockImplementationOnce(() =>
+          jsonResponse({
+            output_text: JSON.stringify({
+              answer: "I could not retrieve enough evidence.",
+              confidence: "low",
+              sources: [],
+              suggestedActions: [],
+            }),
+            output: [],
+          })
+        );
+      global.fetch = fetchMock as any;
+
+      await expect(runAgent()).resolves.toMatchObject({ confidence: "low" });
+      expect(mockedExecuteRegisteredMcpTool).not.toHaveBeenCalled();
+      const secondBody = JSON.parse(fetchMock.mock.calls[1][1].body);
+      expect(secondBody.input).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            type: "function_call_output",
+            call_id: "malformed-call",
+            output: expect.stringContaining("invalid_arguments"),
+          }),
+        ])
+      );
+    }
+  );
 
   it("returns null for provider failures and invalid final output", async () => {
     global.fetch = jest.fn().mockRejectedValueOnce(new Error("network down")) as any;

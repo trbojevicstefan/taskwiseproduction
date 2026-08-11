@@ -346,6 +346,44 @@ describe("POST /api/ai/chat", () => {
       expect(mockedSearchWorkspaceContext).not.toHaveBeenCalled();
     });
 
+    it("preserves repeated ordered turns while merging the latest twelve history entries", async () => {
+      chatSessionsFindOne.mockResolvedValue({
+        _id: "session-1",
+        workspaceId: "workspace-1",
+        userId: "user-1",
+      });
+      const repeatedTurns = [
+        { role: "user" as const, text: "Please repeat that." },
+        { role: "assistant" as const, text: "First acknowledgement." },
+        { role: "user" as const, text: "Please repeat that." },
+      ];
+      mockedLoadDurableChatMemory.mockResolvedValue({
+        recentHistory: repeatedTurns,
+        summary: null,
+      });
+      mockedRunScopedChatAgent.mockResolvedValue(validFlowResult);
+
+      const response = await POST(
+        buildRequest({
+          question: "What happened next?",
+          sessionId: "session-1",
+          history: [
+            { role: "assistant", text: "Second acknowledgement." },
+          ],
+        })
+      );
+
+      expect(response.status).toBe(200);
+      expect(mockedRunScopedChatAgent).toHaveBeenCalledWith(
+        expect.objectContaining({
+          history: [
+            ...repeatedTurns,
+            { role: "assistant", text: "Second acknowledgement." },
+          ],
+        })
+      );
+    });
+
     it("applies meeting source and action filters to the agent result", async () => {
       mockedRunScopedChatAgent.mockResolvedValue({
         ...validMeetingFlowResult,
@@ -382,6 +420,38 @@ describe("POST /api/ai/chat", () => {
         validMeetingFlowResult.suggestedActions
       );
       expect(mockedAnswerMeetingQuestion).not.toHaveBeenCalled();
+    });
+
+    it("retains canonical meeting evidence when the request used a legacy meeting id", async () => {
+      meetingsFindOne.mockResolvedValue({
+        ...transcriptMeeting,
+        _id: "canonical-meeting-id",
+        id: "legacy-meeting-id",
+      });
+      const canonicalAnswer = {
+        ...validMeetingFlowResult,
+        sources: validMeetingFlowResult.sources.map((source) => ({
+          ...source,
+          sourceId: "canonical-meeting-id",
+        })),
+        suggestedActions: validMeetingFlowResult.suggestedActions.map((action) => ({
+          ...action,
+          targetId: "canonical-meeting-id",
+        })),
+      };
+      mockedRunScopedChatAgent.mockResolvedValue(canonicalAnswer);
+
+      const response = await POST(
+        buildRequest({
+          question: "What did Stefan say?",
+          scope: { type: "meeting", meetingId: "legacy-meeting-id" },
+        })
+      );
+
+      expect(response.status).toBe(200);
+      const payload = await response.json();
+      expect(payload.data).toEqual(canonicalAnswer);
+      expect(meetingsFindOne).toHaveBeenCalled();
     });
 
     it("validates entity scope before invoking the agent", async () => {

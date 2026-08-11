@@ -25,6 +25,16 @@ export type ScopedMcpToolExecution =
       };
     };
 
+export type PreparedScopedMcpToolCall =
+  | { ok: true; name: string; args: Record<string, unknown> }
+  | {
+      ok: false;
+      error: {
+        code: "tool_not_available";
+        message: string;
+      };
+    };
+
 const WORKSPACE_READ_TOOLS = new Set([
   "search_workspace_knowledge",
   "search_meetings",
@@ -174,13 +184,11 @@ const constrainToolArgs = (
   return { ...args };
 };
 
-export async function executeScopedMcpTool(input: {
-  db: Db;
-  workspaceId: string;
+export const prepareScopedMcpToolCall = (input: {
   scope: ChatScope;
   name: string;
   args: Record<string, unknown>;
-}): Promise<ScopedMcpToolExecution> {
+}): PreparedScopedMcpToolCall => {
   const available = getOpenAiReadToolsForScope(input.scope).some(
     (tool) => tool.name === input.name
   );
@@ -194,11 +202,28 @@ export async function executeScopedMcpTool(input: {
     };
   }
 
+  return {
+    ok: true,
+    name: input.name,
+    args: constrainToolArgs(input.scope, input.name, input.args),
+  };
+};
+
+export async function executeScopedMcpTool(input: {
+  db: Db;
+  workspaceId: string;
+  scope: ChatScope;
+  name: string;
+  args: Record<string, unknown>;
+}): Promise<ScopedMcpToolExecution> {
+  const prepared = prepareScopedMcpToolCall(input);
+  if (!prepared.ok) return prepared;
+
   try {
     const result = await executeRegisteredMcpTool(
       { db: input.db, workspaceId: input.workspaceId },
-      input.name,
-      constrainToolArgs(input.scope, input.name, input.args)
+      prepared.name,
+      prepared.args
     );
     return { ok: true, result };
   } catch (error) {

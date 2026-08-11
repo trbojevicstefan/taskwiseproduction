@@ -2,6 +2,7 @@ import { executeRegisteredMcpTool } from "@/lib/mcp-registry";
 import {
   executeScopedMcpTool,
   getOpenAiReadToolsForScope,
+  prepareScopedMcpToolCall,
 } from "@/lib/openai-responses-tools";
 
 jest.mock("@/lib/mcp-registry", () => {
@@ -138,6 +139,52 @@ describe("OpenAI Responses MCP tools", () => {
       { personId: "person-1", includeDone: true }
     );
   });
+
+  it.each([
+    {
+      scope: { type: "meeting", meetingId: "meeting-1" } as const,
+      name: "search_workspace_knowledge",
+      firstArgs: {
+        query: "pricing",
+        scopeType: "workspace",
+        scopeId: "other-meeting-1",
+      },
+      secondArgs: {
+        query: "pricing",
+        scopeType: "client",
+        scopeId: "other-meeting-2",
+      },
+      expectedArgs: {
+        query: "pricing",
+        scopeType: "meeting",
+        scopeId: "meeting-1",
+      },
+    },
+    {
+      scope: { type: "meeting", meetingId: "meeting-1" } as const,
+      name: "get_meeting",
+      firstArgs: { meetingId: "other-meeting-1" },
+      secondArgs: { meetingId: "other-meeting-2" },
+      expectedArgs: { meetingId: "meeting-1" },
+    },
+    {
+      scope: { type: "person", personId: "person-1" } as const,
+      name: "get_client_commitments",
+      firstArgs: { personId: "other-person-1", includeDone: true },
+      secondArgs: { personId: "other-person-2", includeDone: true },
+      expectedArgs: { personId: "person-1", includeDone: true },
+    },
+  ])(
+    "prepares identical effective arguments for spoofed $name authority fields",
+    ({ scope, name, firstArgs, secondArgs, expectedArgs }) => {
+      const first = prepareScopedMcpToolCall({ scope, name, args: firstArgs });
+      const second = prepareScopedMcpToolCall({ scope, name, args: secondArgs });
+
+      expect(first).toEqual({ ok: true, name, args: expectedArgs });
+      expect(second).toEqual(first);
+      expect(mockedExecuteRegisteredMcpTool).not.toHaveBeenCalled();
+    }
+  );
 
   it("rejects unavailable and unknown tools without executing the registry", async () => {
     const unavailable = await executeScopedMcpTool({
