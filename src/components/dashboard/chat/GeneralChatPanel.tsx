@@ -696,6 +696,7 @@ export default function GeneralChatPanel({
   );
   const [inputValue, setInputValue] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [sessionError, setSessionError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
 
@@ -729,6 +730,13 @@ export default function GeneralChatPanel({
   const lastScopeKeyRef = useRef<string | undefined>(undefined);
   const sendLockRef = useRef(false);
   const ensureSessionPromiseRef = useRef<Promise<string | null> | null>(null);
+  const messageRevisionRef = useRef(0);
+  const conversationGenerationRef = useRef(0);
+  const pendingPersistenceRevisionsRef = useRef(new Set<number>());
+  const initialMessagesFingerprint = JSON.stringify(initialMessages ?? []);
+  const lastInitialMessagesFingerprintRef = useRef(
+    initialMessagesFingerprint
+  );
   const scopeKey =
     scope.type === 'meeting'
       ? `meeting:${scope.meetingId}`
@@ -761,39 +769,91 @@ export default function GeneralChatPanel({
     lastSessionKeyRef.current = sessionKey;
     lastScopeKeyRef.current = scopeKey;
     ensuredSessionIdRef.current = null;
+    conversationGenerationRef.current += 1;
+    messageRevisionRef.current += 1;
+    pendingPersistenceRevisionsRef.current.clear();
+    lastInitialMessagesFingerprintRef.current = initialMessagesFingerprint;
+    setSessionError(null);
     if (isFirstRun) return; // initial state already seeded from initialMessages
     const next = initialMessagesRef.current ?? [];
     messagesRef.current = next;
     setMessages(next);
-  }, [scopeKey, sessionId]);
+  }, [initialMessagesFingerprint, scopeKey, sessionId]);
+
+  const applyAuthoritativeInitialMessages = useCallback(() => {
+    const next = initialMessagesRef.current ?? [];
+    messagesRef.current = next;
+    setMessages(next);
+    onMessagesChangeRef.current?.(next);
+  }, []);
+
+  // The context can replace the same session's messages after a failed save.
+  // Defer that prop snapshot while a newer local revision is still in flight;
+  // the failed latest revision explicitly reconciles once its queue settles.
+  useEffect(() => {
+    if (
+      lastInitialMessagesFingerprintRef.current === initialMessagesFingerprint
+    ) {
+      return;
+    }
+    lastInitialMessagesFingerprintRef.current = initialMessagesFingerprint;
+    if (pendingPersistenceRevisionsRef.current.size > 0) return;
+    applyAuthoritativeInitialMessages();
+  }, [applyAuthoritativeInitialMessages, initialMessagesFingerprint]);
 
   const persistToSession = useCallback(
-    (nextMessages: PanelMessage[]) => {
+    (nextMessages: PanelMessage[], revision: number) => {
       if (!persistMessages) return;
       const targetSessionId = sessionId ?? ensuredSessionIdRef.current;
       if (!targetSessionId) return;
       const stored = panelMessagesToStoredMessages(nextMessages);
-      const persistence = onPersistMessagesRef.current?.(
-        targetSessionId,
-        stored
-      );
-      if (persistence) {
-        void Promise.resolve(persistence).catch((error) => {
-          console.error('Failed to persist chat messages:', error);
-        });
+      const generation = conversationGenerationRef.current;
+      pendingPersistenceRevisionsRef.current.add(revision);
+      let persistence: Promise<boolean> | void;
+      try {
+        persistence = onPersistMessagesRef.current?.(targetSessionId, stored);
+      } catch (error) {
+        persistence = Promise.reject(error);
       }
+      if (!persistence) {
+        pendingPersistenceRevisionsRef.current.delete(revision);
+        return;
+      }
+      void Promise.resolve(persistence)
+        .then((saved) => {
+          pendingPersistenceRevisionsRef.current.delete(revision);
+          if (
+            saved === false &&
+            conversationGenerationRef.current === generation &&
+            messageRevisionRef.current === revision
+          ) {
+            applyAuthoritativeInitialMessages();
+          }
+        })
+        .catch((error) => {
+          pendingPersistenceRevisionsRef.current.delete(revision);
+          console.error('Failed to persist chat messages:', error);
+          if (
+            conversationGenerationRef.current === generation &&
+            messageRevisionRef.current === revision
+          ) {
+            applyAuthoritativeInitialMessages();
+          }
+        });
     },
-    [persistMessages, sessionId]
+    [applyAuthoritativeInitialMessages, persistMessages, sessionId]
   );
 
   /** Append/replace messages, notify the parent, and persist. */
   const commitMessages = useCallback(
     (updater: (prev: PanelMessage[]) => PanelMessage[]) => {
       const next = updater(messagesRef.current);
+      const revision = messageRevisionRef.current + 1;
+      messageRevisionRef.current = revision;
       messagesRef.current = next;
       setMessages(next);
       onMessagesChangeRef.current?.(next);
-      persistToSession(next);
+      persistToSession(next, revision);
     },
     [persistToSession]
   );
@@ -853,29 +913,40 @@ export default function GeneralChatPanel({
     const question = inputValue.trim().slice(0, MAX_QUESTION_LENGTH);
     if (!question || isLoading || sendLockRef.current) return;
     sendLockRef.current = true;
-    setInputValue('');
     try {
-      if (
-        persistMessages &&
-        !sessionId &&
-        !ensuredSessionIdRef.current &&
-        onEnsureSessionRef.current
-      ) {
+      if (persistMessages && !sessionId && !ensuredSessionIdRef.current) {
+        const ensureSession = onEnsureSessionRef.current;
+        if (!ensureSession) {
+          setSessionError(
+            'Could not create a durable chat session. Please try again.'
+          );
+          return;
+        }
         try {
           const ensurePromise =
             ensureSessionPromiseRef.current ??
-            onEnsureSessionRef.current(question);
+            ensureSession(question);
           ensureSessionPromiseRef.current = ensurePromise;
           const createdId = await ensurePromise;
-          if (createdId) {
-            ensuredSessionIdRef.current = createdId;
+          if (!createdId) {
+            setSessionError(
+              'Could not create a durable chat session. Please try again.'
+            );
+            return;
           }
+          ensuredSessionIdRef.current = createdId;
         } catch (error) {
           console.error('Failed to create chat session before send:', error);
+          setSessionError(
+            'Could not create a durable chat session. Please try again.'
+          );
+          return;
         } finally {
           ensureSessionPromiseRef.current = null;
         }
       }
+      setSessionError(null);
+      setInputValue('');
       const history = buildChatHistoryPayload(messagesRef.current);
       commitMessages((prev) => [
         ...prev,
@@ -997,6 +1068,11 @@ export default function GeneralChatPanel({
             <span className="hidden sm:inline">Ask</span>
           </Button>
         </form>
+        {sessionError && (
+          <p role="alert" className="text-sm text-destructive">
+            {sessionError}
+          </p>
+        )}
         <div ref={bottomRef} />
       </div>
     </TooltipProvider>

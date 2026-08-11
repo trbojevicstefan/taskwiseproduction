@@ -7,6 +7,7 @@ type CachedGetResponse = {
 
 const inFlightGetRequests = new Map<string, Promise<unknown>>();
 const cachedGetResponses = new Map<string, CachedGetResponse>();
+const getCacheGenerations = new Map<string, number>();
 
 const isBrowserRuntime = () => typeof window !== "undefined";
 
@@ -47,8 +48,25 @@ export const apiFetch = async <T>(
   options: RequestInit = {}
 ): Promise<T> => {
   const method = normalizeMethod(options);
-  const shouldDedupeGet =
+  const forceRefresh =
+    method === "GET" &&
+    (options.cache === "no-store" ||
+      options.cache === "no-cache" ||
+      options.cache === "reload");
+  const cacheableBrowserGet =
     isBrowserRuntime() && method === "GET" && options.body === undefined;
+  if (cacheableBrowserGet && forceRefresh) {
+    const requestKey = buildGetRequestKey(url, options);
+    getCacheGenerations.set(
+      requestKey,
+      (getCacheGenerations.get(requestKey) ?? 0) + 1
+    );
+    cachedGetResponses.delete(requestKey);
+    inFlightGetRequests.delete(requestKey);
+    return executeRequest<T>(url, options);
+  }
+  const shouldDedupeGet =
+    cacheableBrowserGet && !forceRefresh;
 
   if (!shouldDedupeGet) {
     return executeRequest<T>(url, options);
@@ -69,16 +87,21 @@ export const apiFetch = async <T>(
     return inFlight as Promise<T>;
   }
 
+  const cacheGeneration = getCacheGenerations.get(requestKey) ?? 0;
   const requestPromise = executeRequest<T>(url, options)
     .then((result) => {
-      cachedGetResponses.set(requestKey, {
-        value: result,
-        expiresAt: Date.now() + GET_RESPONSE_CACHE_TTL_MS,
-      });
+      if ((getCacheGenerations.get(requestKey) ?? 0) === cacheGeneration) {
+        cachedGetResponses.set(requestKey, {
+          value: result,
+          expiresAt: Date.now() + GET_RESPONSE_CACHE_TTL_MS,
+        });
+      }
       return result;
     })
     .finally(() => {
-      inFlightGetRequests.delete(requestKey);
+      if (inFlightGetRequests.get(requestKey) === requestPromise) {
+        inFlightGetRequests.delete(requestKey);
+      }
     });
 
   inFlightGetRequests.set(requestKey, requestPromise);

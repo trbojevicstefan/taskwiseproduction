@@ -288,7 +288,10 @@ export const ChatHistoryProvider = ({ children }: { children: ReactNode }) => {
           console.error("Failed to persist chat messages:", error);
           if (messageSaveVersionsRef.current.get(sessionId) === version) {
             try {
-              const loadedSessions = await apiFetch<ChatSession[]>("/api/chat-sessions");
+              const loadedSessions = await apiFetch<ChatSession[]>(
+                "/api/chat-sessions",
+                { cache: "no-store" }
+              );
               const authoritative = loadedSessions
                 .map(sanitizeSession)
                 .find((session) => session.id === sessionId);

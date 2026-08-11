@@ -309,11 +309,11 @@ describe("POST /api/ai/chat", () => {
       expect(mockedAnswerWorkspaceQuestion).not.toHaveBeenCalled();
     });
 
-    it("loads authorized durable memory and lets sourceMeetingId override payload scope", async () => {
+    it("loads a workspace-visible teammate session and lets sourceMeetingId override payload scope", async () => {
       chatSessionsFindOne.mockResolvedValue({
         _id: "session-1",
         workspaceId: "workspace-1",
-        userId: "user-1",
+        userId: "user-2",
         sourceMeetingId: "m1",
       });
       mockedLoadDurableChatMemory.mockResolvedValue({
@@ -340,6 +340,7 @@ describe("POST /api/ai/chat", () => {
         userId: "user-1",
         workspaceId: "workspace-1",
         sessionId: "session-1",
+        memberUserIds: ["user-1", "user-2"],
       });
       expect(chatSessionsFindOne).toHaveBeenCalledWith(
         {
@@ -347,10 +348,10 @@ describe("POST /api/ai/chat", () => {
             { $or: [{ _id: "session-1" }, { id: "session-1" }] },
             {
               $or: [
-                { workspaceId: "workspace-1", userId: "user-1" },
+                { workspaceId: "workspace-1" },
                 {
                   workspaceId: { $exists: false },
-                  userId: "user-1",
+                  userId: { $in: ["user-1", "user-2"] },
                 },
               ],
             },
@@ -371,6 +372,41 @@ describe("POST /api/ai/chat", () => {
       );
       expect(mockedAnswerMeetingQuestion).not.toHaveBeenCalled();
       expect(mockedSearchWorkspaceContext).not.toHaveBeenCalled();
+    });
+
+    it("rejects a cross-workspace session before reading scope or invoking the agent", async () => {
+      mockedLoadDurableChatMemory.mockRejectedValue(
+        new ApiRouteError(
+          404,
+          "chat_session_not_found",
+          "Chat session was not found."
+        )
+      );
+
+      const response = await POST(
+        buildRequest({
+          question: "What happened?",
+          sessionId: "other-workspace-session",
+        })
+      );
+
+      expect(response.status).toBe(404);
+      expect(chatSessionsFindOne).not.toHaveBeenCalled();
+      expect(mockedRunScopedChatAgent).not.toHaveBeenCalled();
+    });
+
+    it("rejects a non-member before loading any persisted session", async () => {
+      mockedResolveScope.mockRejectedValue(
+        new ApiRouteError(403, "workspace_forbidden", "Workspace access denied.")
+      );
+
+      const response = await POST(
+        buildRequest({ question: "What happened?", sessionId: "session-1" })
+      );
+
+      expect(response.status).toBe(403);
+      expect(mockedLoadDurableChatMemory).not.toHaveBeenCalled();
+      expect(chatSessionsFindOne).not.toHaveBeenCalled();
     });
 
     it.each([
@@ -662,7 +698,10 @@ describe("POST /api/ai/chat", () => {
     expect(mockedResolveScope).toHaveBeenCalledWith(
       fakeDb,
       "user-1",
-      expect.objectContaining({ includeMemberUserIds: true })
+      expect.objectContaining({
+        adminVisibilityKey: "chatSessions",
+        includeMemberUserIds: true,
+      })
     );
     expect(mockedSearchWorkspaceContext).toHaveBeenCalledWith(
       fakeDb,
@@ -1627,10 +1666,10 @@ describe("POST /api/ai/chat", () => {
             { $or: [{ _id: "s1" }, { id: "s1" }] },
             {
               $or: [
-                { workspaceId: "workspace-1", userId: "user-1" },
+                { workspaceId: "workspace-1" },
                 {
                   workspaceId: { $exists: false },
-                  userId: "user-1",
+                  userId: { $in: ["user-1", "user-2"] },
                 },
               ],
             },

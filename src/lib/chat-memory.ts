@@ -1,5 +1,6 @@
 import type { Db } from "mongodb";
 import { ApiRouteError } from "@/lib/api-route";
+import { buildChatSessionVisibilityFilter } from "@/lib/chat-scope";
 import type {
   ChatHistoryEntry,
   GeneralChatSource,
@@ -132,19 +133,17 @@ export async function loadDurableChatMemory(params: {
   userId: string;
   workspaceId: string;
   sessionId: string;
+  memberUserIds?: string[];
 }): Promise<{ recentHistory: ChatHistoryEntry[]; summary: string | null }> {
+  const visibilityFilter = buildChatSessionVisibilityFilter({
+    workspaceId: params.workspaceId,
+    userId: params.userId,
+    memberUserIds: params.memberUserIds,
+  });
   const sessionFilter = {
     $and: [
       { $or: [{ _id: params.sessionId }, { id: params.sessionId }] },
-      {
-        $or: [
-          { workspaceId: params.workspaceId, userId: params.userId },
-          {
-            workspaceId: { $exists: false },
-            userId: params.userId,
-          },
-        ],
-      },
+      visibilityFilter,
     ],
   };
   const collection = params.db.collection("chatSessions");

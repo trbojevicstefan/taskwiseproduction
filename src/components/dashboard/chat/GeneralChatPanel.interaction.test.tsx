@@ -14,6 +14,7 @@ import { act } from "react-dom/test-utils";
   true;
 import { createRoot, type Root } from "react-dom/client";
 import GeneralChatPanel, {
+  storedMessagesToPanelMessages,
   type PanelMessage,
 } from "@/components/dashboard/chat/GeneralChatPanel";
 import { apiFetch } from "@/lib/api";
@@ -271,9 +272,60 @@ describe("GeneralChatPanel interactions", () => {
     cleanup();
   });
 
-  it("deduplicates concurrent first sends while session creation is pending", async () => {
+  it("keeps a newer optimistic revision until the latest save fails, then shows the durable snapshot", async () => {
+    const firstSave = deferred<boolean>();
+    const latestSave = deferred<boolean>();
+    const onPersistMessages = jest
+      .fn()
+      .mockImplementationOnce(() => firstSave.promise)
+      .mockImplementationOnce(() => latestSave.promise);
+    const { container, root, cleanup } = await renderPanel(
+      <GeneralChatPanel
+        scope={{ type: "workspace" }}
+        sessionId="session-1"
+        persistMessages
+        onPersistMessages={onPersistMessages}
+      />
+    );
+
+    await sendQuestion(container, "Keep the durable question");
+    expect(onPersistMessages).toHaveBeenCalledTimes(2);
+    const durableStored = onPersistMessages.mock.calls[0][1];
+
+    await act(async () => {
+      root.render(
+        <GeneralChatPanel
+          scope={{ type: "workspace" }}
+          sessionId="session-1"
+          persistMessages
+          initialMessages={storedMessagesToPanelMessages(durableStored)}
+          onPersistMessages={onPersistMessages}
+        />
+      );
+    });
+    expect(container.textContent).toContain("Stefan said pricing is too high.");
+
+    firstSave.resolve(true);
+    latestSave.resolve(false);
+    await act(async () => {
+      await firstSave.promise;
+      await latestSave.promise;
+      await Promise.resolve();
+    });
+
+    expect(container.textContent).toContain("Keep the durable question");
+    expect(container.textContent).not.toContain(
+      "Stefan said pricing is too high."
+    );
+    cleanup();
+  });
+
+  it("deduplicates a null first-session ensure, retains input, and recovers on retry", async () => {
     const ensure = deferred<string | null>();
-    const onEnsureSession = jest.fn(() => ensure.promise);
+    const onEnsureSession = jest
+      .fn()
+      .mockImplementationOnce(() => ensure.promise)
+      .mockResolvedValueOnce("new-session");
     const onPersistMessages = jest.fn().mockResolvedValue(true);
     const { container, cleanup } = await renderPanel(
       <GeneralChatPanel
@@ -299,11 +351,30 @@ describe("GeneralChatPanel interactions", () => {
     });
     expect(onEnsureSession).toHaveBeenCalledTimes(1);
 
-    ensure.resolve("new-session");
+    ensure.resolve(null);
     await act(async () => {
       await Promise.resolve();
       await Promise.resolve();
     });
+    expect(mockedApiFetch).not.toHaveBeenCalled();
+    expect(input.value).toBe("Only once");
+    expect(container.querySelector('[role="alert"]')?.textContent).toMatch(
+      /could not create.*session/i
+    );
+
+    await act(async () => {
+      form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(onEnsureSession).toHaveBeenCalledTimes(2);
+    expect(mockedApiFetch).toHaveBeenCalledWith(
+      "/api/ai/chat",
+      expect.objectContaining({
+        body: expect.stringContaining('"sessionId":"new-session"'),
+      })
+    );
+    expect(container.querySelector('[role="alert"]')).toBeNull();
     cleanup();
   });
 });

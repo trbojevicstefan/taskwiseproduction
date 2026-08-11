@@ -24,6 +24,7 @@ import { runScopedChatAgent } from "@/lib/chat-agent-runtime";
 import { loadDurableChatMemory } from "@/lib/chat-memory";
 import {
   assertChatScopeAccess,
+  buildChatSessionVisibilityFilter,
   resolveSessionChatScope,
 } from "@/lib/chat-scope";
 import {
@@ -539,6 +540,7 @@ export async function POST(request: Request) {
     const { workspaceId, workspaceMemberUserIds } =
       await resolveWorkspaceScopeForUser(db, userId, {
         minimumRole: "member",
+        adminVisibilityKey: "chatSessions",
         includeMemberUserIds: true,
       });
 
@@ -552,22 +554,20 @@ export async function POST(request: Request) {
         userId,
         workspaceId,
         sessionId,
+        memberUserIds: workspaceMemberUserIds,
       });
       durableHistory = durableMemory.recentHistory;
       memorySummary = durableMemory.summary;
+      const sessionVisibilityFilter = buildChatSessionVisibilityFilter({
+        workspaceId,
+        userId,
+        memberUserIds: workspaceMemberUserIds,
+      });
       const session = await db.collection("chatSessions").findOne(
         {
           $and: [
             { $or: [{ _id: sessionId }, { id: sessionId }] },
-            {
-              $or: [
-                { workspaceId, userId },
-                {
-                  workspaceId: { $exists: false },
-                  userId,
-                },
-              ],
-            },
+            sessionVisibilityFilter,
           ],
         },
         { projection: { sourceMeetingId: 1, scope: 1 } }

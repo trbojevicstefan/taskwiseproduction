@@ -470,6 +470,8 @@ const impossibleAssociationFilter = (): Record<string, any> => ({
   _id: { $in: [] },
 });
 
+const MAX_CLIENT_SCOPE_PEOPLE = 200;
+
 const buildAssigneeAssociationFilter = (people: any[]): Record<string, any> => {
   const ids = uniqueStrings(
     people.flatMap((person) => [
@@ -560,7 +562,7 @@ const resolveTaskAssociationFilter = async (
   } as any);
   const peopleIds = uniqueStrings(
     Array.isArray(company?.peopleIds) ? company.peopleIds : []
-  );
+  ).slice(0, MAX_CLIENT_SCOPE_PEOPLE);
   if (!company || !peopleIds.length) return impossibleAssociationFilter();
   const people = await db
     .collection("people")
@@ -570,7 +572,7 @@ const resolveTaskAssociationFilter = async (
         { $or: peopleIds.map(identifierFilter) },
       ],
     } as any)
-    .limit(200)
+    .limit(MAX_CLIENT_SCOPE_PEOPLE)
     .toArray();
   return buildAssigneeAssociationFilter(people);
 };

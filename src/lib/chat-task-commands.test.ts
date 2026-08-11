@@ -55,6 +55,12 @@ const buildDb = (options?: {
         : (options?.rows ?? []);
     return createCursor(rows);
   });
+  const relatedFind = jest.fn(
+    (collectionName: string, filter: any = {}) => {
+      void filter;
+      return createCursor(options?.collectionRows?.[collectionName] ?? []);
+    }
+  );
   const insertOne = jest.fn();
   const updateOne = jest.fn();
   return {
@@ -63,7 +69,7 @@ const buildDb = (options?: {
         if (name === "tasks") return { findOne, find, insertOne, updateOne };
         return {
           findOne: jest.fn(async () => options?.documents?.[name] ?? null),
-          find: jest.fn(() => createCursor(options?.collectionRows?.[name] ?? [])),
+          find: jest.fn((filter: any = {}) => relatedFind(name, filter)),
         };
       }),
     } as any,
@@ -71,6 +77,7 @@ const buildDb = (options?: {
     find,
     insertOne,
     updateOne,
+    relatedFind,
   };
 };
 
@@ -362,6 +369,42 @@ describe("chat-task-commands", () => {
       );
       expect(mockedExecuteRegisteredMcpTool).toHaveBeenCalled();
     }
+  });
+
+  it("bounds malformed stored company peopleIds before constructing the relationship query", async () => {
+    const storedPeopleIds = [
+      ...Array.from({ length: 250 }, (_, index) => `person-${index}`),
+      " person-0 ",
+      "",
+      null,
+      { unsafe: true },
+    ];
+    const { db, relatedFind } = buildDb({
+      documents: {
+        companies: { _id: "client-1", peopleIds: storedPeopleIds },
+      },
+      collectionRows: { people: [] },
+    });
+
+    await runChatTaskCommand(
+      db,
+      scope,
+      command("Mark the selected task done"),
+      chatScopeOptions(
+        { type: "client", clientId: "client-1" },
+        ["task-selected"]
+      )
+    );
+
+    const peopleQuery = relatedFind.mock.calls.find(
+      ([collectionName]) => collectionName === "people"
+    )?.[1];
+    const relationshipClauses = peopleQuery?.$and?.[1]?.$or;
+    expect(relationshipClauses).toHaveLength(200);
+    expect(
+      relationshipClauses.map((clause: any) => clause.$or[0]._id)
+    ).toEqual(Array.from({ length: 200 }, (_, index) => `person-${index}`));
+    expect(JSON.stringify(peopleQuery)).not.toContain("[object Object]");
   });
 
   it.each([

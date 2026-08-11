@@ -73,6 +73,7 @@ describe("loadDurableChatMemory", () => {
     userId: "user-1",
     workspaceId: "workspace-1",
     sessionId: "session-1",
+    memberUserIds: ["user-1", "user-2"],
   };
 
   it("ignores typing indicators and empty messages while retaining the latest 12 real turns verbatim", async () => {
@@ -223,28 +224,36 @@ describe("loadDurableChatMemory", () => {
     });
   });
 
-  it("queries the session through the active workspace and authorized user visibility", async () => {
-    const { db, findOne } = createDb({ _id: "session-1", messages: [] });
+  it("loads only a session visible through the active workspace member contract", async () => {
+    const { db, findOne } = createDb({
+      _id: "session-1",
+      workspaceId: "workspace-1",
+      userId: "user-2",
+      messages: [userMessage("member-message", "Visible teammate context")],
+    });
 
-    await loadDurableChatMemory({ ...params, db });
+    const result = await loadDurableChatMemory({ ...params, db });
 
     expect(findOne).toHaveBeenCalledWith({
       $and: [
         { $or: [{ _id: "session-1" }, { id: "session-1" }] },
         {
           $or: [
-            { workspaceId: "workspace-1", userId: "user-1" },
+            { workspaceId: "workspace-1" },
             {
               workspaceId: { $exists: false },
-              userId: "user-1",
+              userId: { $in: ["user-1", "user-2"] },
             },
           ],
         },
       ],
     });
+    expect(result.recentHistory).toEqual([
+      { role: "user", text: "Visible teammate context" },
+    ]);
   });
 
-  it("rejects a missing or out-of-scope session", async () => {
+  it("rejects a missing, outsider-owned legacy, or cross-workspace session", async () => {
     const { db } = createDb(null);
 
     await expect(loadDurableChatMemory({ ...params, db })).rejects.toMatchObject({

@@ -174,36 +174,59 @@ describe("ChatHistoryContext durable session persistence", () => {
     cleanup();
   });
 
-  it("reloads the authoritative session after the latest message save fails", async () => {
-    const serverMessages = [
-      { id: "server", sender: "ai", text: "durable", timestamp: 1 },
+  it("force-reloads the first durable snapshot after the latest queued save fails", async () => {
+    const firstMessages = [
+      { id: "durable", sender: "user", text: "saved", timestamp: 1 },
     ];
-    let listLoads = 0;
+    const latestMessages = [
+      ...firstMessages,
+      { id: "optimistic", sender: "ai", text: "not saved", timestamp: 2 },
+    ];
+    let ordinaryListLoads = 0;
+    let forcedListLoads = 0;
+    let patchCalls = 0;
     mockedApiFetch.mockImplementation((url, options) => {
+      if (url === "/api/chat-sessions" && options?.cache === "no-store") {
+        forcedListLoads += 1;
+        return Promise.resolve([session("s1", firstMessages)]) as any;
+      }
       if (url === "/api/chat-sessions" && !options) {
-        listLoads += 1;
-        return Promise.resolve([
-          session("s1", listLoads === 1 ? [] : serverMessages),
-        ]) as any;
+        ordinaryListLoads += 1;
+        // Simulate the prior GET still being present in apiFetch's 1s cache.
+        return Promise.resolve([session("s1", [])]) as any;
       }
       if (url === "/api/chat-sessions/s1" && options?.method === "PATCH") {
-        return Promise.reject(new Error("save failed"));
+        patchCalls += 1;
+        return patchCalls === 1
+          ? Promise.resolve(session("s1", firstMessages)) as any
+          : Promise.reject(new Error("save failed"));
       }
       throw new Error(`Unexpected API call: ${url}`);
     });
     const cleanup = await renderProvider();
     await flush();
 
-    let saved!: boolean;
+    let firstSaved!: boolean;
+    let latestSaved!: boolean;
     await act(async () => {
-      saved = await latestContext!.persistSessionMessages("s1", [
-        { id: "local", sender: "user", text: "optimistic", timestamp: 2 },
-      ] as any);
+      const firstSave = latestContext!.persistSessionMessages(
+        "s1",
+        firstMessages as any
+      );
+      const latestSave = latestContext!.persistSessionMessages(
+        "s1",
+        latestMessages as any
+      );
+      firstSaved = await firstSave;
+      latestSaved = await latestSave;
     });
 
-    expect(saved).toBe(false);
-    expect(listLoads).toBe(2);
-    expect(latestContext!.sessions[0].messages).toEqual(serverMessages);
+    expect(firstSaved).toBe(true);
+    expect(latestSaved).toBe(false);
+    expect(patchCalls).toBe(2);
+    expect(ordinaryListLoads).toBe(1);
+    expect(forcedListLoads).toBe(1);
+    expect(latestContext!.sessions[0].messages).toEqual(firstMessages);
     cleanup();
   });
 
