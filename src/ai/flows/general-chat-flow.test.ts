@@ -98,6 +98,84 @@ describe("answerMeetingQuestion", () => {
     });
     warnSpy.mockRestore();
   });
+
+  it("uses the meeting summary for decision questions instead of noisy transcript lines", async () => {
+    mockedRunPrompt.mockRejectedValue(new Error("model down"));
+    const warnSpy = jest.spyOn(console, "warn").mockImplementation(() => {});
+    const summary =
+      "The team selected a staged rollout, kept the current billing provider, and agreed Ana would prepare the launch checklist.";
+
+    const result = await answerMeetingQuestion(
+      {
+        ...meetingInput,
+        question: "What were the key decisions made in this meeting?",
+        summary,
+        transcript: [
+          "00:01 - Speaker: Yeah.",
+          "00:03 - Speaker: I had to restart.",
+          ...Array.from(
+            { length: 120 },
+            (_, index) => `${index + 1}:00 - Speaker: unrelated status chatter`
+          ),
+        ].join("\n"),
+      },
+      { userId: "user-1" }
+    );
+
+    expect(result.answer).toContain("selected a staged rollout");
+    expect(result.answer).toContain("kept the current billing provider");
+    expect(result.answer).not.toMatch(/Yeah|restart/i);
+    expect(result.sources).toEqual([
+      expect.objectContaining({
+        sourceType: "meeting",
+        sourceId: "m1",
+        snippet: expect.stringContaining("selected a staged rollout"),
+      }),
+    ]);
+    warnSpy.mockRestore();
+  });
+
+  it("uses summary evidence when selected transcript excerpts have no positive relevance", async () => {
+    mockedRunPrompt.mockRejectedValue(new Error("model down"));
+    const warnSpy = jest.spyOn(console, "warn").mockImplementation(() => {});
+
+    const result = await answerMeetingQuestion(
+      {
+        ...meetingInput,
+        question: "Explain the launch risk assessment.",
+        summary: "Legal review is the only launch risk recorded in the summary.",
+        transcript: "00:01 - Speaker: Yeah.\n00:03 - Speaker: I had to restart.",
+      },
+      { userId: "user-1" }
+    );
+
+    expect(result.answer).toContain("Legal review is the only launch risk");
+    expect(result.answer).not.toMatch(/Yeah|restart/i);
+    expect(result.sources[0]).toMatchObject({ sourceType: "meeting" });
+    warnSpy.mockRestore();
+  });
+
+  it("prefers the summary for Serbian decision questions despite superficial transcript overlap", async () => {
+    mockedRunPrompt.mockRejectedValue(new Error("model down"));
+    const warnSpy = jest.spyOn(console, "warn").mockImplementation(() => {});
+
+    const result = await answerMeetingQuestion(
+      {
+        ...meetingInput,
+        question: "Koje su ključne odluke donete na sastanku?",
+        summary:
+          "Tim je odlučio da koristi postepeno lansiranje i da Ana pripremi kontrolnu listu.",
+        transcript:
+          "00:01 - Speaker: Koje pitanje je sledeće?\n00:03 - Speaker: Morao sam da restartujem poziv.",
+      },
+      { userId: "user-1" }
+    );
+
+    expect(result.answer).toContain("Tim je odlučio");
+    expect(result.answer).not.toMatch(/Koje pitanje|restartujem/i);
+    expect(result.sources[0]).toMatchObject({ sourceType: "meeting" });
+    warnSpy.mockRestore();
+  });
 });
 
 describe("answerWorkspaceQuestion history support", () => {

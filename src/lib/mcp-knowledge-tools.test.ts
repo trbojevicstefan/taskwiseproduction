@@ -7,9 +7,13 @@ import { getMcpKnowledgeToolDefinitions } from "@/lib/mcp-knowledge-tools";
 import { searchWorkspaceContext } from "@/lib/workspace-retrieval";
 import { listActiveWorkspaceMembershipsForWorkspace } from "@/lib/workspace-memberships";
 
-jest.mock("@/lib/workspace-retrieval", () => ({
-  searchWorkspaceContext: jest.fn(),
-}));
+jest.mock("@/lib/workspace-retrieval", () => {
+  const actual = jest.requireActual("@/lib/workspace-retrieval");
+  return {
+    ...actual,
+    searchWorkspaceContext: jest.fn(),
+  };
+});
 
 jest.mock("@/lib/workspace-memberships", () => ({
   listActiveWorkspaceMembershipsForWorkspace: jest.fn(),
@@ -351,6 +355,265 @@ describe("search_workspace_knowledge MCP tool", () => {
       "meeting-1",
     ]);
     expect((result.data.tasks as any[]).map((task) => task.id)).toEqual(["task-1"]);
+  });
+
+  it("returns bounded direct evidence for the authorized meeting when indexed retrieval is empty", async () => {
+    const decisionSummary =
+      "The team chose the staged rollout, kept the current billing provider, and assigned Ana to prepare the launch checklist.";
+    const db = makeDb({
+      meetings: [
+        {
+          _id: "meeting-authorized",
+          workspaceId: "ws-1",
+          userId: "user-1",
+          title: "Launch decisions",
+          startTime: "2026-08-08T10:00:00.000Z",
+          summary: decisionSummary,
+          originalTranscript: [
+            "00:01 - Host: Welcome everyone.",
+            "18:42 - Ana: The staged rollout gives us a safer launch window.",
+          ].join("\n"),
+        },
+        {
+          _id: "meeting-outside-scope",
+          workspaceId: "ws-1",
+          userId: "user-1",
+          title: "Unrelated confidential meeting",
+          summary: "This summary must never be returned.",
+        },
+      ],
+    });
+    const [definition] = getMcpKnowledgeToolDefinitions();
+    registerMcpTools([definition]);
+
+    const result = await executeRegisteredMcpTool(
+      { db, workspaceId: "ws-1" },
+      definition.name,
+      {
+        query: "What were the key decisions made in this meeting?",
+        scopeType: "meeting",
+        scopeId: "meeting-authorized",
+      }
+    );
+
+    expect(result.data.isEmpty).toBe(false);
+    expect(result.data.meetings).toEqual([
+      expect.objectContaining({
+        id: "meeting-authorized",
+        title: "Launch decisions",
+        startTime: "2026-08-08T10:00:00.000Z",
+        summarySnippet: decisionSummary,
+      }),
+    ]);
+    expect(result.data.citations).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          sourceType: "meeting",
+          sourceId: "meeting-authorized",
+          snippet: decisionSummary,
+        }),
+      ])
+    );
+    expect(JSON.stringify(result.data)).not.toContain("meeting-outside-scope");
+    expect(JSON.stringify(result.data)).not.toContain(
+      "This summary must never be returned"
+    );
+  });
+
+  it("adds only bounded query-relevant transcript evidence to the exact meeting fallback", async () => {
+    const transcript = [
+      "00:01 - Host: Welcome everyone.",
+      "09:10 - Priya: The enterprise pricing needs legal review.",
+      ...Array.from(
+        { length: 200 },
+        (_, index) => `${index + 10}:00 - Host: unrelated filler ${"x".repeat(80)}`
+      ),
+    ].join("\n");
+    const db = makeDb({
+      meetings: [
+        {
+          _id: "meeting-pricing",
+          workspaceId: "ws-1",
+          userId: "user-1",
+          title: "Enterprise review",
+          summary: "Commercial review notes.",
+          originalTranscript: transcript,
+        },
+      ],
+    });
+    const [definition] = getMcpKnowledgeToolDefinitions();
+    registerMcpTools([definition]);
+
+    const result = await executeRegisteredMcpTool(
+      { db, workspaceId: "ws-1" },
+      definition.name,
+      {
+        query: "What happened with enterprise pricing?",
+        scopeType: "meeting",
+        scopeId: "meeting-pricing",
+      }
+    );
+
+    const [meeting] = result.data.meetings as any[];
+    expect(meeting.transcriptSnippets).toEqual([
+      expect.objectContaining({
+        timestamp: "09:10",
+        snippet: expect.stringContaining("enterprise pricing needs legal review"),
+      }),
+    ]);
+    expect(meeting.transcriptSnippets[0].snippet.length).toBeLessThanOrEqual(320);
+    expect(JSON.stringify(result.data).length).toBeLessThan(transcript.length);
+  });
+
+  it("does not surface a hidden meeting through the direct evidence fallback", async () => {
+    const db = makeDb({
+      meetings: [
+        {
+          _id: "meeting-hidden",
+          workspaceId: "ws-1",
+          userId: "user-1",
+          title: "Hidden meeting",
+          summary: "Hidden decision evidence.",
+          isHidden: true,
+        },
+      ],
+    });
+    const [definition] = getMcpKnowledgeToolDefinitions();
+    registerMcpTools([definition]);
+    searchMock.mockResolvedValue({
+      meetings: [],
+      tasks: [
+        {
+          id: "task-hidden",
+          title: "Hidden follow-up",
+          status: "todo",
+          dueAt: null,
+          assigneeName: "Hidden Person",
+          overdue: false,
+          sourceSessionId: "meeting-hidden",
+          score: 4,
+        },
+      ],
+      people: [
+        {
+          id: "person-hidden",
+          name: "Hidden Person",
+          email: "hidden@example.com",
+          personType: "unknown",
+          score: 3,
+        },
+      ],
+      isEmpty: false,
+    } as any);
+
+    const result = await executeRegisteredMcpTool(
+      { db, workspaceId: "ws-1" },
+      definition.name,
+      {
+        query: "What were the decisions?",
+        scopeType: "meeting",
+        scopeId: "meeting-hidden",
+      }
+    );
+
+    expect(result.data.meetings).toEqual([]);
+    expect(result.data.tasks).toEqual([]);
+    expect(result.data.people).toEqual([]);
+    expect(result.data.clients).toEqual([]);
+    expect(result.data.citations).toEqual([]);
+    expect(result.data.isEmpty).toBe(true);
+  });
+
+  it("keeps a title-only meeting empty when no content evidence exists", async () => {
+    const db = makeDb({
+      meetings: [
+        {
+          _id: "meeting-title-only",
+          workspaceId: "ws-1",
+          userId: "user-1",
+          title: "Metadata only",
+          startTime: "2026-08-08T10:00:00.000Z",
+        },
+      ],
+    });
+    const [definition] = getMcpKnowledgeToolDefinitions();
+    registerMcpTools([definition]);
+
+    const result = await executeRegisteredMcpTool(
+      { db, workspaceId: "ws-1" },
+      definition.name,
+      {
+        query: "What decisions were made?",
+        scopeType: "meeting",
+        scopeId: "meeting-title-only",
+      }
+    );
+
+    expect(result.data.meetings).toEqual([]);
+    expect(result.data.citations).toEqual([]);
+    expect(result.data.isEmpty).toBe(true);
+  });
+
+  it("keeps explicit date filters on the exact meeting fallback", async () => {
+    const db = makeDb({
+      meetings: [
+        {
+          _id: "meeting-old",
+          workspaceId: "ws-1",
+          userId: "user-1",
+          title: "Old meeting",
+          startTime: "2026-01-10T10:00:00.000Z",
+          summary: "An old decision.",
+        },
+      ],
+    });
+    const [definition] = getMcpKnowledgeToolDefinitions();
+    registerMcpTools([definition]);
+
+    const result = await executeRegisteredMcpTool(
+      { db, workspaceId: "ws-1" },
+      definition.name,
+      {
+        query: "What were the decisions?",
+        scopeType: "meeting",
+        scopeId: "meeting-old",
+        from: "2026-08-01T00:00:00.000Z",
+      }
+    );
+
+    expect(result.data.meetings).toEqual([]);
+    expect(result.data.isEmpty).toBe(true);
+  });
+
+  it("does not substitute activity time for a missing startTime date filter", async () => {
+    const db = makeDb({
+      meetings: [
+        {
+          _id: "meeting-no-start",
+          workspaceId: "ws-1",
+          userId: "user-1",
+          title: "Undated meeting",
+          lastActivityAt: "2026-08-10T10:00:00.000Z",
+          summary: "Decision evidence without a meeting date.",
+        },
+      ],
+    });
+    const [definition] = getMcpKnowledgeToolDefinitions();
+    registerMcpTools([definition]);
+
+    const result = await executeRegisteredMcpTool(
+      { db, workspaceId: "ws-1" },
+      definition.name,
+      {
+        query: "What decisions were made?",
+        scopeType: "meeting",
+        scopeId: "meeting-no-start",
+        from: "2026-08-01T00:00:00.000Z",
+      }
+    );
+
+    expect(result.data.meetings).toEqual([]);
+    expect(result.data.isEmpty).toBe(true);
   });
 
   it("rejects an entity scope that is not visible in the execution workspace", async () => {

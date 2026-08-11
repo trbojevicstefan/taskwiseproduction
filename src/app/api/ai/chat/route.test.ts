@@ -1555,6 +1555,62 @@ describe("POST /api/ai/chat", () => {
       expect(flowMeta).toMatchObject({ userId: "user-1" });
     });
 
+    it("uses the grounded meeting fallback path for decision questions when the scoped agent is unavailable", async () => {
+      meetingsFindOne.mockResolvedValue({
+        ...transcriptMeeting,
+        title: "Launch decisions",
+        summary:
+          "The team selected a staged rollout and agreed Ana would prepare the launch checklist.",
+        originalTranscript:
+          "00:01 - Speaker: Yeah.\n00:03 - Speaker: I had to restart.",
+      });
+      mockedRunScopedChatAgent.mockResolvedValue(null);
+      mockedAnswerMeetingQuestion.mockResolvedValue({
+        answer:
+          "The meeting summary says the team selected a staged rollout and agreed Ana would prepare the launch checklist.",
+        confidence: "low",
+        sources: [
+          {
+            sourceType: "meeting",
+            sourceId: "m1",
+            title: "Launch decisions",
+            snippet:
+              "The team selected a staged rollout and agreed Ana would prepare the launch checklist.",
+          },
+        ],
+        suggestedActions: [],
+      });
+
+      const response = await POST(
+        buildRequest({
+          question: "What were the key decisions made in this meeting?",
+          meetingId: "m1",
+        })
+      );
+
+      expect(response.status).toBe(200);
+      const payload = await response.json();
+      expect(payload.data.answer).toContain("selected a staged rollout");
+      expect(payload.data.answer).not.toMatch(/Yeah|restart/i);
+      expect(payload.data.sources).toEqual([
+        expect.objectContaining({
+          sourceType: "meeting",
+          sourceId: "m1",
+          title: "Launch decisions",
+        }),
+      ]);
+      expect(mockedRunScopedChatAgent).toHaveBeenCalledTimes(1);
+      expect(mockedAnswerMeetingQuestion).toHaveBeenCalledWith(
+        expect.objectContaining({
+          question: "What were the key decisions made in this meeting?",
+          meetingId: "m1",
+          summary: expect.stringContaining("selected a staged rollout"),
+        }),
+        expect.objectContaining({ userId: "user-1" })
+      );
+      expect(mockedSearchWorkspaceContext).not.toHaveBeenCalled();
+    });
+
     it("uses a transcript artifact when originalTranscript is missing", async () => {
       meetingsFindOne.mockResolvedValue({
         ...transcriptMeeting,

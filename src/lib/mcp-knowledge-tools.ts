@@ -8,7 +8,12 @@ import type {
   McpToolDefinition,
   McpToolResult,
 } from "@/lib/mcp-registry";
-import { searchWorkspaceContext } from "@/lib/workspace-retrieval";
+import {
+  extractTranscriptSnippets,
+  searchWorkspaceContext,
+  tokenize,
+  type RetrievedMeeting,
+} from "@/lib/workspace-retrieval";
 import { listActiveWorkspaceMembershipsForWorkspace } from "@/lib/workspace-memberships";
 import type { ChatScope } from "@/types/general-chat";
 import { normalizePersonNameKey } from "@/lib/transcript-utils";
@@ -24,6 +29,8 @@ const MAX_KNOWLEDGE_LIMIT = 50;
 const DEFAULT_KNOWLEDGE_LIMIT = 10;
 const MAX_QUERY_CHARS = 4_000;
 const MAX_RELATED_PEOPLE = 300;
+const MAX_DIRECT_MEETING_SUMMARY_CHARS = 4_000;
+const MAX_DIRECT_TRANSCRIPT_SCAN_CHARS = 80_000;
 
 const isoDateSchema = z
   .string()
@@ -567,6 +574,16 @@ const filterScopedResult = (context: ScopeContext, result: any) => {
     return result;
   }
 
+  if (context.scope.type === "meeting" && context.meeting?.isHidden === true) {
+    return {
+      ...result,
+      meetings: [],
+      tasks: [],
+      people: [],
+      isEmpty: true,
+    };
+  }
+
   const identity = collectPeopleIdentity(context.relatedPeople);
   const allowedIds = new Set(identity.ids);
   const allowedEmails = new Set(identity.emails);
@@ -634,6 +651,99 @@ const filterScopedResult = (context: ScopeContext, result: any) => {
       )
     ),
     people,
+  };
+};
+
+const toIsoString = (value: unknown): string | null => {
+  if (
+    !(value instanceof Date) &&
+    typeof value !== "string" &&
+    typeof value !== "number"
+  ) {
+    return null;
+  }
+  const parsed = value instanceof Date ? value : new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
+};
+
+const boundedText = (value: unknown, maxChars: number): string =>
+  typeof value === "string" ? value.slice(0, maxChars).trim() : "";
+
+const getMeetingTranscript = (meeting: any): string => {
+  for (const value of [meeting?.originalTranscript, meeting?.transcript]) {
+    const bounded = boundedText(value, MAX_DIRECT_TRANSCRIPT_SCAN_CHARS);
+    if (bounded) return bounded;
+  }
+  if (!Array.isArray(meeting?.artifacts)) return "";
+  for (const artifact of meeting.artifacts) {
+    if (artifact?.type !== "transcript") continue;
+    const bounded = boundedText(
+      artifact?.processedText,
+      MAX_DIRECT_TRANSCRIPT_SCAN_CHARS
+    );
+    if (bounded) return bounded;
+  }
+  return "";
+};
+
+/**
+ * Meeting scope is already server-authorized by loadScopeContext. If the
+ * ranked/indexed pass has no meeting hit, expose only that exact document as
+ * bounded evidence rather than broadening retrieval to neighboring meetings.
+ */
+const buildAuthorizedMeetingEvidence = (
+  context: ScopeContext,
+  args: KnowledgeArgs
+): RetrievedMeeting | null => {
+  if (
+    context.scope.type !== "meeting" ||
+    !context.meeting ||
+    context.meeting.isHidden === true
+  ) {
+    return null;
+  }
+  const meeting = context.meeting;
+  const meetingDate = toIsoString(meeting.startTime);
+  if (args.from || args.to) {
+    if (!meetingDate) return null;
+    const timestamp = new Date(meetingDate).getTime();
+    if (args.from && timestamp < new Date(args.from).getTime()) return null;
+    if (args.to && timestamp > new Date(args.to).getTime()) return null;
+  }
+  const transcript = getMeetingTranscript(meeting);
+  const summary = boundedText(
+    meeting.summary,
+    MAX_DIRECT_MEETING_SUMMARY_CHARS
+  );
+  const title = boundedText(meeting.title, 300) || "Untitled meeting";
+  const transcriptSnippets = extractTranscriptSnippets(
+    transcript,
+    tokenize(args.query)
+  );
+  if (!summary && !transcriptSnippets.length) return null;
+
+  return {
+    id: context.scope.meetingId,
+    title,
+    startTime: meetingDate,
+    summarySnippet: summary || null,
+    transcriptSnippets,
+    score: 0,
+  };
+};
+
+const addAuthorizedMeetingFallback = (
+  context: ScopeContext,
+  result: any,
+  args: KnowledgeArgs
+) => {
+  if (context.scope.type !== "meeting" || result.meetings.length) return result;
+  const meeting = buildAuthorizedMeetingEvidence(context, args);
+  if (!meeting) return result;
+  return {
+    ...result,
+    meetings: [meeting],
+    isEmpty: false,
   };
 };
 
@@ -736,7 +846,11 @@ const executeKnowledgeSearch = async (
       constraints: buildConstraints(context),
     }
   );
-  const scopedResult = filterScopedResult(context, retrieved);
+  const scopedResult = addAuthorizedMeetingFallback(
+    context,
+    filterScopedResult(context, retrieved),
+    args
+  );
   const clients = await loadRelatedClients(
     db,
     workspaceId,
