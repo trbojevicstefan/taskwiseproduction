@@ -128,10 +128,107 @@ const collectPeopleIdentity = (people: any[]) => ({
 
 const uniqueFallbackNames = (people: any[]) =>
   uniqueStrings(
-    people
-      .filter((person) => person?.__knowledgeUniqueNameFallback === true)
-      .flatMap((person) => [person?.name, ...(person?.aliases || [])])
+    people.flatMap((person) => {
+      const allowedKeys = new Set(
+        Array.isArray(person?.__knowledgeUniqueNameKeys)
+          ? person.__knowledgeUniqueNameKeys
+          : []
+      );
+      return [person?.name, ...(person?.aliases || [])].filter(
+        (name) =>
+          typeof name === "string" &&
+          allowedKeys.has(normalizePersonNameKey(name))
+      );
+    })
   );
+
+const missingOrEmptyField = (field: string): Record<string, unknown> => ({
+  $or: [
+    { [field]: { $exists: false } },
+    { [field]: null },
+    { [field]: "" },
+  ],
+});
+
+const personIdentityMatches = (left: any, right: any) => {
+  const leftIdentity = collectPeopleIdentity([left]);
+  const rightIdentity = collectPeopleIdentity([right]);
+  return (
+    leftIdentity.ids.some((id) => rightIdentity.ids.includes(id)) ||
+    leftIdentity.emails.some((email) => rightIdentity.emails.includes(email))
+  );
+};
+
+const markWorkspaceUniqueNames = async (
+  db: Db,
+  visibility: Record<string, unknown>,
+  people: any[]
+): Promise<any[]> => {
+  const entries = new Map<string, { name: string; owners: any[] }>();
+  for (const person of people) {
+    const seenPersonKeys = new Set<string>();
+    for (const name of uniqueStrings([person?.name, ...(person?.aliases || [])])) {
+      const key = normalizePersonNameKey(name);
+      if (!key || seenPersonKeys.has(key)) continue;
+      seenPersonKeys.add(key);
+      const entry = entries.get(key) || { name, owners: [] };
+      entry.owners.push(person);
+      entries.set(key, entry);
+    }
+  }
+
+  const workspacePeople = await db
+    .collection("people")
+    .find(visibility as any, {
+      projection: {
+        _id: 1,
+        id: 1,
+        uid: 1,
+        slackId: 1,
+        email: 1,
+        name: 1,
+        aliases: 1,
+      },
+    })
+    .limit(MAX_RELATED_PEOPLE + 1)
+    .toArray();
+  if (workspacePeople.length > MAX_RELATED_PEOPLE) {
+    return people.map((person) => ({
+      ...person,
+      __knowledgeUniqueNameKeys: [],
+    }));
+  }
+
+  const workspaceOwnersByKey = new Map<string, any[]>();
+  for (const person of workspacePeople) {
+    const seenPersonKeys = new Set<string>();
+    for (const name of uniqueStrings([person?.name, ...(person?.aliases || [])])) {
+      const key = normalizePersonNameKey(name);
+      if (!key || seenPersonKeys.has(key)) continue;
+      seenPersonKeys.add(key);
+      const owners = workspaceOwnersByKey.get(key) || [];
+      owners.push(person);
+      workspaceOwnersByKey.set(key, owners);
+    }
+  }
+
+  const uniqueKeysByIdentity = new Map<any, string[]>();
+  for (const [key, entry] of entries) {
+    if (entry.owners.length !== 1) continue;
+    const matches = workspaceOwnersByKey.get(key) || [];
+    const owner = entry.owners[0];
+    if (matches.length === 1 && personIdentityMatches(owner, matches[0])) {
+      const keys = uniqueKeysByIdentity.get(owner) || [];
+      keys.push(key);
+      uniqueKeysByIdentity.set(owner, keys);
+    }
+  }
+
+  return people.map((person) => ({
+    ...person,
+    __knowledgeUniqueNameKeys: uniqueKeysByIdentity.get(person) || [],
+  }));
+};
 
 const personRelationshipFilter = (people: any[]): Record<string, unknown> => {
   const { ids, emails } = collectPeopleIdentity(people);
@@ -146,10 +243,17 @@ const personRelationshipFilter = (people: any[]): Record<string, unknown> => {
       { "assignee.email": email },
       { assigneeEmail: email },
     ]),
-    ...names.flatMap((name) => [
-      { "assignee.name": name },
-      { assigneeName: name },
-    ]),
+    ...names.map((name) => ({
+      $and: [
+        { $or: [{ "assignee.name": name }, { assigneeName: name }] },
+        missingOrEmptyField("assignee.uid"),
+        missingOrEmptyField("assignee.id"),
+        missingOrEmptyField("assigneeId"),
+        missingOrEmptyField("personId"),
+        missingOrEmptyField("assignee.email"),
+        missingOrEmptyField("assigneeEmail"),
+      ],
+    })),
   ];
   return clauses.length ? { $or: clauses } : { _id: { $in: [] } };
 };
@@ -158,9 +262,18 @@ const attendeeRelationshipFilter = (people: any[]): Record<string, unknown> => {
   const { ids, emails } = collectPeopleIdentity(people);
   const names = uniqueFallbackNames(people);
   const attendeeClauses: Record<string, unknown>[] = [
-    ...ids.flatMap((id) => [{ id }, { uid: id }, { personId: id }]),
+    ...ids.flatMap((id) => [{ _id: id }, { id }, { uid: id }, { personId: id }]),
     ...emails.map((email) => ({ email })),
-    ...names.map((name) => ({ name })),
+    ...names.map((name) => ({
+      $and: [
+        { name },
+        missingOrEmptyField("_id"),
+        missingOrEmptyField("id"),
+        missingOrEmptyField("uid"),
+        missingOrEmptyField("personId"),
+        missingOrEmptyField("email"),
+      ],
+    })),
   ];
   return attendeeClauses.length
     ? { attendees: { $elemMatch: { $or: attendeeClauses } } }
@@ -171,11 +284,9 @@ const peopleDocumentIdentityFilter = (
   people: any[]
 ): Record<string, unknown> => {
   const { ids, emails } = collectPeopleIdentity(people);
-  const names = uniqueFallbackNames(people);
   const clauses: Record<string, unknown>[] = [
     ...ids.flatMap((id) => [{ _id: id }, { id }]),
     ...emails.map((email) => ({ email })),
-    ...names.flatMap((name) => [{ name }, { aliases: name }]),
   ];
   return clauses.length ? { $or: clauses } : { _id: { $in: [] } };
 };
@@ -242,7 +353,7 @@ const resolveMeetingAttendeePeople = async (
       if (matches.length === 1) {
         uniqueNamePeople.push({
           ...matches[0],
-          __knowledgeUniqueNameFallback: true,
+          __knowledgeUniqueNameKeys: [nameKey],
         });
       }
     }
@@ -280,7 +391,10 @@ const loadScopeContext = async (
     const person = await db.collection("people").findOne({
       $and: [identifierFilter(scope.personId), visibility],
     } as any);
-    return { scope, person, relatedPeople: person ? [person] : [] };
+    const relatedPeople = person
+      ? await markWorkspaceUniqueNames(db, visibility, [person])
+      : [];
+    return { scope, person, relatedPeople };
   }
   if (scope.type === "client") {
     const client = await db.collection("companies").findOne({
@@ -311,7 +425,15 @@ const loadScopeContext = async (
           .limit(MAX_RELATED_PEOPLE)
           .toArray()
       : [];
-    return { scope, client, relatedPeople };
+    return {
+      scope,
+      client,
+      relatedPeople: await markWorkspaceUniqueNames(
+        db,
+        visibility,
+        relatedPeople
+      ),
+    };
   }
   return { scope, relatedPeople: [] };
 };
@@ -414,6 +536,32 @@ const hasIdentityMatch = (
   );
 };
 
+const hasEvidenceIdentityMatch = (
+  evidence: { ids?: unknown; emails?: unknown; nameKey?: unknown },
+  allowedIds: Set<string>,
+  allowedEmails: Set<string>,
+  allowedUniqueNameKeys: Set<string>
+) => {
+  const ids = Array.isArray(evidence.ids)
+    ? uniqueStrings(evidence.ids)
+    : uniqueStrings([evidence.ids]);
+  const emails = (Array.isArray(evidence.emails)
+    ? uniqueStrings(evidence.emails)
+    : uniqueStrings([evidence.emails])
+  ).map((email) => email.toLowerCase());
+  if (ids.length || emails.length) {
+    return (
+      ids.some((id) => allowedIds.has(id)) ||
+      emails.some((email) => allowedEmails.has(email))
+    );
+  }
+  const nameKey =
+    typeof evidence.nameKey === "string"
+      ? normalizePersonNameKey(evidence.nameKey)
+      : "";
+  return Boolean(nameKey && allowedUniqueNameKeys.has(nameKey));
+};
+
 const filterScopedResult = (context: ScopeContext, result: any) => {
   if (context.scope.type === "workspace" || context.scope.type === "planner") {
     return result;
@@ -422,6 +570,9 @@ const filterScopedResult = (context: ScopeContext, result: any) => {
   const identity = collectPeopleIdentity(context.relatedPeople);
   const allowedIds = new Set(identity.ids);
   const allowedEmails = new Set(identity.emails);
+  const allowedUniqueNameKeys = new Set(
+    uniqueFallbackNames(context.relatedPeople).map(normalizePersonNameKey)
+  );
   const people = result.people.filter((person: any) =>
     hasIdentityMatch(
       [person?.id, person?._id],
@@ -448,20 +599,38 @@ const filterScopedResult = (context: ScopeContext, result: any) => {
 
   return {
     ...result,
-    meetings: result.meetings.filter((meeting: any) =>
-      hasIdentityMatch(
-        meeting?.attendeeIds,
-        meeting?.attendeeEmails,
-        allowedIds,
-        allowedEmails
-      )
-    ),
+    meetings: result.meetings.filter((meeting: any) => {
+      const attendeeIdentities = Array.isArray(meeting?.attendeeIdentities)
+        ? meeting.attendeeIdentities
+        : [
+            {
+              ids: meeting?.attendeeIds,
+              emails: meeting?.attendeeEmails,
+              nameKey: null,
+            },
+          ];
+      return attendeeIdentities.some((attendee: any) =>
+        hasEvidenceIdentityMatch(
+          attendee,
+          allowedIds,
+          allowedEmails,
+          allowedUniqueNameKeys
+        )
+      );
+    }),
     tasks: result.tasks.filter((task: any) =>
-      hasIdentityMatch(
-        task?.assigneeId,
-        task?.assigneeEmail,
+      hasEvidenceIdentityMatch(
+        {
+          ids: task?.assigneeId,
+          emails: task?.assigneeEmail,
+          nameKey:
+            typeof task?.assigneeName === "string"
+              ? normalizePersonNameKey(task.assigneeName)
+              : null,
+        },
         allowedIds,
-        allowedEmails
+        allowedEmails,
+        allowedUniqueNameKeys
       )
     ),
     people,

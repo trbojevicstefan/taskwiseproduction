@@ -57,7 +57,21 @@ const makeDb = ({
     },
     people: {
       findOne: jest.fn(async (filter: any) => findByIdentifier(people, filter)),
-      find: jest.fn(() => cursor(relatedPeople)),
+      find: jest.fn((filter: any, options?: any) => {
+        if (options?.projection) return cursor(people);
+        const namePattern = filter?.$and
+          ?.flatMap((part: any) => part?.$or || [])
+          .map((part: any) => part?.name ?? part?.aliases)
+          .find((value: any) => value instanceof RegExp);
+        if (!namePattern) return cursor(relatedPeople);
+        return cursor(
+          relatedPeople.filter((person) =>
+            [person?.name, ...(person?.aliases || [])].some(
+              (name) => typeof name === "string" && namePattern.test(name)
+            )
+          )
+        );
+      }),
     },
     companies: {
       findOne: jest.fn(async (filter: any) => findByIdentifier(companies, filter)),
@@ -138,6 +152,47 @@ const sameNameCollisionResult = () =>
         id: "person-collision",
         name: "Alex Morgan",
         email: "alex.collision@example.com",
+        personType: "client",
+        score: 3,
+      },
+    ],
+    isEmpty: false,
+  }) as any;
+
+const uniqueNameOnlyResult = () =>
+  ({
+    meetings: [
+      {
+        id: "meeting-name-only",
+        title: "Unique name meeting",
+        startTime: null,
+        summarySnippet: "Name-only attendee evidence",
+        transcriptSnippets: [],
+        attendeeIdentities: [
+          { ids: [], emails: [], nameKey: "unique alex" },
+        ],
+        score: 7,
+      },
+    ],
+    tasks: [
+      {
+        id: "task-name-only",
+        title: "Unique name task",
+        status: "todo",
+        dueAt: null,
+        assigneeName: "Unique Alex",
+        assigneeId: null,
+        assigneeEmail: null,
+        overdue: false,
+        sourceSessionId: "meeting-name-only",
+        score: 5,
+      },
+    ],
+    people: [
+      {
+        id: "person-unique",
+        name: "Unique Alex",
+        email: "unique@example.com",
         personType: "client",
         score: 3,
       },
@@ -310,6 +365,134 @@ describe("search_workspace_knowledge MCP tool", () => {
       )
     ).rejects.toMatchObject({ code: "chat_scope_not_found", status: 404 });
     expect(searchMock).not.toHaveBeenCalled();
+  });
+
+  it("returns and cites unique name-only meeting and task evidence in person scope", async () => {
+    const uniquePerson = {
+      _id: "person-unique",
+      workspaceId: "ws-1",
+      name: "Unique Alex",
+      email: "unique@example.com",
+    };
+    const db = makeDb({ people: [uniquePerson], relatedPeople: [uniquePerson] });
+    searchMock.mockResolvedValue(uniqueNameOnlyResult());
+    const [definition] = getMcpKnowledgeToolDefinitions();
+    registerMcpTools([definition]);
+
+    const result = await executeRegisteredMcpTool(
+      { db, workspaceId: "ws-1" },
+      definition.name,
+      {
+        query: "Unique Alex commitments",
+        scopeType: "person",
+        scopeId: "person-unique",
+      }
+    );
+
+    expect((result.data.meetings as any[]).map((item) => item.id)).toEqual([
+      "meeting-name-only",
+    ]);
+    expect((result.data.tasks as any[]).map((item) => item.id)).toEqual([
+      "task-name-only",
+    ]);
+    const citationIds = (result.data.citations as any[]).map(
+      (citation) => citation.sourceId
+    );
+    expect(citationIds).toEqual(
+      expect.arrayContaining(["meeting-name-only", "task-name-only"])
+    );
+  });
+
+  it("returns and cites unique name-only meeting and task evidence in client scope", async () => {
+    const uniquePerson = {
+      _id: "person-unique",
+      workspaceId: "ws-1",
+      name: "Unique Alex",
+      email: "unique@example.com",
+      company: "Acme",
+    };
+    const db = makeDb({
+      people: [uniquePerson],
+      relatedPeople: [uniquePerson],
+      companies: [
+        {
+          _id: "client-unique",
+          workspaceId: "ws-1",
+          name: "Acme",
+          domain: "acme.com",
+          peopleIds: ["person-unique"],
+        },
+      ],
+    });
+    searchMock.mockResolvedValue(uniqueNameOnlyResult());
+    const [definition] = getMcpKnowledgeToolDefinitions();
+    registerMcpTools([definition]);
+
+    const result = await executeRegisteredMcpTool(
+      { db, workspaceId: "ws-1" },
+      definition.name,
+      {
+        query: "Unique Alex commitments",
+        scopeType: "client",
+        scopeId: "client-unique",
+      }
+    );
+
+    expect((result.data.meetings as any[]).map((item) => item.id)).toEqual([
+      "meeting-name-only",
+    ]);
+    expect((result.data.tasks as any[]).map((item) => item.id)).toEqual([
+      "task-name-only",
+    ]);
+    const citationIds = (result.data.citations as any[]).map(
+      (citation) => citation.sourceId
+    );
+    expect(citationIds).toEqual(
+      expect.arrayContaining(["meeting-name-only", "task-name-only"])
+    );
+  });
+
+  it("rejects name-only evidence when a punctuation variant collides after normalization", async () => {
+    const allowedPerson = {
+      _id: "person-allowed",
+      workspaceId: "ws-1",
+      name: "Alex Morgan",
+      email: "alex.allowed@example.com",
+    };
+    const collision = {
+      _id: "person-collision",
+      workspaceId: "ws-1",
+      name: "Alex-Morgan",
+      email: "alex.collision@example.com",
+    };
+    const db = makeDb({
+      people: [allowedPerson, collision],
+      relatedPeople: [allowedPerson, collision],
+    });
+    const retrieved = uniqueNameOnlyResult();
+    retrieved.meetings[0].attendeeIdentities[0].nameKey = "alex morgan";
+    retrieved.tasks[0].assigneeName = "Alex Morgan";
+    searchMock.mockResolvedValue(retrieved);
+    const [definition] = getMcpKnowledgeToolDefinitions();
+    registerMcpTools([definition]);
+
+    const result = await executeRegisteredMcpTool(
+      { db, workspaceId: "ws-1" },
+      definition.name,
+      {
+        query: "Alex Morgan commitments",
+        scopeType: "person",
+        scopeId: "person-allowed",
+      }
+    );
+
+    expect(result.data.meetings).toEqual([]);
+    expect(result.data.tasks).toEqual([]);
+    expect(
+      (result.data.citations as any[]).map((citation) => citation.sourceId)
+    ).not.toEqual(
+      expect.arrayContaining(["meeting-name-only", "task-name-only"])
+    );
   });
 
   it("excludes same-name meeting, task, person, and citation collisions in person scope", async () => {

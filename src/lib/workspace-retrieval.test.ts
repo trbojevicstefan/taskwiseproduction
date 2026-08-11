@@ -289,6 +289,32 @@ describe("searchWorkspaceContext", () => {
     expect(result.meetings[1].summarySnippet).toContain("discussed pricing");
   });
 
+  it("carries per-attendee stable and normalized-name identities for scoped filtering", async () => {
+    const { db } = makeDb({
+      meetings: [
+        {
+          _id: "m-identities",
+          title: "Unique Alex sync",
+          attendees: [
+            { name: "Unique Alex" },
+            { id: "person-stable", name: "Stable Sam", email: "SAM@EXAMPLE.COM" },
+          ],
+        },
+      ],
+    });
+
+    const result = await searchWorkspaceContext(db, scope, "Unique Alex");
+
+    expect(result.meetings[0].attendeeIdentities).toEqual([
+      { ids: [], emails: [], nameKey: "unique alex" },
+      {
+        ids: ["person-stable"],
+        emails: ["sam@example.com"],
+        nameKey: "stable sam",
+      },
+    ]);
+  });
+
   it("boosts recent meetings over old ones with the same keyword match", async () => {
     const { db } = makeDb({
       meetings: [

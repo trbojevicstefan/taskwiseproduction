@@ -32,6 +32,7 @@ import {
   MEETING_SEARCH_VECTOR_PATH,
 } from "@/lib/meeting-search-chunks";
 import { cosineSimilarity } from "@/lib/task-completion-helpers";
+import { normalizePersonNameKey } from "@/lib/transcript-utils";
 
 export type WorkspaceRetrievalScope = {
   userId: string;
@@ -74,6 +75,13 @@ export type RetrievedMeeting = {
   semanticScore?: number | null;
   attendeeIds?: string[];
   attendeeEmails?: string[];
+  attendeeIdentities?: RetrievedAttendeeIdentity[];
+};
+
+export type RetrievedAttendeeIdentity = {
+  ids: string[];
+  emails: string[];
+  nameKey: string | null;
 };
 
 export type RetrievedTask = {
@@ -504,6 +512,7 @@ const TASK_CANDIDATE_PROJECTION = {
   assigneeName: 1,
   assigneeId: 1,
   assigneeEmail: 1,
+  personId: 1,
   assignee: 1,
   sourceSessionId: 1,
   lastUpdated: 1,
@@ -535,26 +544,52 @@ const extractAttendeeNames = (attendees: unknown): string[] => {
 
 const extractAttendeeIdentityValues = (attendees: unknown) => {
   if (!Array.isArray(attendees)) {
-    return { ids: [] as string[], emails: [] as string[] };
+    return {
+      ids: [] as string[],
+      emails: [] as string[],
+      identities: [] as RetrievedAttendeeIdentity[],
+    };
   }
   const ids = new Set<string>();
   const emails = new Set<string>();
+  const identities: RetrievedAttendeeIdentity[] = [];
   for (const attendee of attendees) {
     if (!attendee || typeof attendee !== "object") continue;
+    const attendeeIds = new Set<string>();
+    const attendeeEmails = new Set<string>();
     for (const value of [
       (attendee as any)._id,
       (attendee as any).id,
       (attendee as any).uid,
       (attendee as any).personId,
     ]) {
-      if (typeof value === "string" && value.trim()) ids.add(value.trim());
+      if (typeof value === "string" && value.trim()) {
+        ids.add(value.trim());
+        attendeeIds.add(value.trim());
+      }
     }
     const email = (attendee as any).email;
     if (typeof email === "string" && email.trim()) {
       emails.add(email.trim().toLowerCase());
+      attendeeEmails.add(email.trim().toLowerCase());
+    }
+    const nameKey =
+      typeof (attendee as any).name === "string"
+        ? normalizePersonNameKey((attendee as any).name)
+        : "";
+    if (attendeeIds.size || attendeeEmails.size || nameKey) {
+      identities.push({
+        ids: Array.from(attendeeIds),
+        emails: Array.from(attendeeEmails),
+        nameKey: nameKey || null,
+      });
     }
   }
-  return { ids: Array.from(ids), emails: Array.from(emails) };
+  return {
+    ids: Array.from(ids),
+    emails: Array.from(emails),
+    identities,
+  };
 };
 
 const recencyBoost = (startTime: Date | null, now: Date): number => {
@@ -806,6 +841,7 @@ const retrieveMeetings = async (
         semanticScore: semanticHit ? semanticHit.similarity : null,
         attendeeIds: attendeeIdentities.ids,
         attendeeEmails: attendeeIdentities.emails,
+        attendeeIdentities: attendeeIdentities.identities,
         semanticHit,
         sortTime: startTime ? startTime.getTime() : 0,
       };
@@ -871,6 +907,7 @@ const retrieveMeetings = async (
     semanticScore: meeting.semanticScore,
     attendeeIds: meeting.attendeeIds,
     attendeeEmails: meeting.attendeeEmails,
+    attendeeIdentities: meeting.attendeeIdentities,
   }));
 };
 
@@ -921,6 +958,7 @@ const retrieveTasks = async (
             : "";
       const assigneeId = [
         doc?.assigneeId,
+        doc?.personId,
         doc?.assignee?.uid,
         doc?.assignee?.id,
       ].find((value) => typeof value === "string" && value.trim());
