@@ -33,13 +33,10 @@
  * deterministic `_id`s, guarded by a `sourceHash` short-circuit so unchanged
  * meetings are skipped (no re-embedding cost). Safe to run twice.
  *
- * Retrieval (see src/lib/workspace-retrieval.ts) uses LOCAL cosine
- * similarity over a capped, workspace-scoped, most-recently-updated
- * candidate set — no Atlas Vector Search required. To move to Atlas Vector
- * Search later: create a vector index on `embedding` (cosine, dimensions of
- * the configured model, filter fields `workspaceId`/`userId`) and replace
- * the local scan with a `$vectorSearch` aggregation stage; the document
- * shape needs no changes.
+ * Retrieval (see src/lib/workspace-retrieval.ts) uses Atlas Vector Search
+ * when MONGODB_VECTOR_INDEX names a configured index, with workspace/user
+ * fields applied as the vector prefilter. Unsupported deployments fall back
+ * to local cosine similarity over a capped, workspace-scoped candidate set.
  *
  * Degradation: when OPENAI_API_KEY is missing or embedding fails, indexing
  * is skipped (status reported, nothing thrown) and search falls back to the
@@ -50,6 +47,12 @@ import { createHash } from "crypto";
 import { embedTexts, getEmbeddingModel, isEmbeddingAvailable } from "@/lib/embeddings";
 
 export const MEETING_SEARCH_CHUNKS_COLLECTION = "meetingSearchChunks";
+export const MEETING_SEARCH_VECTOR_PATH = "embedding";
+
+export const getMeetingSearchVectorIndexName = (): string | null => {
+  const name = process.env.MONGODB_VECTOR_INDEX?.trim();
+  return name || null;
+};
 
 // Transcript windows: target size with a hard per-chunk cap and a small
 // speaker-turn overlap between consecutive windows.

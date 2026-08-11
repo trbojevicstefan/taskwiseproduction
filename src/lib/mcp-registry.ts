@@ -105,7 +105,52 @@ const toolAliasMap = new Map<string, string>();
 const resourceRegistry = new Map<string, McpResourceDefinition>();
 const promptRegistry = new Map<string, McpPromptDefinition>();
 
+const freezePlainSnapshot = <T>(value: T): T => {
+  if (Array.isArray(value)) {
+    return Object.freeze(value.map((item) => freezePlainSnapshot(item))) as T;
+  }
+  if (value && typeof value === "object") {
+    const clone = Object.fromEntries(
+      Object.entries(value as Record<string, unknown>).map(([key, item]) => [
+        key,
+        freezePlainSnapshot(item),
+      ])
+    );
+    return Object.freeze(clone) as T;
+  }
+  return value;
+};
+
 export const registerMcpTools = (definitions: McpToolDefinition[]) => {
+  const pendingNames = new Set<string>();
+  const pendingAliases = new Set<string>();
+
+  for (const definition of definitions) {
+    if (toolRegistry.has(definition.name) || pendingNames.has(definition.name)) {
+      throw new Error(`Duplicate MCP tool name: ${definition.name}`);
+    }
+    if (toolAliasMap.has(definition.name) || pendingAliases.has(definition.name)) {
+      throw new Error(
+        `MCP tool name ${definition.name} conflicts with a registered alias.`
+      );
+    }
+    pendingNames.add(definition.name);
+  }
+
+  for (const definition of definitions) {
+    for (const alias of definition.aliases || []) {
+      if (toolAliasMap.has(alias) || pendingAliases.has(alias)) {
+        throw new Error(`Duplicate MCP tool alias: ${alias}`);
+      }
+      if (toolRegistry.has(alias) || pendingNames.has(alias)) {
+        throw new Error(
+          `MCP tool alias ${alias} conflicts with a registered tool name.`
+        );
+      }
+      pendingAliases.add(alias);
+    }
+  }
+
   for (const definition of definitions) {
     toolRegistry.set(definition.name, definition);
     for (const alias of definition.aliases || []) {
@@ -126,7 +171,17 @@ export const getMcpToolDefinition = (
 
 /** Canonical tools only — aliases are intentionally not listed. */
 export const listRegisteredMcpTools = (): McpToolDefinition[] =>
-  Array.from(toolRegistry.values());
+  Object.freeze(
+    Array.from(toolRegistry.values(), (definition) =>
+      Object.freeze({
+        ...definition,
+        aliases: definition.aliases
+          ? Object.freeze([...definition.aliases])
+          : undefined,
+        jsonSchema: freezePlainSnapshot(definition.jsonSchema),
+      })
+    )
+  ) as unknown as McpToolDefinition[];
 
 export const resolveToolScope = (nameOrAlias: string): McpToolScope | null =>
   getMcpToolDefinition(nameOrAlias)?.scope ?? null;
@@ -162,13 +217,24 @@ export const executeRegisteredMcpTool = async (
 };
 
 export const registerMcpResources = (definitions: McpResourceDefinition[]) => {
+  const pendingUris = new Set<string>();
+  for (const definition of definitions) {
+    if (resourceRegistry.has(definition.uri) || pendingUris.has(definition.uri)) {
+      throw new Error(`Duplicate MCP resource URI: ${definition.uri}`);
+    }
+    pendingUris.add(definition.uri);
+  }
   for (const definition of definitions) {
     resourceRegistry.set(definition.uri, definition);
   }
 };
 
 export const listRegisteredMcpResources = (): McpResourceDefinition[] =>
-  Array.from(resourceRegistry.values());
+  Object.freeze(
+    Array.from(resourceRegistry.values(), (definition) =>
+      Object.freeze({ ...definition })
+    )
+  ) as unknown as McpResourceDefinition[];
 
 export const getMcpResourceDefinition = (
   uri: string
@@ -199,13 +265,29 @@ export const readRegisteredMcpResource = async (
 };
 
 export const registerMcpPrompts = (definitions: McpPromptDefinition[]) => {
+  const pendingNames = new Set<string>();
+  for (const definition of definitions) {
+    if (promptRegistry.has(definition.name) || pendingNames.has(definition.name)) {
+      throw new Error(`Duplicate MCP prompt name: ${definition.name}`);
+    }
+    pendingNames.add(definition.name);
+  }
   for (const definition of definitions) {
     promptRegistry.set(definition.name, definition);
   }
 };
 
 export const listRegisteredMcpPrompts = (): McpPromptDefinition[] =>
-  Array.from(promptRegistry.values());
+  Object.freeze(
+    Array.from(promptRegistry.values(), (definition) =>
+      Object.freeze({
+        ...definition,
+        arguments: definition.arguments
+          ? freezePlainSnapshot(definition.arguments)
+          : undefined,
+      })
+    )
+  ) as unknown as McpPromptDefinition[];
 
 export const getMcpPromptDefinition = (name: string): McpPromptDefinition | null =>
   promptRegistry.get(name) || null;

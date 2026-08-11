@@ -7,16 +7,11 @@
  * - Keyword scoring (title/summary/attendee/task/person token overlap,
  *   phrase bonus) is the always-available baseline and the tie-breaker.
  * - Semantic meeting search embeds the question (OpenAI embeddings, see
- *   src/lib/embeddings.ts) and runs LOCAL cosine similarity against the
- *   pre-embedded `meetingSearchChunks` collection
- *   (src/lib/meeting-search-chunks.ts). Candidates are workspace-scoped and
- *   capped to the CHUNK_CANDIDATE_LIMIT most recently updated chunks (i.e.
- *   the most recently ingested/updated meetings' chunks) so the scan stays
- *   cheap without Atlas Vector Search. To adopt Atlas Vector Search later,
- *   create a cosine vector index on `meetingSearchChunks.embedding` with
- *   `workspaceId`/`userId` filter fields and swap the capped find+cosine in
- *   `retrieveSemanticMeetingHits` for a `$vectorSearch` aggregation — the
- *   rest of the ranking pipeline is unchanged.
+ *   src/lib/embeddings.ts) and uses Atlas `$vectorSearch` when
+ *   MONGODB_VECTOR_INDEX names a configured index. Workspace/user fields are
+ *   applied inside the vector stage before its bounded candidates. Missing or
+ *   unsupported indexes fall back to LOCAL cosine similarity against at most
+ *   CHUNK_CANDIDATE_LIMIT recently updated `meetingSearchChunks` documents.
  * - Recency boost and the structured intents (overdue tasks, priorities,
  *   clients, assignees) are unchanged.
  *
@@ -31,7 +26,11 @@
  */
 
 import { embedText, isEmbeddingAvailable } from "@/lib/embeddings";
-import { MEETING_SEARCH_CHUNKS_COLLECTION } from "@/lib/meeting-search-chunks";
+import {
+  getMeetingSearchVectorIndexName,
+  MEETING_SEARCH_CHUNKS_COLLECTION,
+  MEETING_SEARCH_VECTOR_PATH,
+} from "@/lib/meeting-search-chunks";
 import { cosineSimilarity } from "@/lib/task-completion-helpers";
 
 export type WorkspaceRetrievalScope = {
@@ -44,6 +43,17 @@ export type WorkspaceRetrievalOptions = {
   maxMeetings?: number;
   maxTasks?: number;
   maxPeople?: number;
+  from?: string;
+  to?: string;
+  plannerBias?: boolean;
+  constraints?: WorkspaceRetrievalConstraints;
+};
+
+export type WorkspaceRetrievalConstraints = {
+  meetings?: Record<string, unknown>;
+  tasks?: Record<string, unknown>;
+  people?: Record<string, unknown>;
+  chunks?: Record<string, unknown>;
 };
 
 export type TranscriptSnippet = {
@@ -118,9 +128,10 @@ const PHRASE_BONUS = 2;
 const RECENT_7D_BOOST = 2;
 const RECENT_30D_BOOST = 1;
 
-// Semantic pass: capped local scan over the most recently updated chunks
-// (~ the most recent meetings' chunks; documented in the module header).
+// Semantic pass bounds both Atlas candidates and the local fallback scan.
 const CHUNK_CANDIDATE_LIMIT = 500;
+const VECTOR_SEARCH_NUM_CANDIDATES = 500;
+const VECTOR_SEARCH_LIMIT = 100;
 const MIN_SEMANTIC_SIMILARITY = 0.3;
 // Similarity (0..1) scaled onto the keyword score's integer range so a
 // strong semantic hit outranks a weak single-token keyword match, while
@@ -427,6 +438,48 @@ const buildScopeFilter = (
   return { userId: { $in: memberUserIds } };
 };
 
+const buildVectorScopeFilter = (
+  scope: WorkspaceRetrievalScope
+): Record<string, any> => {
+  const memberUserIds =
+    Array.isArray(scope.memberUserIds) && scope.memberUserIds.length
+      ? scope.memberUserIds
+      : [scope.userId];
+  if (scope.workspaceId) {
+    return {
+      $or: [
+        { workspaceId: scope.workspaceId },
+        { workspaceId: null, userId: { $in: memberUserIds } },
+      ],
+    };
+  }
+  return { userId: { $in: memberUserIds } };
+};
+
+const combineFilters = (
+  base: Record<string, any>,
+  ...filters: Array<Record<string, unknown> | null | undefined>
+): Record<string, any> => {
+  const additions = filters.filter(
+    (filter): filter is Record<string, unknown> =>
+      Boolean(filter && Object.keys(filter).length)
+  );
+  return additions.length ? { $and: [base, ...additions] } : base;
+};
+
+const buildDateRangeFilter = (
+  field: string,
+  from: string | undefined,
+  to: string | undefined
+): Record<string, unknown> | null => {
+  const range: Record<string, Date> = {};
+  const fromDate = toDate(from);
+  const toDateValue = toDate(to);
+  if (fromDate) range.$gte = fromDate;
+  if (toDateValue) range.$lte = toDateValue;
+  return Object.keys(range).length ? { [field]: range } : null;
+};
+
 const MEETING_CANDIDATE_PROJECTION = {
   _id: 1,
   title: 1,
@@ -495,15 +548,15 @@ type SemanticMeetingHit = {
 };
 
 /**
- * Semantic pass: embed the question and cosine-score it locally against the
- * workspace's most recently updated meeting chunks (capped candidate set —
- * see module header for the Atlas Vector Search migration path). Returns
- * null whenever embeddings are unavailable or anything fails, so callers
- * degrade to the keyword-only path. Never throws.
+ * Semantic pass: embed the question, prefer bounded Atlas vector search, and
+ * fall back to a bounded local cosine scan. Returns null whenever embeddings
+ * or both retrieval paths are unavailable, so callers degrade to keyword-only.
  */
 const retrieveSemanticMeetingHits = async (
   db: any,
   scopeFilter: Record<string, any>,
+  vectorScopeFilter: Record<string, any>,
+  chunkConstraint: Record<string, unknown> | undefined,
   question: string
 ): Promise<Map<string, SemanticMeetingHit> | null> => {
   const trimmed = typeof question === "string" ? question.trim() : "";
@@ -515,32 +568,82 @@ const retrieveSemanticMeetingHits = async (
     );
     if (!questionEmbedding) return null;
 
-    const chunks: any[] = await db
-      .collection(MEETING_SEARCH_CHUNKS_COLLECTION)
-      .find(
-        { ...scopeFilter },
-        {
-          projection: {
-            _id: 1,
-            meetingId: 1,
-            text: 1,
-            speaker: 1,
-            timestamp: 1,
-            embedding: 1,
-          },
-        }
-      )
-      .sort({ updatedAt: -1, _id: -1 })
-      .limit(CHUNK_CANDIDATE_LIMIT)
-      .toArray();
+    const collection = db.collection(MEETING_SEARCH_CHUNKS_COLLECTION);
+    const vectorIndex = getMeetingSearchVectorIndexName();
+    let chunks: any[] | null = null;
+    let atlasScores = false;
+
+    if (vectorIndex) {
+      try {
+        chunks = await collection
+          .aggregate([
+            {
+              $vectorSearch: {
+                index: vectorIndex,
+                path: MEETING_SEARCH_VECTOR_PATH,
+                queryVector: questionEmbedding,
+                filter: combineFilters(vectorScopeFilter, chunkConstraint),
+                numCandidates: VECTOR_SEARCH_NUM_CANDIDATES,
+                limit: VECTOR_SEARCH_LIMIT,
+              },
+            },
+            {
+              $project: {
+                _id: 1,
+                meetingId: 1,
+                text: 1,
+                speaker: 1,
+                timestamp: 1,
+                similarity: { $meta: "vectorSearchScore" },
+              },
+            },
+            { $limit: VECTOR_SEARCH_LIMIT },
+          ])
+          .toArray();
+        atlasScores = true;
+      } catch {
+        // Unsupported deployments and missing indexes use the bounded local path.
+        chunks = null;
+      }
+    }
+
+    if (!chunks) {
+      chunks = await collection
+        .find(
+          combineFilters(scopeFilter, chunkConstraint),
+          {
+            projection: {
+              _id: 1,
+              meetingId: 1,
+              text: 1,
+              speaker: 1,
+              timestamp: 1,
+              embedding: 1,
+            },
+          }
+        )
+        .sort({ updatedAt: -1, _id: -1 })
+        .limit(CHUNK_CANDIDATE_LIMIT)
+        .toArray();
+    }
 
     const hits = new Map<string, SemanticMeetingHit>();
-    for (const chunk of chunks) {
+    for (const chunk of chunks ?? []) {
       const meetingId = String(chunk?.meetingId ?? "").trim();
-      const embedding = Array.isArray(chunk?.embedding) ? chunk.embedding : [];
       const text = typeof chunk?.text === "string" ? chunk.text : "";
-      if (!meetingId || !embedding.length || !text.trim()) continue;
-      const similarity = cosineSimilarity(questionEmbedding, embedding);
+      const embedding = Array.isArray(chunk?.embedding) ? chunk.embedding : [];
+      if (!meetingId || !text.trim() || (!atlasScores && !embedding.length)) continue;
+      const atlasSimilarity =
+        typeof chunk?.similarity === "number"
+          ? chunk.similarity
+          : typeof chunk?.vectorScore === "number"
+            ? chunk.vectorScore
+            : typeof chunk?.score === "number"
+              ? chunk.score
+              : 0;
+      const similarity = atlasScores
+        ? atlasSimilarity
+        : cosineSimilarity(questionEmbedding, embedding);
       if (similarity < MIN_SEMANTIC_SIMILARITY) continue;
 
       const chunkHit: SemanticChunkHit = {
@@ -948,30 +1051,49 @@ export const searchWorkspaceContext = async (
   const rawQuestion = typeof question === "string" ? question : "";
   const overdueIntent = OVERDUE_INTENT_REGEX.test(rawQuestion);
   const clientIntent = CLIENT_INTENT_REGEX.test(rawQuestion);
-  const priorityIntent = PRIORITY_INTENT_REGEX.test(rawQuestion);
+  const priorityIntent =
+    PRIORITY_INTENT_REGEX.test(rawQuestion) || opts.plannerBias === true;
 
   const maxMeetings = clampLimit(opts.maxMeetings, DEFAULT_MAX_MEETINGS);
   const maxTasks = clampLimit(opts.maxTasks, DEFAULT_MAX_TASKS);
   const maxPeople = clampLimit(opts.maxPeople, DEFAULT_MAX_PEOPLE);
 
   const scopeFilter = buildScopeFilter(scope);
+  const vectorScopeFilter = buildVectorScopeFilter(scope);
+  const meetingFilter = combineFilters(
+    scopeFilter,
+    opts.constraints?.meetings,
+    buildDateRangeFilter("startTime", opts.from, opts.to)
+  );
+  const taskFilter = combineFilters(
+    scopeFilter,
+    opts.constraints?.tasks,
+    buildDateRangeFilter("dueAt", opts.from, opts.to)
+  );
+  const peopleFilter = combineFilters(scopeFilter, opts.constraints?.people);
   const now = new Date();
 
   const [meetings, tasks, people] = await Promise.all([
-    retrieveSemanticMeetingHits(db, scopeFilter, rawQuestion).then(
+    retrieveSemanticMeetingHits(
+      db,
+      scopeFilter,
+      vectorScopeFilter,
+      opts.constraints?.chunks,
+      rawQuestion
+    ).then(
       (semanticHits) =>
-        retrieveMeetings(db, scopeFilter, query, maxMeetings, now, semanticHits)
+        retrieveMeetings(db, meetingFilter, query, maxMeetings, now, semanticHits)
     ),
     retrieveTasks(
       db,
-      scopeFilter,
+      taskFilter,
       query,
       maxTasks,
       overdueIntent,
       priorityIntent,
       now
     ),
-    retrievePeople(db, scopeFilter, rawQuestion, query, maxPeople, clientIntent),
+    retrievePeople(db, peopleFilter, rawQuestion, query, maxPeople, clientIntent),
   ]);
 
   return {

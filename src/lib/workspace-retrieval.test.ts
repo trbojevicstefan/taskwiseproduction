@@ -19,15 +19,19 @@ const daysAgo = (days: number) =>
 // below assert the embeddings-unavailable behavior, so pin the env (the
 // developer shell may carry a real key) and restore it afterwards.
 const originalApiKey = process.env.OPENAI_API_KEY;
+const originalVectorIndex = process.env.MONGODB_VECTOR_INDEX;
 const originalFetch = global.fetch;
 
 beforeEach(() => {
   delete process.env.OPENAI_API_KEY;
+  delete process.env.MONGODB_VECTOR_INDEX;
 });
 
 afterAll(() => {
   if (originalApiKey === undefined) delete process.env.OPENAI_API_KEY;
   else process.env.OPENAI_API_KEY = originalApiKey;
+  if (originalVectorIndex === undefined) delete process.env.MONGODB_VECTOR_INDEX;
+  else process.env.MONGODB_VECTOR_INDEX = originalVectorIndex;
   global.fetch = originalFetch;
 });
 
@@ -49,12 +53,17 @@ const makeDb = ({
   tasks = [] as any[],
   people = [] as any[],
   chunks = null as any[] | null,
+  vectorChunks = null as any[] | null,
+  vectorError = null as Error | null,
 } = {}) => {
-  const calls: Record<"meetings" | "tasks" | "people" | "chunks", FindCall[]> = {
+  const calls: Record<"meetings" | "tasks" | "people" | "chunks", FindCall[]> & {
+    vectors: any[][];
+  } = {
     meetings: [],
     tasks: [],
     people: [],
     chunks: [],
+    vectors: [],
   };
   const collections: Record<string, any> = {
     meetings: {
@@ -89,11 +98,16 @@ const makeDb = ({
       }),
     },
   };
-  if (chunks) {
+  if (chunks || vectorChunks || vectorError) {
     collections.meetingSearchChunks = {
+      aggregate: jest.fn((pipeline: any[]) => {
+        calls.vectors.push(pipeline);
+        if (vectorError) throw vectorError;
+        return makeCursor(vectorChunks ?? []);
+      }),
       find: jest.fn((filter: any, options?: any) => {
         calls.chunks.push({ filter, options });
-        return makeCursor(chunks);
+        return makeCursor(chunks ?? []);
       }),
     };
   }
@@ -648,7 +662,73 @@ describe("searchWorkspaceContext (hybrid semantic retrieval)", () => {
   afterEach(() => {
     global.fetch = originalFetch;
     delete process.env.OPENAI_API_KEY;
+    delete process.env.MONGODB_VECTOR_INDEX;
     jest.clearAllMocks();
+  });
+
+  it("uses bounded Atlas vector search with a workspace prefilter when configured", async () => {
+    process.env.OPENAI_API_KEY = "test-key";
+    process.env.MONGODB_VECTOR_INDEX = "meeting_chunks_vector";
+    mockQuestionEmbedding();
+    const { db, calls } = makeDb({
+      meetings: [
+        {
+          _id: "m-sem",
+          title: "Weekly checkin",
+          summary: "General project notes",
+          startTime: daysAgo(60),
+        },
+      ],
+      chunks: [],
+      vectorChunks: [chunkDoc({ vectorScore: 0.98 })],
+    });
+
+    const result = await searchWorkspaceContext(db, scope, "pricing feedback");
+
+    expect(result.meetings.map((meeting) => meeting.id)).toEqual(["m-sem"]);
+    expect(calls.vectors).toHaveLength(1);
+    const vectorStage = calls.vectors[0][0].$vectorSearch;
+    expect(vectorStage).toMatchObject({
+      index: "meeting_chunks_vector",
+      path: "embedding",
+      queryVector: [1, 0],
+    });
+    expect(vectorStage.filter).toEqual({
+      $or: [
+        { workspaceId: "ws-1" },
+        { workspaceId: null, userId: { $in: ["user-1", "user-2"] } },
+      ],
+    });
+    expect(vectorStage.numCandidates).toBeGreaterThan(0);
+    expect(vectorStage.numCandidates).toBeLessThanOrEqual(500);
+    expect(vectorStage.limit).toBeGreaterThan(0);
+    expect(vectorStage.limit).toBeLessThanOrEqual(vectorStage.numCandidates);
+    expect(calls.chunks).toHaveLength(0);
+  });
+
+  it("falls back to the bounded cosine path when Atlas vector search fails", async () => {
+    process.env.OPENAI_API_KEY = "test-key";
+    process.env.MONGODB_VECTOR_INDEX = "missing_vector_index";
+    mockQuestionEmbedding();
+    const { db, calls } = makeDb({
+      meetings: [
+        {
+          _id: "m-sem",
+          title: "Weekly checkin",
+          summary: "General project notes",
+          startTime: daysAgo(60),
+        },
+      ],
+      chunks: [chunkDoc()],
+      vectorError: new Error("$vectorSearch is not supported"),
+    });
+
+    const result = await searchWorkspaceContext(db, scope, "pricing feedback");
+
+    expect(result.meetings.map((meeting) => meeting.id)).toEqual(["m-sem"]);
+    expect(calls.vectors).toHaveLength(1);
+    expect(calls.chunks).toHaveLength(1);
+    expect(calls.chunks[0].filter.$or).toEqual(expectedScopeOr);
   });
 
   it("finds a meeting semantically when the query wording shares no keywords", async () => {

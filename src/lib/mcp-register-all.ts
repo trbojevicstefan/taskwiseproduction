@@ -10,6 +10,7 @@ import { executeMcpWriteTool, listMcpWriteTools } from "@/lib/mcp-write-tools";
 import { getMcpMeetingToolDefinitions } from "@/lib/mcp-meeting-tools";
 import { getMcpTaskToolDefinitions } from "@/lib/mcp-task-tools";
 import { getMcpWorkspaceToolDefinitions } from "@/lib/mcp-workspace-tools";
+import { getMcpKnowledgeToolDefinitions } from "@/lib/mcp-knowledge-tools";
 import { getMcpResourceDefinitions } from "@/lib/mcp-resources";
 import { getMcpPromptDefinitions } from "@/lib/mcp-prompts";
 
@@ -70,6 +71,7 @@ export const registerAllMcpDefinitions = () => {
     ...getMcpMeetingToolDefinitions(),
     ...getMcpTaskToolDefinitions(),
     ...getMcpWorkspaceToolDefinitions(),
+    ...getMcpKnowledgeToolDefinitions(),
   ]);
   registerMcpResources(getMcpResourceDefinitions());
   registerMcpPrompts(getMcpPromptDefinitions());

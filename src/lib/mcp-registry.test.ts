@@ -66,6 +66,112 @@ describe("mcp-registry", () => {
     expect(names).not.toContain("attendees.list");
   });
 
+  it("rejects duplicate canonical names without replacing the original tool", () => {
+    const original = buildToolDefinition({ name: "people.list" });
+    registerMcpTools([original]);
+
+    expect(() =>
+      registerMcpTools([buildToolDefinition({ name: "people.list" })])
+    ).toThrow(/duplicate mcp tool name/i);
+    expect(getMcpToolDefinition("people.list")).toBe(original);
+  });
+
+  it("rejects duplicate aliases and canonical-alias collisions atomically", () => {
+    registerMcpTools([
+      buildToolDefinition({
+        name: "people.list",
+        aliases: ["attendees.list"],
+      }),
+    ]);
+
+    expect(() =>
+      registerMcpTools([
+        buildToolDefinition({
+          name: "meetings.list",
+          aliases: ["attendees.list"],
+        }),
+      ])
+    ).toThrow(/duplicate mcp tool alias/i);
+    expect(() =>
+      registerMcpTools([
+        buildToolDefinition({ name: "attendees.list" }),
+      ])
+    ).toThrow(/conflicts with.*alias/i);
+    expect(getMcpToolDefinition("meetings.list")).toBeNull();
+  });
+
+  it("returns immutable definition snapshots from list operations", () => {
+    registerMcpTools([
+      buildToolDefinition({
+        name: "people.list",
+        aliases: ["attendees.list"],
+      }),
+    ]);
+
+    const snapshot = listRegisteredMcpTools();
+    expect(Object.isFrozen(snapshot)).toBe(true);
+    expect(Object.isFrozen(snapshot[0])).toBe(true);
+    expect(Object.isFrozen(snapshot[0].aliases)).toBe(true);
+    expect(Object.isFrozen(snapshot[0].jsonSchema)).toBe(true);
+    expect(() => (snapshot as McpToolDefinition[]).push(buildToolDefinition())).toThrow();
+    expect(() => {
+      (snapshot[0] as { name: string }).name = "changed";
+    }).toThrow();
+    expect(getMcpToolDefinition("people.list")?.name).toBe("people.list");
+  });
+
+  it("rejects duplicate resource URIs and prompt names", () => {
+    const resource = {
+      uri: "taskwise://tasks",
+      name: "Tasks",
+      description: "Open tasks",
+      mimeType: "application/json",
+      handler: async () => ({ text: "{}" }),
+    };
+    const prompt = {
+      name: "daily_plan",
+      description: "Daily plan",
+      handler: async () => ({ description: "Daily plan", messages: [] }),
+    };
+    registerMcpResources([resource]);
+    registerMcpPrompts([prompt]);
+
+    expect(() => registerMcpResources([{ ...resource }])).toThrow(
+      /duplicate mcp resource uri/i
+    );
+    expect(() => registerMcpPrompts([{ ...prompt }])).toThrow(
+      /duplicate mcp prompt name/i
+    );
+  });
+
+  it("returns immutable resource and prompt snapshots", () => {
+    registerMcpResources([
+      {
+        uri: "taskwise://tasks",
+        name: "Tasks",
+        description: "Open tasks",
+        mimeType: "application/json",
+        handler: async () => ({ text: "{}" }),
+      },
+    ]);
+    registerMcpPrompts([
+      {
+        name: "daily_plan",
+        description: "Daily plan",
+        arguments: [{ name: "date", required: false }],
+        handler: async () => ({ description: "Daily plan", messages: [] }),
+      },
+    ]);
+
+    const resources = listRegisteredMcpResources();
+    const prompts = listRegisteredMcpPrompts();
+    expect(Object.isFrozen(resources)).toBe(true);
+    expect(Object.isFrozen(resources[0])).toBe(true);
+    expect(Object.isFrozen(prompts)).toBe(true);
+    expect(Object.isFrozen(prompts[0])).toBe(true);
+    expect(Object.isFrozen(prompts[0].arguments)).toBe(true);
+  });
+
   it("resolves scope through aliases and returns null for unknown names", () => {
     registerMcpTools([
       buildToolDefinition({
