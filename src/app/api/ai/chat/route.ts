@@ -73,6 +73,10 @@ const requestSchema = z.object({
   sessionId: z.string().trim().min(1).max(200).optional(),
   meetingId: z.string().trim().min(1).max(200).optional(),
   scope: ChatScopeSchema.optional(),
+  selectedTaskIds: z
+    .array(z.string().trim().min(1).max(200))
+    .max(25)
+    .optional(),
   history: z.array(historyEntrySchema).max(MAX_HISTORY_ENTRIES).optional(),
 });
 
@@ -515,7 +519,14 @@ export async function POST(request: Request) {
     }
     setMetricUserId(userId);
 
-    const { question, sessionId, meetingId, scope, history } = await parseJsonBody(
+    const {
+      question,
+      sessionId,
+      meetingId,
+      scope,
+      selectedTaskIds,
+      history,
+    } = await parseJsonBody(
       request,
       requestSchema,
       "Invalid chat question payload."
@@ -619,7 +630,11 @@ export async function POST(request: Request) {
           workspaceId,
           memberUserIds: workspaceMemberUserIds,
         },
-        taskCommand
+        taskCommand,
+        {
+          selectedTaskIds,
+          meetingId: effectiveMeetingId,
+        }
       );
 
       logger.info("api.request.succeeded", {

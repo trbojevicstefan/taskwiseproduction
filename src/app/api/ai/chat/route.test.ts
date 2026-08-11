@@ -7,6 +7,7 @@ import { planWorkspaceChatQuestion } from "@/lib/chat-query-planner";
 import { runInternalChatTool } from "@/lib/internal-chat-tools";
 import { loadDurableChatMemory } from "@/lib/chat-memory";
 import { assertChatScopeAccess } from "@/lib/chat-scope";
+import { executeRegisteredMcpTool } from "@/lib/mcp-registry";
 import { ApiRouteError } from "@/lib/api-route";
 import {
   answerMeetingQuestion,
@@ -46,6 +47,14 @@ jest.mock(
 jest.mock("@/lib/chat-memory", () => ({
   loadDurableChatMemory: jest.fn(),
 }));
+
+jest.mock("@/lib/mcp-registry", () => {
+  const actual = jest.requireActual("@/lib/mcp-registry");
+  return {
+    ...actual,
+    executeRegisteredMcpTool: jest.fn(),
+  };
+});
 
 jest.mock("@/lib/chat-scope", () => {
   const actual = jest.requireActual("@/lib/chat-scope");
@@ -87,6 +96,10 @@ const mockedLoadDurableChatMemory =
   loadDurableChatMemory as jest.MockedFunction<typeof loadDurableChatMemory>;
 const mockedAssertChatScopeAccess =
   assertChatScopeAccess as jest.MockedFunction<typeof assertChatScopeAccess>;
+const mockedExecuteRegisteredMcpTool =
+  executeRegisteredMcpTool as jest.MockedFunction<
+    typeof executeRegisteredMcpTool
+  >;
 const mockedAnswerWorkspaceQuestion =
   answerWorkspaceQuestion as jest.MockedFunction<typeof answerWorkspaceQuestion>;
 const mockedAnswerMeetingQuestion =
@@ -256,6 +269,19 @@ describe("POST /api/ai/chat", () => {
     tasksFindOne.mockResolvedValue(null);
     tasksInsertOne.mockResolvedValue({ insertedId: "task-new" });
     tasksUpdateOne.mockResolvedValue({ matchedCount: 1, modifiedCount: 1 });
+    mockedExecuteRegisteredMcpTool.mockImplementation(
+      async (_context, toolName, args) => ({
+        toolName,
+        summary: "Task command completed.",
+        data: {
+          task: {
+            id: String(args?.taskId ?? "task-new"),
+            title: String(args?.title ?? "Follow up with Casey"),
+            status: String(args?.status ?? "todo"),
+          },
+        },
+      })
+    );
   });
 
   describe("scoped read agent", () => {
@@ -1083,17 +1109,17 @@ describe("POST /api/ai/chat", () => {
         targetId: expect.any(String),
       }),
     ]);
-    expect(tasksInsertOne).toHaveBeenCalledWith(
-      expect.objectContaining({
+    expect(mockedExecuteRegisteredMcpTool).toHaveBeenCalledWith(
+      { db: fakeDb, workspaceId: "workspace-1" },
+      "create_task",
+      {
+        ownerUserId: "user-1",
         title: "Follow up with Casey",
-        status: "todo",
-        priority: "medium",
-        origin: "chat",
-        workspaceId: "workspace-1",
-        userId: "user-1",
-        taskState: "active",
-      })
+        description: undefined,
+        dueAt: null,
+      }
     );
+    expect(tasksInsertOne).not.toHaveBeenCalled();
     expect(mockedSearchWorkspaceContext).not.toHaveBeenCalled();
     expect(mockedAnswerWorkspaceQuestion).not.toHaveBeenCalled();
   });
@@ -1116,15 +1142,17 @@ describe("POST /api/ai/chat", () => {
     expect(response.status).toBe(200);
     const payload = await response.json();
     expect(payload.data.answer).toContain('Created task "Make pancakes"');
-    expect(tasksInsertOne).toHaveBeenCalledWith(
-      expect.objectContaining({
+    expect(mockedExecuteRegisteredMcpTool).toHaveBeenCalledWith(
+      { db: fakeDb, workspaceId: "workspace-1" },
+      "create_task",
+      {
+        ownerUserId: "user-1",
         title: "Make pancakes",
         description: expect.stringContaining("how can i make pancakes"),
-        origin: "chat",
-        workspaceId: "workspace-1",
-        userId: "user-1",
-      })
+        dueAt: null,
+      }
     );
+    expect(tasksInsertOne).not.toHaveBeenCalled();
     expect(mockedSearchWorkspaceContext).not.toHaveBeenCalled();
     expect(mockedAnswerWorkspaceQuestion).not.toHaveBeenCalled();
   });
@@ -1139,13 +1167,19 @@ describe("POST /api/ai/chat", () => {
         userId: "user-1",
       },
     ]);
-    tasksFindOne.mockResolvedValue({
-      _id: "task-1",
-      title: "Follow up with Casey",
-      status: "done",
-      workspaceId: "workspace-1",
-      userId: "user-1",
-      lastUpdated: new Date("2026-07-08T12:00:00.000Z"),
+    mockedExecuteRegisteredMcpTool.mockResolvedValue({
+      toolName: "update_task_status",
+      summary: "Updated status to done.",
+      data: {
+        task: {
+          id: "task-1",
+          title: "Follow up with Casey",
+          status: "done",
+          workspaceId: "workspace-1",
+          userId: "user-1",
+          lastUpdated: "2026-07-08T12:00:00.000Z",
+        },
+      },
     });
 
     const response = await POST(
@@ -1157,12 +1191,12 @@ describe("POST /api/ai/chat", () => {
     expect(payload.data.answer).toContain(
       'Updated task "Follow up with Casey"'
     );
-    expect(tasksUpdateOne).toHaveBeenCalledWith(
-      expect.objectContaining({ _id: "task-1" }),
-      expect.objectContaining({
-        $set: expect.objectContaining({ status: "done" }),
-      })
+    expect(mockedExecuteRegisteredMcpTool).toHaveBeenCalledWith(
+      { db: fakeDb, workspaceId: "workspace-1" },
+      "update_task_status",
+      { taskId: "task-1", status: "done" }
     );
+    expect(tasksUpdateOne).not.toHaveBeenCalled();
     expect(mockedSearchWorkspaceContext).not.toHaveBeenCalled();
     expect(mockedAnswerWorkspaceQuestion).not.toHaveBeenCalled();
   });
@@ -1182,7 +1216,125 @@ describe("POST /api/ai/chat", () => {
     expect(payload.data.confidence).toBe("low");
     expect(payload.data.answer).toMatch(/I found multiple matching tasks/i);
     expect(tasksUpdateOne).not.toHaveBeenCalled();
+    expect(mockedExecuteRegisteredMcpTool).not.toHaveBeenCalled();
     expect(mockedSearchWorkspaceContext).not.toHaveBeenCalled();
+  });
+
+  it("resolves a selected source task id and edits the canonical task before the agent", async () => {
+    tasksFindOne.mockResolvedValue({
+      _id: "task-canonical",
+      sourceTaskId: "task-source",
+      title: "Follow up with Casey",
+      status: "todo",
+      workspaceId: "workspace-1",
+      userId: "user-1",
+    });
+    mockedExecuteRegisteredMcpTool.mockResolvedValue({
+      toolName: "update_task_status",
+      summary: "Updated status to done.",
+      data: {
+        task: {
+          id: "task-canonical",
+          title: "Follow up with Casey",
+          status: "done",
+        },
+      },
+    });
+
+    const response = await POST(
+      buildRequest({
+        question: "Mark the selected task done",
+        selectedTaskIds: ["task-source"],
+      })
+    );
+
+    expect(response.status).toBe(200);
+    expect(mockedExecuteRegisteredMcpTool).toHaveBeenCalledWith(
+      { db: fakeDb, workspaceId: "workspace-1" },
+      "update_task_status",
+      { taskId: "task-canonical", status: "done" }
+    );
+    expect(mockedRunScopedChatAgent).not.toHaveBeenCalled();
+    expect(mockedSearchWorkspaceContext).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    {
+      label: "multiple selected tasks",
+      body: {
+        question: "Mark the selected task done",
+        selectedTaskIds: ["task-1", "task-2"],
+      },
+    },
+    {
+      label: "an out-of-scope selected id",
+      body: {
+        question: "Mark the selected task done",
+        selectedTaskIds: ["other-workspace-task"],
+      },
+    },
+    {
+      label: "destructive language",
+      body: {
+        question: "Delete the selected task",
+        selectedTaskIds: ["task-1"],
+      },
+    },
+    {
+      label: "bulk language",
+      body: { question: "Mark all tasks done" },
+    },
+  ])("clarifies $label with zero writes and no agent call", async ({ body }) => {
+    tasksFindOne.mockResolvedValue(null);
+
+    const response = await POST(buildRequest(body));
+
+    expect(response.status).toBe(200);
+    const payload = await response.json();
+    expect(payload.data.confidence).toBe("low");
+    expect(mockedExecuteRegisteredMcpTool).not.toHaveBeenCalled();
+    expect(tasksInsertOne).not.toHaveBeenCalled();
+    expect(tasksUpdateOne).not.toHaveBeenCalled();
+    expect(mockedRunScopedChatAgent).not.toHaveBeenCalled();
+    expect(mockedSearchWorkspaceContext).not.toHaveBeenCalled();
+  });
+
+  it("creates a meeting-scoped task through create_task_from_meeting", async () => {
+    mockedAssertChatScopeAccess.mockResolvedValue({
+      type: "meeting",
+      meetingId: "meeting-canonical",
+    });
+    mockedExecuteRegisteredMcpTool.mockResolvedValue({
+      toolName: "create_task_from_meeting",
+      summary: "Created meeting task.",
+      data: {
+        task: {
+          id: "task-meeting",
+          title: "Send meeting notes",
+          status: "todo",
+        },
+      },
+    });
+
+    const response = await POST(
+      buildRequest({
+        question: "Create a task to send meeting notes",
+        meetingId: "meeting-alias",
+      })
+    );
+
+    expect(response.status).toBe(200);
+    expect(mockedExecuteRegisteredMcpTool).toHaveBeenCalledWith(
+      { db: fakeDb, workspaceId: "workspace-1" },
+      "create_task_from_meeting",
+      {
+        meetingId: "meeting-canonical",
+        title: "Send meeting notes",
+        description: undefined,
+        dueAt: undefined,
+      }
+    );
+    expect(mockedRunScopedChatAgent).not.toHaveBeenCalled();
   });
 
   describe("meeting-scoped chat", () => {

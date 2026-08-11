@@ -1,5 +1,6 @@
-import { randomUUID } from "crypto";
-import { normalizePersonNameKey } from "@/lib/transcript-utils";
+import type { Db } from "mongodb";
+import "@/lib/mcp-register-all";
+import { executeRegisteredMcpTool } from "@/lib/mcp-registry";
 import type { GeneralChatAnswer } from "@/types/general-chat";
 
 export type ChatTaskCommand =
@@ -18,6 +19,10 @@ export type ChatTaskCommand =
         dueAt?: string | null;
       };
       changeLabel: string;
+    }
+  | {
+      kind: "clarify";
+      reason: "destructive" | "bulk";
     };
 
 export type ChatTaskScope = {
@@ -29,6 +34,11 @@ export type ChatTaskScope = {
 export type ChatTaskHistoryEntry = {
   role: "user" | "assistant";
   text: string;
+};
+
+export type ChatTaskCommandOptions = {
+  selectedTaskIds?: string[];
+  meetingId?: string | null;
 };
 
 const MAX_TASK_MATCHES = 25;
@@ -157,11 +167,59 @@ const quotedText = (value: string): string | null => {
   return match ? singleLine(match[1]) : null;
 };
 
+const hasSelectedTaskReference = (value: string): boolean =>
+  /\b(?:the\s+)?selected\s+(?:task|todo)\b/i.test(value);
+
+const parseUnsafeTaskCommand = (question: string): ChatTaskCommand | null => {
+  if (!/\b(?:tasks?|todos?)\b/i.test(question)) return null;
+  const isDueDateRemoval =
+    /\bremove\b/i.test(question) && /\bdue\s+date\b/i.test(question);
+  const hasDestructiveTaskEdit =
+    /\b(?:delete|remove|archive|purge)\b(?=[^.!?]{0,300}\b(?:tasks?|todos?)\b)/i.test(
+      question
+    );
+  if (
+    hasDestructiveTaskEdit &&
+    !isDueDateRemoval
+  ) {
+    return { kind: "clarify", reason: "destructive" };
+  }
+  const hasMutationIntent =
+    /\b(?:bulk|mark|set|update|change|edit|rename|retitle)\b/i.test(question);
+  const hasBulkTarget =
+    /\bbulk\b|\b(?:all|every|both|multiple)\s+(?:tasks?|todos?)\b|\b(?:these|those|selected)\s+(?:tasks|todos)\b/i.test(
+      question
+    );
+  if (hasMutationIntent && hasBulkTarget) {
+    return { kind: "clarify", reason: "bulk" };
+  }
+  return null;
+};
+
 const parseUpdateCommand = (
   question: string,
   now: Date
 ): ChatTaskCommand | null => {
   const quoted = quotedText(question);
+  const selectedStatusMatch =
+    /\b(?:mark|set|update|change|edit)\s+(?:the\s+)?selected\s+(?:task|todo)\s+(?:(?:to|as)\s+)?(todo|to do|in progress|in-progress|done|complete|completed)\b/i.exec(
+      question
+    );
+  if (selectedStatusMatch) {
+    const statusText = selectedStatusMatch[1].toLowerCase();
+    const status = statusText.includes("progress")
+      ? "inprogress"
+      : statusText.includes("done") || statusText.includes("complete")
+        ? "done"
+        : "todo";
+    return {
+      kind: "update",
+      matchText: "selected task",
+      updates: { status },
+      changeLabel: `set to ${status === "inprogress" ? "in progress" : status}`,
+    };
+  }
+
   const statusDone =
     /\b(?:mark|set|update|change|edit)\b.*\b(?:done|complete|completed)\b/i.test(
       question
@@ -169,6 +227,7 @@ const parseUpdateCommand = (
   if (statusDone) {
     const unquoted =
       quoted ??
+      (hasSelectedTaskReference(question) ? "selected task" : null) ??
       /(?:task|todo)\s+(.+?)\s+(?:(?:to|as)\s+)?(?:done|complete|completed)\b/i.exec(
         question
       )?.[1];
@@ -179,6 +238,23 @@ const parseUpdateCommand = (
       matchText,
       updates: { status: "done" },
       changeLabel: "marked done",
+    };
+  }
+
+  const selectedRenameMatch =
+    /\b(?:rename|retitle)\s+(?:the\s+)?selected\s+(?:task|todo)\s+(?:to|as)\s+(.+)$/i.exec(
+      question
+    );
+  if (selectedRenameMatch) {
+    const title = capitalizeFirst(
+      stripWrappingQuotes(removeDuePhrase(selectedRenameMatch[1]))
+    );
+    if (!title) return null;
+    return {
+      kind: "update",
+      matchText: "selected task",
+      updates: { title },
+      changeLabel: "renamed",
     };
   }
 
@@ -220,6 +296,21 @@ const parseUpdateCommand = (
     };
   }
 
+  const selectedDueMatch =
+    /\b(?:set|update|change|edit)\s+(?:the\s+)?selected\s+(?:task|todo)\s+(?:due|by)\s+(today|tomorrow|\d{4}-\d{2}-\d{2})\b/i.exec(
+      question
+    );
+  if (selectedDueMatch) {
+    const dueAt = parseDueDate(selectedDueMatch[1], now);
+    if (dueAt === undefined) return null;
+    return {
+      kind: "update",
+      matchText: "selected task",
+      updates: { dueAt },
+      changeLabel: "updated due date",
+    };
+  }
+
   const dueMatch =
     /\b(?:set|update|change|edit)\s+(?:the\s+)?(?:task|todo)\s+(.+?)\s+(?:due|by)\s+(today|tomorrow|\d{4}-\d{2}-\d{2})\b/i.exec(
       question
@@ -236,6 +327,37 @@ const parseUpdateCommand = (
     };
   }
 
+  const clearSelectedDueDate =
+    /\b(?:clear|remove)\s+(?:the\s+)?selected\s+(?:task|todo)(?:'s)?\s+due\s+date\b|\b(?:clear|remove)\s+(?:the\s+)?due\s+date\s+(?:for|on|from)\s+(?:the\s+)?selected\s+(?:task|todo)\b/i.test(
+      question
+    );
+  if (clearSelectedDueDate) {
+    return {
+      kind: "update",
+      matchText: "selected task",
+      updates: { dueAt: null },
+      changeLabel: "cleared due date",
+    };
+  }
+
+  const clearDueMatch =
+    /\b(?:clear|remove)\s+(?:the\s+)?(?:task|todo)\s+(.+?)\s+due\s+date\b/i.exec(
+      question
+    ) ??
+    /\b(?:clear|remove)\s+(?:the\s+)?due\s+date\s+(?:for|on|from)\s+(?:the\s+)?(?:task|todo)\s+(.+)$/i.exec(
+      question
+    );
+  if (clearDueMatch) {
+    const matchText = stripWrappingQuotes(quoted ?? clearDueMatch[1]);
+    if (!matchText) return null;
+    return {
+      kind: "update",
+      matchText,
+      updates: { dueAt: null },
+      changeLabel: "cleared due date",
+    };
+  }
+
   return null;
 };
 
@@ -248,15 +370,10 @@ export const planChatTaskCommand = (
   return (
     parseCreateCommand(normalized, now) ??
     parseContextualCreateCommand(normalized, history) ??
+    parseUnsafeTaskCommand(normalized) ??
     parseUpdateCommand(normalized, now)
   );
 };
-
-const serializeTaskDates = (task: any) => ({
-  ...task,
-  createdAt: task.createdAt?.toISOString?.() || task.createdAt,
-  lastUpdated: task.lastUpdated?.toISOString?.() || task.lastUpdated,
-});
 
 const taskSource = (task: any) => ({
   sourceType: "task" as const,
@@ -297,7 +414,7 @@ const normalizeForMatch = (value: string): string =>
     .trim();
 
 const findTaskMatch = async (
-  db: any,
+  db: Db,
   scope: ChatTaskScope,
   matchText: string
 ): Promise<
@@ -318,8 +435,7 @@ const findTaskMatch = async (
     .limit(MAX_TASK_MATCHES)
     .toArray();
 
-  const activeTasks = tasks.filter((task) => String(task?.status ?? "") !== "done");
-  const candidates = activeTasks.length ? activeTasks : tasks;
+  const candidates = tasks;
   const exact = candidates.filter(
     (task) => normalizeForMatch(String(task?.title ?? "")) === normalizedNeedle
   );
@@ -335,52 +451,121 @@ const findTaskMatch = async (
   return { status: "none" };
 };
 
-export const runChatTaskCommand = async (
-  db: any,
+const findSelectedTask = async (
+  db: Db,
   scope: ChatTaskScope,
-  command: ChatTaskCommand
+  selectedTaskId: string
+): Promise<any | null> =>
+  db.collection("tasks").findOne({
+    $and: [
+      buildScopeFilter(scope),
+      { taskState: { $ne: "archived" } },
+      {
+        $or: [
+          { _id: selectedTaskId },
+          { sourceTaskId: selectedTaskId },
+        ],
+      },
+    ],
+  } as any);
+
+const clarificationAnswer = (answer: string): GeneralChatAnswer => ({
+  answer,
+  confidence: "low",
+  sources: [],
+  suggestedActions: [],
+});
+
+const taskFromToolResult = (result: {
+  data: Record<string, unknown>;
+}): any | null => {
+  const task = result.data?.task;
+  return task && typeof task === "object" ? task : null;
+};
+
+export const runChatTaskCommand = async (
+  db: Db,
+  scope: ChatTaskScope,
+  command: ChatTaskCommand,
+  options: ChatTaskCommandOptions = {}
 ): Promise<GeneralChatAnswer> => {
+  if (!scope.workspaceId) {
+    return clarificationAnswer(
+      "I couldn't resolve an active workspace for this task command, so I didn't change anything."
+    );
+  }
+
+  if (command.kind === "clarify") {
+    return clarificationAnswer(
+      command.reason === "destructive"
+        ? "I can't delete or archive tasks from chat. Open the task to review that change explicitly."
+        : "I can update only one task at a time from chat. Select one task and try again."
+    );
+  }
+
+  const selectedTaskIds = Array.from(
+    new Set(
+      (options.selectedTaskIds ?? [])
+        .map((taskId) => String(taskId).trim())
+        .filter(Boolean)
+    )
+  );
+  if (selectedTaskIds.length > 1) {
+    return clarificationAnswer(
+      "I can update only one task at a time from chat. Select one task and try again."
+    );
+  }
+
   if (command.kind === "create") {
-    const now = new Date();
-    const task = {
-      _id: randomUUID(),
-      title: command.title,
-      description: command.description || "",
-      status: "todo",
-      priority: "medium",
-      dueAt: command.dueAt,
-      assignee: undefined,
-      assigneeName: null,
-      assigneeNameKey: null as string | null,
-      aiSuggested: false,
-      origin: "chat",
-      projectId: null,
-      workspaceId: scope.workspaceId ?? null,
-      userId: scope.userId,
-      parentId: null,
-      order: 0,
-      subtaskCount: 0,
-      sourceSessionId: null,
-      sourceSessionName: null,
-      sourceSessionType: "chat",
-      sourceTaskId: null,
-      taskState: "active",
-      researchBrief: null,
-      aiAssistanceText: null,
-      createdAt: now,
-      lastUpdated: now,
-    };
-    await db.collection("tasks").insertOne(task);
-    const serialized = serializeTaskDates(task);
+    const meetingId = options.meetingId?.trim() || null;
+    const result = meetingId
+      ? await executeRegisteredMcpTool(
+          { db, workspaceId: scope.workspaceId },
+          "create_task_from_meeting",
+          {
+            meetingId,
+            title: command.title,
+            description: command.description,
+            dueAt: command.dueAt ?? undefined,
+          }
+        )
+      : await executeRegisteredMcpTool(
+          { db, workspaceId: scope.workspaceId },
+          "create_task",
+          {
+            ownerUserId: scope.userId,
+            title: command.title,
+            description: command.description,
+            dueAt: command.dueAt,
+          }
+        );
+    const task = taskFromToolResult(result);
+    if (!task) {
+      return clarificationAnswer(
+        "The task tool did not return a created task, so I couldn't confirm the change."
+      );
+    }
     return {
-      answer: `Created task "${serialized.title}".`,
+      answer: `Created task "${String(task.title || command.title)}".`,
       confidence: "high",
-      sources: [taskSource(serialized)],
-      suggestedActions: [openTaskAction(serialized)],
+      sources: [taskSource(task)],
+      suggestedActions: [openTaskAction(task)],
     };
   }
 
-  const match = await findTaskMatch(db, scope, command.matchText);
+  const match = selectedTaskIds.length
+    ? await (async () => {
+        const task = await findSelectedTask(db, scope, selectedTaskIds[0]);
+        return task
+          ? ({ status: "matched", task } as const)
+          : ({ status: "selected_out_of_scope" } as const);
+      })()
+    : await findTaskMatch(db, scope, command.matchText);
+  if (match.status === "selected_out_of_scope") {
+    return clarificationAnswer(
+      "I couldn't resolve the selected task inside the active workspace, so I didn't change anything."
+    );
+  }
   if (match.status === "none") {
     return {
       answer: `I couldn't find a task matching "${command.matchText}". Try the exact task title and I can update it.`,
@@ -402,27 +587,50 @@ export const runChatTaskCommand = async (
     };
   }
 
-  const update: Record<string, unknown> = {
-    ...command.updates,
-    lastUpdated: new Date(),
-  };
-  if (typeof update.assigneeName === "string") {
-    update.assigneeNameKey = normalizePersonNameKey(update.assigneeName);
+  const taskId =
+    match.task?._id === undefined || match.task?._id === null
+      ? ""
+      : String(match.task._id).trim();
+  if (!taskId) {
+    return clarificationAnswer(
+      "I couldn't resolve the canonical task id, so I didn't change anything."
+    );
   }
 
-  const taskId = String(match.task._id ?? match.task.id);
-  const updateFilter = { _id: taskId, ...buildScopeFilter(scope) };
-  await db.collection("tasks").updateOne(updateFilter, { $set: update });
-  const updatedTask =
-    (await db.collection("tasks").findOne(updateFilter)) ?? {
-      ...match.task,
-      ...update,
-    };
-  const serialized = serializeTaskDates(updatedTask);
+  const toolCall = command.updates.status
+    ? {
+        name: "update_task_status",
+        args: { taskId, status: command.updates.status },
+      }
+    : command.updates.title
+      ? {
+          name: "action_items.update_title",
+          args: { taskId, title: command.updates.title },
+        }
+      : Object.prototype.hasOwnProperty.call(command.updates, "dueAt")
+        ? {
+            name: "set_task_due_date",
+            args: { taskId, dueAt: command.updates.dueAt ?? null },
+          }
+        : null;
+  if (!toolCall) {
+    return clarificationAnswer(
+      "I couldn't identify a safe single-task change, so I didn't change anything."
+    );
+  }
+
+  const result = await executeRegisteredMcpTool(
+    { db, workspaceId: scope.workspaceId },
+    toolCall.name,
+    toolCall.args
+  );
+  const updatedTask = taskFromToolResult(result) ?? match.task;
   return {
-    answer: `Updated task "${serialized.title}" (${command.changeLabel}).`,
+    answer: `Updated task "${String(
+      updatedTask.title || match.task.title || "Untitled task"
+    )}" (${command.changeLabel}).`,
     confidence: "high",
-    sources: [taskSource(serialized)],
-    suggestedActions: [openTaskAction(serialized)],
+    sources: [taskSource(updatedTask)],
+    suggestedActions: [openTaskAction(updatedTask)],
   };
 };

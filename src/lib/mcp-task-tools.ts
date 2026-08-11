@@ -32,7 +32,8 @@ import { findWorkspaceById } from "@/lib/workspaces";
  * Phase 8 pack: task tools.
  *
  * list_tasks (read); update_task_status / assign_task / set_task_due_date /
- * prioritize_tasks / create_task_from_meeting / schedule_slack_reminder (write).
+ * prioritize_tasks / create_task / create_task_from_meeting /
+ * schedule_slack_reminder (write).
  *
  * Conventions honored here:
  * - Mutating tools use scope "mcp:write" (scope checks, write rate-limit
@@ -98,6 +99,13 @@ const setTaskDueDateArgsSchema = z.object({
 
 const prioritizeTasksArgsSchema = z.object({
   limit: z.number().int().min(1).max(PRIORITIZE_MAX_TASKS).optional(),
+});
+
+const createTaskArgsSchema = z.object({
+  ownerUserId: z.string().trim().min(1).max(120),
+  title: z.string().trim().min(1).max(300),
+  description: z.string().max(4000).optional(),
+  dueAt: z.string().trim().min(1).max(64).nullable().optional(),
 });
 
 const createTaskFromMeetingArgsSchema = z.object({
@@ -438,6 +446,104 @@ const TASK_TOOLS: McpToolDefinition[] = [
           updated: operations.length,
           byLabel,
         },
+      };
+    },
+  },
+  {
+    name: "create_task",
+    description:
+      "Create one confirmed task in the active workspace for an explicitly authorized workspace member.",
+    scope: "mcp:write",
+    inputSchema: createTaskArgsSchema,
+    jsonSchema: {
+      type: "object",
+      additionalProperties: false,
+      required: ["ownerUserId", "title"],
+      properties: {
+        ownerUserId: { type: "string", minLength: 1, maxLength: 120 },
+        title: { type: "string", minLength: 1, maxLength: 300 },
+        description: { type: "string", maxLength: 4000 },
+        dueAt: { type: ["string", "null"], maxLength: 64 },
+      },
+    },
+    handler: async ({ db, workspaceId }, rawArgs) => {
+      const args = rawArgs as z.infer<typeof createTaskArgsSchema>;
+      const memberUserIds = await getWorkspaceMemberUserIds(db, workspaceId);
+      if (!memberUserIds.includes(args.ownerUserId)) {
+        throw new McpToolCallError(
+          "invalid_arguments",
+          "Task owner is not an active member of this workspace."
+        );
+      }
+
+      let dueAt: string | null = null;
+      if (args.dueAt) {
+        const parsed = toDateOrNull(args.dueAt);
+        if (!parsed) {
+          throw new McpToolCallError(
+            "invalid_arguments",
+            "dueAt must be a valid date."
+          );
+        }
+        dueAt = parsed.toISOString();
+      }
+
+      const now = new Date();
+      const title = args.title.trim();
+      const description = args.description || "";
+      const priority = computeTaskPriority(
+        {
+          title,
+          description,
+          status: "todo",
+          priority: "medium",
+          dueAt,
+          createdAt: now,
+          lastUpdated: now,
+        },
+        { now }
+      );
+      const task = {
+        _id: randomUUID(),
+        userId: args.ownerUserId,
+        workspaceId,
+        title,
+        description,
+        status: "todo",
+        priority: "medium",
+        dueAt,
+        assignee: null,
+        assigneeName: null,
+        assigneeNameKey: null,
+        aiSuggested: false,
+        origin: "chat",
+        projectId: null,
+        parentId: null,
+        order: 0,
+        subtaskCount: 0,
+        sourceSessionId: null,
+        sourceSessionName: null,
+        sourceSessionType: "chat",
+        sourceTaskId: null,
+        taskState: "active",
+        reviewStatus: "confirmed",
+        reviewedAt: now,
+        researchBrief: null,
+        aiAssistanceText: null,
+        priorityScore: priority.priorityScore,
+        priorityLabel: priority.priorityLabel,
+        priorityReason: priority.priorityReason,
+        priorityUpdatedAt: now.toISOString(),
+        createdAt: now,
+        lastUpdated: now,
+      };
+
+      await db.collection("tasks").insertOne(task as any);
+
+      return {
+        toolName: "create_task",
+        summary: `Created task "${truncateText(title, 80)}".`,
+        data: { task: serializeMcpTask(task) },
       };
     },
   },

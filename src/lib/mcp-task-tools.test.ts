@@ -102,7 +102,7 @@ describe("mcp-task-tools", () => {
     mockedEnqueueSweep.mockResolvedValue({ enqueued: true, jobId: "job-2" } as any);
   });
 
-  it("exposes the seven task tools with correct scopes", () => {
+  it("exposes the eight task tools with correct scopes", () => {
     const definitions = getMcpTaskToolDefinitions();
     const scopes = Object.fromEntries(
       definitions.map((definition) => [definition.name, definition.scope])
@@ -113,6 +113,7 @@ describe("mcp-task-tools", () => {
       assign_task: "mcp:write",
       set_task_due_date: "mcp:write",
       prioritize_tasks: "mcp:write",
+      create_task: "mcp:write",
       create_task_from_meeting: "mcp:write",
       schedule_slack_reminder: "mcp:write",
     });
@@ -299,6 +300,61 @@ describe("mcp-task-tools", () => {
     expect(operations[0].updateOne.filter).toEqual({ _id: "task-overdue" });
     expect(operations[0].updateOne.update.$set.priorityScore).toBeGreaterThan(0);
     expect(operations[0].updateOne.update.$set.priorityReason).toContain("Overdue");
+  });
+
+  it("create_task inserts a typed workspace task for a validated owner", async () => {
+    const insertOne = jest.fn(async () => ({}));
+    const db = {
+      collection: jest.fn((name: string) => {
+        if (name === "tasks") return { insertOne };
+        throw new Error(`Unexpected collection: ${name}`);
+      }),
+    } as any;
+
+    const result = await run(db, "create_task", {
+      ownerUserId: "user-1",
+      title: "Send the proposal",
+      description: "Include the updated pricing.",
+      dueAt: "2026-08-20T00:00:00.000Z",
+    });
+
+    expect(mockedMemberships).toHaveBeenCalledWith(db, "workspace-1");
+    expect(insertOne).toHaveBeenCalledTimes(1);
+    const inserted = (insertOne.mock.calls as any[])[0][0];
+    expect(inserted).toMatchObject({
+      userId: "user-1",
+      workspaceId: "workspace-1",
+      title: "Send the proposal",
+      description: "Include the updated pricing.",
+      status: "todo",
+      origin: "chat",
+      sourceSessionType: "chat",
+      taskState: "active",
+      reviewStatus: "confirmed",
+    });
+    expect(inserted.dueAt).toBe("2026-08-20T00:00:00.000Z");
+    expect((result.data as any).task.id).toBe(inserted._id);
+  });
+
+  it.each([
+    { label: "missing", args: { title: "Unauthorized owner" } },
+    {
+      label: "non-member",
+      args: { ownerUserId: "stranger", title: "Unauthorized owner" },
+    },
+  ])("create_task rejects a $label owner with zero inserts", async ({ args }) => {
+    const insertOne = jest.fn(async () => ({}));
+    const db = {
+      collection: jest.fn((name: string) => {
+        if (name === "tasks") return { insertOne };
+        throw new Error(`Unexpected collection: ${name}`);
+      }),
+    } as any;
+
+    await expect(run(db, "create_task", args)).rejects.toMatchObject({
+      code: "invalid_arguments",
+    });
+    expect(insertOne).not.toHaveBeenCalled();
   });
 
   it("create_task_from_meeting inserts a confirmed meeting-linked task", async () => {
