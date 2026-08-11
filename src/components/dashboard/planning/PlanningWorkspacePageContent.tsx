@@ -14,7 +14,12 @@ import Link from "next/link";
 import { CalendarClock, Lightbulb, Loader2, RefreshCw } from "lucide-react";
 import DashboardHeader from "@/components/dashboard/DashboardHeader";
 import EmptyState from "@/components/common/EmptyState";
-import GeneralChatPanel from "@/components/dashboard/chat/GeneralChatPanel";
+import GeneralChatPanel, {
+  findSessionForScope,
+  panelMessagesToStoredMessages,
+  storedMessagesToPanelMessages,
+  type PanelMessage,
+} from "@/components/dashboard/chat/GeneralChatPanel";
 import AssignPersonDialog from "@/components/dashboard/planning/AssignPersonDialog";
 import PlanningTaskRow from "@/components/dashboard/planning/PlanningTaskRow";
 import { Badge } from "@/components/ui/badge";
@@ -45,6 +50,9 @@ import {
   type UpcomingMeeting,
 } from "./planning-overview";
 import UpcomingMeetingsSection from "./UpcomingMeetingsSection";
+import { useChatHistory } from "@/contexts/ChatHistoryContext";
+
+const PLANNER_CHAT_SCOPE = { type: "planner" } as const;
 
 // ---------------------------------------------------------------------------
 // Sections grid (pure — exported for tests)
@@ -172,6 +180,29 @@ function PlanningSectionsSkeleton() {
 
 export default function PlanningWorkspacePageContent() {
   const { toast } = useToast();
+  const { sessions, createNewSession, applySessionMessagesLocal } = useChatHistory();
+  const plannerSession = findSessionForScope(sessions, PLANNER_CHAT_SCOPE);
+
+  const ensurePlannerSession = useCallback(async () => {
+    const existing = findSessionForScope(sessions, PLANNER_CHAT_SCOPE);
+    if (existing) return existing.id;
+    const created = await createNewSession({
+      title: "Planning assistant",
+      scope: PLANNER_CHAT_SCOPE,
+    });
+    return created?.id ?? null;
+  }, [createNewSession, sessions]);
+
+  const handlePlannerMessages = useCallback(
+    (messages: PanelMessage[]) => {
+      if (!plannerSession) return;
+      applySessionMessagesLocal(
+        plannerSession.id,
+        panelMessagesToStoredMessages(messages)
+      );
+    },
+    [applySessionMessagesLocal, plannerSession]
+  );
 
   const [overview, setOverview] = useState<PlanningOverview>(
     EMPTY_PLANNING_OVERVIEW
@@ -466,9 +497,18 @@ export default function PlanningWorkspacePageContent() {
             <Card>
               <CardContent className="p-4">
                 <GeneralChatPanel
+                  scope={PLANNER_CHAT_SCOPE}
+                  scopeLabel="Planner scope"
                   heroTitle="Plan with AI"
                   suggestedPrompts={PLANNING_ASSISTANT_PROMPTS}
                   compact
+                  sessionId={plannerSession?.id}
+                  initialMessages={storedMessagesToPanelMessages(
+                    plannerSession?.messages
+                  )}
+                  persistMessages
+                  onEnsureSession={ensurePlannerSession}
+                  onMessagesChange={handlePlannerMessages}
                 />
               </CardContent>
             </Card>

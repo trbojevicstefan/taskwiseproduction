@@ -40,7 +40,14 @@ import DashboardHeader from '../DashboardHeader';
 import DashboardScreenSkeleton from '@/components/dashboard/DashboardScreenSkeleton';
 import ProfileReportDialog from '@/components/dashboard/common/ProfileReportDialog';
 import EmptyState from '@/components/common/EmptyState';
+import GeneralChatPanel, {
+  findSessionForScope,
+  panelMessagesToStoredMessages,
+  storedMessagesToPanelMessages,
+  type PanelMessage,
+} from '@/components/dashboard/chat/GeneralChatPanel';
 import { useAuth } from '@/contexts/AuthContext';
+import { useChatHistory } from '@/contexts/ChatHistoryContext';
 import { useToast } from '@/hooks/use-toast';
 import { apiFetch } from '@/lib/api';
 import { cn } from '@/lib/utils';
@@ -96,6 +103,7 @@ export default function CompanyDetailPageContent({
   companyId,
 }: CompanyDetailPageContentProps) {
   const { user } = useAuth();
+  const { sessions, createNewSession, applySessionMessagesLocal } = useChatHistory();
   const { toast } = useToast();
   const [profile, setProfile] = useState<CompanyProfileResponse | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -106,6 +114,35 @@ export default function CompanyDetailPageContent({
   const [editName, setEditName] = useState('');
   const [editDomain, setEditDomain] = useState('');
   const [editAliases, setEditAliases] = useState('');
+
+  const companyChatScope = profile
+    ? ({ type: 'client', clientId: profile.company.id } as const)
+    : null;
+  const companyChatSession = companyChatScope
+    ? findSessionForScope(sessions, companyChatScope)
+    : undefined;
+
+  const ensureCompanyChatSession = useCallback(async () => {
+    if (!profile || !companyChatScope) return null;
+    const existing = findSessionForScope(sessions, companyChatScope);
+    if (existing) return existing.id;
+    const created = await createNewSession({
+      title: `Client chat: ${profile.company.name}`,
+      scope: companyChatScope,
+    });
+    return created?.id ?? null;
+  }, [companyChatScope, createNewSession, profile, sessions]);
+
+  const handleCompanyChatMessages = useCallback(
+    (messages: PanelMessage[]) => {
+      if (!companyChatSession) return;
+      applySessionMessagesLocal(
+        companyChatSession.id,
+        panelMessagesToStoredMessages(messages)
+      );
+    },
+    [applySessionMessagesLocal, companyChatSession]
+  );
 
   const loadProfile = useCallback(async () => {
     try {
@@ -262,6 +299,35 @@ export default function CompanyDetailPageContent({
               <p className="text-sm font-medium">{nextFollowUp || 'Not set'}</p>
             </div>
           </div>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Ask about {company.name}</CardTitle>
+              <CardDescription>
+                Answers and task actions are confined to this client.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <GeneralChatPanel
+                scope={{ type: 'client', clientId: company.id }}
+                scopeLabel={`Client: ${company.name}`}
+                heroTitle={`Ask about ${company.name}`}
+                suggestedPrompts={[
+                  'What are we waiting on?',
+                  'Which commitments are overdue?',
+                  'Summarize recent decisions.',
+                ]}
+                compact
+                sessionId={companyChatSession?.id}
+                initialMessages={storedMessagesToPanelMessages(
+                  companyChatSession?.messages
+                )}
+                persistMessages
+                onEnsureSession={ensureCompanyChatSession}
+                onMessagesChange={handleCompanyChatMessages}
+              />
+            </CardContent>
+          </Card>
 
           <Card>
             <CardHeader>

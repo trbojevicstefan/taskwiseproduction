@@ -19,6 +19,35 @@ jest.mock("@/lib/api", () => ({
   apiFetch: jest.fn(() => new Promise(() => {})),
 }));
 
+jest.mock("@/contexts/ChatHistoryContext", () => ({
+  useChatHistory: () => ({
+    sessions: [{ id: "planner-session", scope: { type: "planner" }, messages: [] }],
+    createNewSession: jest.fn(),
+    applySessionMessagesLocal: jest.fn(),
+  }),
+}));
+
+jest.mock("@/components/dashboard/chat/GeneralChatPanel", () => ({
+  __esModule: true,
+  default: (props: any) => (
+    <section
+      data-testid="planning-chat"
+      data-scope={JSON.stringify(props.scope)}
+      data-session-id={props.sessionId}
+      data-persist={String(props.persistMessages)}
+    >
+      <h2>{props.heroTitle}</h2>
+      {(props.suggestedPrompts || []).map((prompt: string) => (
+        <span key={prompt}>{prompt}</span>
+      ))}
+    </section>
+  ),
+  findSessionForScope: (sessions: any[], scope: any) =>
+    sessions.find((session) => session.scope?.type === scope.type),
+  storedMessagesToPanelMessages: () => [],
+  panelMessagesToStoredMessages: () => [],
+}));
+
 jest.mock("@/hooks/use-toast", () => ({
   useToast: () => ({ toast: jest.fn() }),
 }));
@@ -227,6 +256,11 @@ describe("PlanningWorkspacePageContent", () => {
     expect(markup).toContain("Recompute priorities");
     expect(markup).toContain("Meeting agendas");
     expect(markup).toContain('href="/planning/agendas"');
+    expect(markup).toContain(
+      'data-scope="{&quot;type&quot;:&quot;planner&quot;}"'
+    );
+    expect(markup).toContain('data-session-id="planner-session"');
+    expect(markup).toContain('data-persist="true"');
   });
 });
 

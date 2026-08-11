@@ -117,7 +117,7 @@ describe("GeneralChatPanel interactions", () => {
     mockedApiFetch.mockResolvedValue(chatAnswerResponse as any);
   });
 
-  it("meeting mode sends meetingId, sessionId, and history for follow-ups and persists messages", async () => {
+  it("meeting scope sends scope, sessionId, selected tasks, and history for follow-ups", async () => {
     const initialMessages: PanelMessage[] = [
       { id: "u1", role: "user", text: "Summarize this meeting.", at: 1 },
       {
@@ -136,9 +136,9 @@ describe("GeneralChatPanel interactions", () => {
     const onMessagesChange = jest.fn();
     const { container, cleanup } = await renderPanel(
       <GeneralChatPanel
+        scope={{ type: "meeting", meetingId: "m1" }}
         sessionId="s1"
-        meetingId="m1"
-        mode="meeting"
+        selectedTaskIds={["task-1"]}
         initialMessages={initialMessages}
         persistMessages
         onMessagesChange={onMessagesChange}
@@ -159,7 +159,8 @@ describe("GeneralChatPanel interactions", () => {
     expect(body).toEqual({
       question: "Who said that?",
       sessionId: "s1",
-      meetingId: "m1",
+      scope: { type: "meeting", meetingId: "m1" },
+      selectedTaskIds: ["task-1"],
       history: [
         { role: "user", text: "Summarize this meeting." },
         { role: "assistant", text: "The team discussed pricing." },
@@ -197,7 +198,9 @@ describe("GeneralChatPanel interactions", () => {
   });
 
   it("workspace mode sends only the question (no meetingId) and does not persist without a session", async () => {
-    const { container, cleanup } = await renderPanel(<GeneralChatPanel />);
+    const { container, cleanup } = await renderPanel(
+      <GeneralChatPanel scope={{ type: "workspace" }} />
+    );
 
     await sendQuestion(container, "Which tasks are overdue?");
 
@@ -205,7 +208,10 @@ describe("GeneralChatPanel interactions", () => {
     const [url, options] = mockedApiFetch.mock.calls[0];
     expect(url).toBe("/api/ai/chat");
     const body = JSON.parse(options!.body as string);
-    expect(body).toEqual({ question: "Which tasks are overdue?" });
+    expect(body).toEqual({
+      question: "Which tasks are overdue?",
+      scope: { type: "workspace" },
+    });
 
     expect(container.textContent).toContain(
       "Stefan said pricing is too high."
@@ -216,7 +222,11 @@ describe("GeneralChatPanel interactions", () => {
   it("creates a session through onEnsureSession before the first persisted send", async () => {
     const onEnsureSession = jest.fn().mockResolvedValue("fresh-session");
     const { container, cleanup } = await renderPanel(
-      <GeneralChatPanel persistMessages onEnsureSession={onEnsureSession} />
+      <GeneralChatPanel
+        scope={{ type: "workspace" }}
+        persistMessages
+        onEnsureSession={onEnsureSession}
+      />
     );
 
     await sendQuestion(container, "Hello there");
@@ -231,6 +241,11 @@ describe("GeneralChatPanel interactions", () => {
       ([url]) => url === "/api/chat-sessions/fresh-session"
     );
     expect(persistCalls.length).toBeGreaterThanOrEqual(1);
+    const firstPersisted = JSON.parse(
+      persistCalls[0][1]!.body as string
+    ).messages;
+    expect(firstPersisted.filter((message: any) => message.sender === "user"))
+      .toHaveLength(1);
     cleanup();
   });
 });

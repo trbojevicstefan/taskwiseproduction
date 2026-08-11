@@ -12,8 +12,7 @@ import { Badge } from '@/components/ui/badge';
 import { useAuth } from '@/contexts/AuthContext';
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { extractTasksFromChat } from '@/ai/flows/extract-tasks';
-import { answerMeetingChat } from '@/ai/flows/meeting-chat-flow';
-import type { OrchestratorInput, OrchestratorOutput } from '@/ai/flows/schemas';
+import type { OrchestratorInput } from '@/ai/flows/schemas';
 import { simplifyTaskBranch } from '@/ai/flows/simplify-task-branch-flow';
 import { useToast } from "@/hooks/use-toast";
 import { useChatHistory } from '@/contexts/ChatHistoryContext';
@@ -94,6 +93,11 @@ import { TASK_TYPE_LABELS, TASK_TYPE_VALUES, type TaskTypeCategory } from '@/lib
 import type { Meeting } from '@/types/meeting';
 import { buildBriefContext } from "@/lib/brief-context";
 import { generateBriefsForTasks } from "@/lib/task-briefs";
+import {
+  normalizeGeneralChatAnswer,
+  resolveSourceHref,
+} from '@/components/dashboard/chat/GeneralChatPanel';
+import type { ChatScope, GeneralChatAnswer } from '@/types/general-chat';
 
 let chatMessageCounter = 0;
 
@@ -112,6 +116,47 @@ export function resolveChatPanelContext(
   return meetingId
     ? { mode: "meeting", meetingId }
     : { mode: "workspace" };
+}
+
+export function buildActiveChatRequest(params: {
+  question: string;
+  session: {
+    id: string;
+    sourceMeetingId?: string | null;
+    scope?: ChatScope;
+    messages: ChatMessageType[];
+  };
+  selectedTaskIds: Set<string>;
+}): Record<string, unknown> {
+  const persistedMeetingId = params.session.sourceMeetingId?.trim();
+  const scope: ChatScope =
+    persistedMeetingId
+      ? { type: 'meeting', meetingId: persistedMeetingId }
+      : params.session.scope ?? { type: 'workspace' };
+  const history = params.session.messages
+    .filter(
+      (message) =>
+        message.id !== 'ai-typing-indicator' &&
+        (message.sender === 'user' || message.sender === 'ai') &&
+        message.text.trim().length > 0
+    )
+    .map((message) => ({
+      role: message.sender === 'user' ? ('user' as const) : ('assistant' as const),
+      text: message.text.slice(0, 2000),
+      ...(message.sender === 'ai' && message.chatAnswer?.sources?.length
+        ? { sources: message.chatAnswer.sources }
+        : {}),
+    }))
+    .slice(-12);
+  const selectedTaskIds = Array.from(params.selectedTaskIds);
+
+  return {
+    question: params.question,
+    sessionId: params.session.id,
+    scope,
+    ...(selectedTaskIds.length > 0 ? { selectedTaskIds } : {}),
+    ...(history.length > 0 ? { history } : {}),
+  };
 }
 
 
@@ -342,6 +387,49 @@ const MessageDisplay: React.FC<{
             )}
           >
             <div className="text-sm font-body leading-relaxed whitespace-pre-wrap" dangerouslySetInnerHTML={{ __html: displayedText.replace(/\n/g, '<br />') }} />
+            {message.sender === 'ai' && message.chatAnswer && (
+              <div className="mt-3 space-y-2">
+                <Badge variant="outline" className="text-[10px] uppercase">
+                  {message.chatAnswer.confidence} confidence
+                </Badge>
+                {message.chatAnswer.sources.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5">
+                    {message.chatAnswer.sources.map((source, index) => {
+                      const href = resolveSourceHref(source);
+                      const content = (
+                        <Badge variant="secondary" className="max-w-[220px] truncate font-normal">
+                          {source.title}
+                        </Badge>
+                      );
+                      return href ? (
+                        <Link key={`${source.sourceType}-${source.sourceId}-${index}`} href={href}>
+                          {content}
+                        </Link>
+                      ) : (
+                        <span key={`${source.sourceType}-${source.sourceId}-${index}`}>
+                          {content}
+                        </span>
+                      );
+                    })}
+                  </div>
+                )}
+                <div className="flex flex-wrap gap-2">
+                  {message.chatAnswer.suggestedActions.map((action, index) => {
+                    const href =
+                      action.actionType === 'open_meeting' && action.targetId
+                        ? `/meetings/${action.targetId}`
+                        : action.actionType === 'open_task'
+                          ? '/review'
+                          : null;
+                    return href ? (
+                      <Button key={`${action.actionType}-${index}`} asChild variant="outline" size="sm" className="h-7 text-xs">
+                        <Link href={href}>{action.label}</Link>
+                      </Button>
+                    ) : null;
+                  })}
+                </div>
+              </div>
+            )}
             {message.sender === 'ai' && (
               <div className="mt-2 flex items-center gap-2">
                 <MessageSourcesButton sources={message.sources} />
@@ -664,16 +752,6 @@ export default function ChatPageContent() {
     },
     [meetings]
   );
-
-  useEffect(() => {
-    const activeSession = getActiveSession();
-    if (!activeSession || activeSession.sourceMeetingId) return;
-    const mostRecent = getMeetingByChatSessionId(activeSession.id);
-    if (!mostRecent) return;
-    if (activeSession.sourceMeetingId === mostRecent.id) return;
-    updateSession(activeSession.id, { sourceMeetingId: mostRecent.id });
-  }, [activeSessionId, getActiveSession, getMeetingByChatSessionId, updateSession]);
-
 
   const getInitials = (name: string | null | undefined) => (name ? name.split(' ').map(n => n[0]).join('').toUpperCase().substring(0, 2) : 'U');
   const userAvatar = user?.photoURL || `https://api.dicebear.com/8.x/initials/svg?seed=${user?.displayName || user?.email}`;
@@ -1365,12 +1443,12 @@ export default function ChatPageContent() {
         }
     } else {
         await addMessageToActiveSession(userMessage);
-        await processAIResponse(promptText, false);
+        await processAIResponse(promptText);
       }
     };
   
   
-    const processAIResponse = async (promptText: string, isFirstMessage: boolean = false) => {
+    const processAIResponse = async (promptText: string) => {
         if (!user?.uid) {
           toast({ title: "Authentication Error", description: "You must be logged in.", variant: "destructive" });
           return;
@@ -1390,165 +1468,45 @@ export default function ChatPageContent() {
       }
 
       try {
-        const currentSession = getActiveSession();
-        const currentTasks = currentSession?.suggestedTasks || [];
-        const sanitizedCurrentTasks = sanitizeTasksForAI(currentTasks);
-        const selectedAITasks = sanitizeTasksForAI(getSelectedTasks());
-        const sourceMeeting = getMeetingForSession(currentSession);
-        const sourceTranscript = getMeetingTranscript(sourceMeeting);
-        const shouldApplyTaskUpdate =
-          !sourceMeeting || currentTasks.length === 0 || selectedAITasks.length > 0;
-
-        if (activeSessionId && currentSession && sourceMeeting) {
-          if (!currentSession.sourceMeetingId || currentSession.sourceMeetingId !== sourceMeeting.id) {
-            await updateSession(activeSessionId, {
-              sourceMeetingId: sourceMeeting.id,
-              people: currentSession.people?.length ? currentSession.people : sourceMeeting.attendees || [],
-            });
-          }
-        }
-
-        if (sourceMeeting) {
-          const meetingChatResult = await answerMeetingChat({
-            message: promptText,
-            transcript: sourceTranscript || "",
-            meetingTasks: sanitizedCurrentTasks.length > 0
-              ? sanitizedCurrentTasks
-              : sanitizeTasksForAI(sourceMeeting.extractedTasks || []),
-            selectedTaskIds: Array.from(selectedTaskIds),
-            selectedTasks: selectedAITasks.length > 0 ? selectedAITasks : undefined,
-            requestedDetailLevel,
+        const activeChatSession = getActiveSession();
+        if (activeSessionId && activeChatSession) {
+          const requestBody = buildActiveChatRequest({
+            question: promptText,
+            session: activeChatSession,
+            selectedTaskIds,
           });
-
-          if (activeSessionId) {
-            const messagePayload: Omit<ChatMessageType, 'sender' | 'timestamp' | 'name'> = {
-              id: createChatMessageId("ai-msg"),
-              text: '',
-            };
-
-            if (meetingChatResult.kind === "task_update") {
-              const newTasks = meetingChatResult.updatedTasks.map((task: any) =>
-                normalizeTask(task as ExtractedTaskSchema)
-              );
-              applyTaskUpdate(newTasks);
+          const response = await apiFetch<{ ok?: boolean; data?: unknown }>(
+            '/api/ai/chat',
+            {
+              method: 'POST',
+              body: JSON.stringify(requestBody),
             }
-
-            messagePayload.text = meetingChatResult.answerText;
-            if ("sources" in meetingChatResult && meetingChatResult.sources) {
-              messagePayload.sources = meetingChatResult.sources;
-            }
-            await addMessageToActiveSession({
-              ...messagePayload,
-              sender: 'ai',
-              timestamp: Date.now(),
-              name: aiName,
-            });
-          }
-
+          );
+          const answer: GeneralChatAnswer = normalizeGeneralChatAnswer(
+            response?.data
+          );
+          await addMessageToActiveSession({
+            id: createChatMessageId('ai-msg'),
+            text: answer.answer,
+            sender: 'ai',
+            timestamp: Date.now(),
+            name: aiName,
+            chatAnswer: answer,
+            sources: answer.sources
+              .filter((source) => source.snippet)
+              .map((source) => ({
+                timestamp: source.timestamp || 'N/A',
+                snippet: source.snippet,
+              })),
+          });
           setSelectedTaskIds(new Set());
-          if (meetingChatResult.kind === "task_update" && activeSidePanel !== 'tasks') {
-            setActiveSidePanel('tasks');
-          }
+          setIsSendingMessage(false);
           return;
         }
 
-            const orchestratorInput: OrchestratorInput = {
-              message: promptText,
-              existingTasks: sanitizedCurrentTasks.length > 0 ? sanitizedCurrentTasks : undefined,
-              selectedTasks: selectedAITasks.length > 0 ? selectedAITasks : undefined,
-              sourceMeetingTranscript: sourceTranscript,
-              isFirstMessage,
-              requestedDetailLevel,
-            };
-
-          const result: OrchestratorOutput = await extractTasksFromChat(orchestratorInput);
-        
-        if (activeSessionId) {
-            const messagePayload: Omit<ChatMessageType, 'sender' | 'timestamp' | 'name'> = { id: createChatMessageId("ai-msg"), text: '' };
-
-            if (result.qaAnswer) {
-                messagePayload.text = result.qaAnswer.answerText;
-                messagePayload.sources = result.qaAnswer.sources;
-                await addMessageToActiveSession({
-                  ...messagePayload,
-                  sender: 'ai',
-                  timestamp: Date.now(),
-                  name: aiName
-                });
-            } else {
-                if (result.tasks && shouldApplyTaskUpdate) {
-                    const newTasks = result.tasks.map((t: any) =>
-                      normalizeTask(t as ExtractedTaskSchema)
-                    );
-                    applyTaskUpdate(newTasks);
-                }
-                if (result.sessionTitle) {
-                    updateSessionTitle(activeSessionId, result.sessionTitle);
-                }
-                if (result.people && result.people.length > 0) {
-                    const filteredPeople = result.people.filter((person: { name: string; email?: string | null }) => !isPersonBlocked(person));
-                    const existingPeopleNames = new Set((currentSession?.people || []).map((person: { name: string }) => person.name));
-                    const hasSessionPeopleChanges = filteredPeople.some(
-                      (person: { name: string }) => !existingPeopleNames.has(person.name)
-                    );
-                    if (hasSessionPeopleChanges) {
-                        await updateSession(activeSessionId, { people: filteredPeople });
-                    }
-                    const definitelyNewPeople = filteredPeople.filter((person: { name: string; email?: string | null }) => {
-                        const email =
-                          typeof person.email === "string" ? person.email.trim().toLowerCase() : "";
-                        if (!email) return false;
-
-                        const exactEmailMatch = people.some(
-                          (existing: any) =>
-                            typeof existing.email === "string" &&
-                            existing.email.toLowerCase() === email
-                        );
-                        if (exactEmailMatch) return false;
-
-                        const normalizedName = (person.name || "").toLowerCase();
-                        const exactNameMatch = normalizedName
-                          ? people.some(
-                              (existing: any) =>
-                                typeof existing.name === "string" &&
-                                existing.name.toLowerCase() === normalizedName
-                            )
-                          : false;
-                        if (exactNameMatch) return false;
-
-                        const fuzzyMatch = getBestPersonMatch(
-                          { name: person.name, email: person.email },
-                          people,
-                          0.9
-                        );
-                        return !fuzzyMatch;
-                    });
-                    if (definitelyNewPeople.length > 0) {
-                        const hasSeenPopup = sessionStorage.getItem(`seen-people-popup-${activeSessionId}`);
-                        if (!hasSeenPopup) {
-                            setIsDiscoveryDialogOpen(true);
-                            sessionStorage.setItem(`seen-people-popup-${activeSessionId}`, 'true');
-                        }
-                    }
-                }
-                 if(result.chatResponseText) {
-                    messagePayload.text = result.chatResponseText;
-                    await addMessageToActiveSession({
-                      ...messagePayload,
-                      sender: 'ai',
-                      timestamp: Date.now(),
-                      name: aiName
-                    });
-                }
-            }
-        }
-        
-        setSelectedTaskIds(new Set());
-        if (result.tasks && result.tasks.length > 0 && activeSidePanel !== 'tasks') {
-          setActiveSidePanel('tasks');
-        }
+        throw new Error('An active chat session is required.');
       } catch (error) {
-        console.error("Error in AI processing orchestrator:", error);
+        console.error("Error in scoped chat processing:", error);
         const aiErrorResponse = "Sorry, I encountered an error processing your request. Please try again.";
         if(activeSessionId) {
             await addMessageToActiveSession({
@@ -1566,7 +1524,7 @@ export default function ChatPageContent() {
   
   useEffect(() => {
     if (!pendingPrompt || !activeSessionId) return;
-    void processAIResponse(pendingPrompt, true);
+    void processAIResponse(pendingPrompt);
     setPendingPrompt(null);
   }, [pendingPrompt, activeSessionId]);
 
@@ -1585,7 +1543,7 @@ export default function ChatPageContent() {
         name: userName,
       };
       await addMessageToActiveSession(userMessage);
-      await processAIResponse(question, false);
+      await processAIResponse(question);
     },
     [activeSessionId, addMessageToActiveSession, processAIResponse, userAvatar, userName]
   );
@@ -1606,7 +1564,7 @@ export default function ChatPageContent() {
         name: userName,
       };
       await addMessageToActiveSession(userMessage);
-      await processAIResponse(confirmation, false);
+      await processAIResponse(confirmation);
     },
     [activeSessionId, addMessageToActiveSession, processAIResponse, userAvatar, userName]
   );
@@ -2171,6 +2129,20 @@ export default function ChatPageContent() {
     toast({title: "Ready to Edit", description: "Type your instructions for the selected tasks and press send."});
   };
 
+  const currentChatScope: ChatScope = sourceMeeting
+    ? { type: 'meeting', meetingId: sourceMeeting.id }
+    : currentSession?.scope ?? { type: 'workspace' };
+  const currentScopeCopy =
+    currentChatScope.type === 'meeting'
+      ? 'Meeting scope'
+      : currentChatScope.type === 'client'
+        ? 'Client scope'
+        : currentChatScope.type === 'person'
+          ? 'Person scope'
+          : currentChatScope.type === 'planner'
+            ? 'Planner scope'
+            : 'Workspace scope';
+
   const headerTitle = (
       <div className="flex items-center gap-2 flex-grow min-w-0">
           {sourceMeeting ? (
@@ -2240,6 +2212,9 @@ export default function ChatPageContent() {
                   )}
              </div>
           )}
+          <Badge variant="outline" className="shrink-0 text-[10px] uppercase tracking-wide">
+            {currentScopeCopy}
+          </Badge>
       </div>
   );
 
@@ -2958,4 +2933,3 @@ export default function ChatPageContent() {
     </>
   );
 }
-

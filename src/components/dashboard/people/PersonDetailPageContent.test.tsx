@@ -17,6 +17,7 @@ import PersonDetailPageContent from "@/components/dashboard/people/PersonDetailP
 import { apiFetch } from "@/lib/api";
 import { getPersonDetails, onTasksForPersonSnapshot } from "@/lib/data";
 import { useMeetingHistory } from "@/contexts/MeetingHistoryContext";
+import { useChatHistory } from "@/contexts/ChatHistoryContext";
 
 // jsdom resolves lucide-react to its ESM build, which ts-jest does not
 // transform; icons are irrelevant to these tests.
@@ -99,6 +100,31 @@ jest.mock("@/contexts/MeetingHistoryContext", () => ({
   useMeetingHistory: jest.fn(),
 }));
 
+jest.mock("@/contexts/ChatHistoryContext", () => ({
+  useChatHistory: jest.fn(),
+}));
+
+jest.mock("@/components/dashboard/chat/GeneralChatPanel", () => ({
+  __esModule: true,
+  default: (props: any) => (
+    <div
+      data-testid="person-chat"
+      data-scope={JSON.stringify(props.scope)}
+      data-scope-label={props.scopeLabel}
+      data-compact={String(props.compact)}
+      data-selected-task-ids={JSON.stringify(props.selectedTaskIds)}
+    />
+  ),
+  findSessionForScope: (sessions: any[], scope: any) =>
+    sessions.find(
+      (session) =>
+        session.scope?.type === scope.type &&
+        session.scope?.personId === scope.personId
+    ),
+  storedMessagesToPanelMessages: jest.fn(() => []),
+  panelMessagesToStoredMessages: jest.fn(() => []),
+}));
+
 jest.mock("@/hooks/use-toast", () => ({
   useToast: () => ({ toast: jest.fn() }),
 }));
@@ -144,6 +170,9 @@ const mockedOnTasksSnapshot = onTasksForPersonSnapshot as jest.MockedFunction<
 const mockedUseMeetingHistory = useMeetingHistory as jest.MockedFunction<
   typeof useMeetingHistory
 >;
+const mockedUseChatHistory = useChatHistory as jest.MockedFunction<
+  typeof useChatHistory
+>;
 
 const person = {
   id: "p1",
@@ -188,7 +217,7 @@ const renderPage = async () => {
   document.body.appendChild(container);
   const root: Root = createRoot(container);
   await act(async () => {
-    root.render(<PersonDetailPageContent personId="p1" />);
+    root.render(<PersonDetailPageContent personId="route-alias" />);
   });
   return {
     container,
@@ -215,8 +244,13 @@ describe("PersonDetailPageContent — profile sections", () => {
       return () => {};
     });
     mockedUseMeetingHistory.mockReturnValue({ meetings: [meeting] } as any);
+    mockedUseChatHistory.mockReturnValue({
+      sessions: [],
+      createNewSession: jest.fn(),
+      applySessionMessagesLocal: jest.fn(),
+    } as any);
     mockedApiFetch.mockImplementation(async (url: string) => {
-      if (url === "/api/people/p1/mentions") {
+      if (url === "/api/people/route-alias/mentions") {
         return {
           mentions: [
             {
@@ -281,6 +315,20 @@ describe("PersonDetailPageContent — profile sections", () => {
     // A client can be marked as teammate but not re-marked as client.
     expect(findButton(container, "Mark as teammate")).toBeTruthy();
     expect(findButton(container, "Mark as client")).toBeFalsy();
+
+    cleanup();
+  });
+
+  it("renders a compact panel scoped to the loaded canonical person identity", async () => {
+    const { container, cleanup } = await renderPage();
+    const panel = container.querySelector('[data-testid="person-chat"]')!;
+
+    expect(panel.getAttribute("data-scope")).toBe(
+      JSON.stringify({ type: "person", personId: "p1" })
+    );
+    expect(panel.getAttribute("data-scope-label")).toBe("Person: Jane Client");
+    expect(panel.getAttribute("data-compact")).toBe("true");
+    expect(panel.getAttribute("data-selected-task-ids")).toBe("[]");
 
     cleanup();
   });

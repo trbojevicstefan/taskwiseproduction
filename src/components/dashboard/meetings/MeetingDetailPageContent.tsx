@@ -45,12 +45,17 @@ export default function MeetingDetailPageContent({ meetingId }: { meetingId: str
       if (isNavigating) return;
       setIsNavigating(true);
       try {
+        const isScopedToMeeting = (session: (typeof sessions)[number]) =>
+          session.sourceMeetingId === meeting.id ||
+          (session.scope?.type === 'meeting' &&
+            session.scope.meetingId === meeting.id);
         const sessionFromMeeting = meeting.chatSessionId
-          ? sessions.find((session: any) => session.id === meeting.chatSessionId)
+          ? sessions.find(
+              (session: any) =>
+                session.id === meeting.chatSessionId && isScopedToMeeting(session)
+            )
           : undefined;
-        const sessionFromLookup = sessions.find(
-          (session) => session.sourceMeetingId === meeting.id
-        );
+        const sessionFromLookup = sessions.find(isScopedToMeeting);
         const existingSession = sessionFromMeeting || sessionFromLookup;
 
         if (existingSession) {
@@ -67,6 +72,7 @@ export default function MeetingDetailPageContent({ meetingId }: { meetingId: str
         const newSession = await createNewSession({
           title: `Chat about "${meeting.title}"`,
           sourceMeetingId: meeting.id,
+          scope: { type: 'meeting', meetingId: meeting.id },
           initialTasks: (meeting.extractedTasks as import('@/types/chat').ExtractedTaskSchema[] | undefined),
           initialPeople: meeting.attendees,
         });
@@ -135,4 +141,3 @@ export default function MeetingDetailPageContent({ meetingId }: { meetingId: str
     </div>
   );
 }
-

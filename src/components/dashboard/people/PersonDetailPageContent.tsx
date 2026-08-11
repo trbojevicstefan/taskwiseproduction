@@ -37,6 +37,13 @@ import { useWorkspaceBoards } from "@/hooks/use-workspace-boards";
 import { moveTaskToBoard } from "@/lib/board-actions";
 import { buildBriefContext } from "@/lib/brief-context";
 import { generateBriefsForTasks } from "@/lib/task-briefs";
+import GeneralChatPanel, {
+  findSessionForScope,
+  panelMessagesToStoredMessages,
+  storedMessagesToPanelMessages,
+  type PanelMessage,
+} from '@/components/dashboard/chat/GeneralChatPanel';
+import { useChatHistory } from '@/contexts/ChatHistoryContext';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -114,6 +121,7 @@ export default function PersonDetailPageContent({ personId }: PersonDetailPageCo
   const { isSlackConnected } = useIntegrations();
   const router = useRouter();
   const { toast } = useToast();
+  const { sessions, createNewSession, applySessionMessagesLocal } = useChatHistory();
   const [person, setPerson] = useState<PersonWithTaskCount | null>(null);
   const [editablePerson, setEditablePerson] = useState<Partial<Person>>({});
   const [tasks, setTasks] = useState<Task[]>([]);
@@ -144,6 +152,35 @@ export default function PersonDetailPageContent({ personId }: PersonDetailPageCo
   const [isReportOpen, setIsReportOpen] = useState(false);
   const [isSettingType, setIsSettingType] = useState(false);
   const [mentions, setMentions] = useState<TranscriptMention[]>([]);
+
+  const personChatScope = person
+    ? ({ type: 'person', personId: person.id } as const)
+    : null;
+  const personChatSession = personChatScope
+    ? findSessionForScope(sessions, personChatScope)
+    : undefined;
+
+  const ensurePersonChatSession = useCallback(async () => {
+    if (!person || !personChatScope) return null;
+    const existing = findSessionForScope(sessions, personChatScope);
+    if (existing) return existing.id;
+    const created = await createNewSession({
+      title: `Person chat: ${person.name}`,
+      scope: personChatScope,
+    });
+    return created?.id ?? null;
+  }, [createNewSession, person, personChatScope, sessions]);
+
+  const handlePersonChatMessages = useCallback(
+    (messages: PanelMessage[]) => {
+      if (!personChatSession) return;
+      applySessionMessagesLocal(
+        personChatSession.id,
+        panelMessagesToStoredMessages(messages)
+      );
+    },
+    [applySessionMessagesLocal, personChatSession]
+  );
 
   const mapTaskToExtracted = useCallback(
     (task: Task): ExtractedTaskSchema => ({
@@ -1110,6 +1147,43 @@ export default function PersonDetailPageContent({ personId }: PersonDetailPageCo
                   </div>
                 </motion.div>
 
+                <motion.div
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.5, delay: 0.18 }}
+                  className="mt-8"
+                >
+                  <Card>
+                    <CardHeader>
+                      <CardTitle>Ask about {person.name}</CardTitle>
+                      <CardDescription>
+                        Answers and task actions are confined to this person.
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                      <GeneralChatPanel
+                        scope={{ type: 'person', personId: person.id }}
+                        scopeLabel={`Person: ${person.name}`}
+                        heroTitle={`Ask about ${person.name}`}
+                        suggestedPrompts={[
+                          'What commitments are open?',
+                          'What did they say recently?',
+                          'Which follow-ups are overdue?',
+                        ]}
+                        compact
+                        sessionId={personChatSession?.id}
+                        initialMessages={storedMessagesToPanelMessages(
+                          personChatSession?.messages
+                        )}
+                        persistMessages
+                        selectedTaskIds={Array.from(selectedTaskIds)}
+                        onEnsureSession={ensurePersonChatSession}
+                        onMessagesChange={handlePersonChatMessages}
+                      />
+                    </CardContent>
+                  </Card>
+                </motion.div>
+
                 <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5, delay: 0.2 }} className="mt-8">
                    <Accordion type="single" collapsible defaultValue="aliases" className="w-full">
                       <AccordionItem value="aliases" className="border-none">
@@ -1614,5 +1688,4 @@ export default function PersonDetailPageContent({ personId }: PersonDetailPageCo
     </div>
   );
 }
-
 

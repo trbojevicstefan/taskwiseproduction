@@ -3,6 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import GeneralChatPanel, {
   GENERAL_CHAT_SUGGESTED_PROMPTS,
   buildChatHistoryPayload,
+  findSessionForScope,
   normalizeGeneralChatAnswer,
   panelMessagesToStoredMessages,
   resolveSourceHref,
@@ -10,6 +11,7 @@ import GeneralChatPanel, {
   type PanelMessage,
   type StoredChatMessage,
 } from "@/components/dashboard/chat/GeneralChatPanel";
+import type { ChatScope } from "@/types/general-chat";
 
 jest.mock("next/navigation", () => ({
   useRouter: jest.fn(() => ({ push: jest.fn() })),
@@ -31,7 +33,9 @@ jest.mock("@/lib/api", () => ({
 
 describe("GeneralChatPanel", () => {
   it("renders the hero state with the five suggested prompts", () => {
-    const markup = renderToStaticMarkup(<GeneralChatPanel />);
+    const markup = renderToStaticMarkup(
+      <GeneralChatPanel scope={{ type: "workspace" }} />
+    );
 
     expect(markup).toContain("Ask anything about your meetings.");
     expect(GENERAL_CHAT_SUGGESTED_PROMPTS).toHaveLength(5);
@@ -41,6 +45,21 @@ describe("GeneralChatPanel", () => {
       );
     }
     expect(markup).toContain("Which tasks are overdue?");
+    expect(markup).toContain("Workspace scope");
+  });
+
+  it("renders explicit confinement copy for entity and planner scopes", () => {
+    expect(
+      renderToStaticMarkup(
+        <GeneralChatPanel
+          scope={{ type: "client", clientId: "client-1" }}
+          scopeLabel="Client: Acme"
+        />
+      )
+    ).toContain("Client: Acme");
+    expect(
+      renderToStaticMarkup(<GeneralChatPanel scope={{ type: "planner" }} />)
+    ).toContain("Planner scope");
   });
 });
 
@@ -325,5 +344,33 @@ describe("buildChatHistoryPayload", () => {
         ],
       },
     ]);
+  });
+});
+
+describe("findSessionForScope", () => {
+  const sessions: Array<{ id: string; scope: ChatScope }> = [
+    { id: "workspace", scope: { type: "workspace" } },
+    { id: "planner", scope: { type: "planner" } },
+    {
+      id: "client",
+      scope: { type: "client", clientId: "client-1" },
+    },
+    {
+      id: "person",
+      scope: { type: "person", personId: "person-1" },
+    },
+  ];
+
+  it("matches only the exact persisted entity or planner scope", () => {
+    expect(findSessionForScope(sessions, { type: "planner" })?.id).toBe(
+      "planner"
+    );
+    expect(
+      findSessionForScope(sessions, { type: "client", clientId: "client-1" })
+        ?.id
+    ).toBe("client");
+    expect(
+      findSessionForScope(sessions, { type: "client", clientId: "client-2" })
+    ).toBeUndefined();
   });
 });

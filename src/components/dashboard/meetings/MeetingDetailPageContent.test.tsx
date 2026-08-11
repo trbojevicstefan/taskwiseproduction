@@ -153,11 +153,50 @@ describe("MeetingDetailPageContent — ask about this meeting", () => {
     await clickAsk(container);
 
     expect(createNewSession).toHaveBeenCalledWith(
-      expect.objectContaining({ sourceMeetingId: "m1" })
+      expect.objectContaining({
+        sourceMeetingId: "m1",
+        scope: { type: "meeting", meetingId: "m1" },
+      })
     );
     expect(updateMeeting).toHaveBeenCalledWith("m1", { chatSessionId: "s-new" });
     expect(setActiveSessionId).toHaveBeenCalledWith("s-new");
     expect(push).toHaveBeenCalledWith("/chat");
+    cleanup();
+  });
+
+  it("does not reuse a linked session whose immutable meeting scope belongs to another meeting", async () => {
+    createNewSession.mockResolvedValue({ id: "s-correct" });
+    mockedUseMeetingHistory.mockReturnValue({
+      meetings: [{ ...meeting, chatSessionId: "s-wrong" }],
+      updateMeeting,
+      loadMeetingById: jest.fn(),
+      isLoadingMeetingHistory: false,
+    } as any);
+    mockedUseChatHistory.mockReturnValue({
+      sessions: [
+        {
+          id: "s-wrong",
+          sourceMeetingId: "m2",
+          scope: { type: "meeting", meetingId: "m2" },
+        },
+      ],
+      createNewSession,
+      setActiveSessionId,
+    } as any);
+
+    const { container, cleanup } = await renderPage(
+      <MeetingDetailPageContent meetingId="m1" />
+    );
+    await clickAsk(container);
+
+    expect(createNewSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sourceMeetingId: "m1",
+        scope: { type: "meeting", meetingId: "m1" },
+      })
+    );
+    expect(setActiveSessionId).toHaveBeenCalledWith("s-correct");
+    expect(setActiveSessionId).not.toHaveBeenCalledWith("s-wrong");
     cleanup();
   });
 });

@@ -8,6 +8,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from "@/hooks/use-toast";
 import { apiFetch } from '@/lib/api';
 import { normalizeTask } from '@/lib/data';
+import type { ChatScope } from '@/types/general-chat';
 
 
 interface ChatHistoryContextType {
@@ -19,6 +20,7 @@ interface ChatHistoryContextType {
     initialMessage?: Message;
     title?: string;
     sourceMeetingId?: string;
+    scope?: ChatScope;
     initialTasks?: ExtractedTaskSchema[];
     initialPeople?: any[];
     allTaskLevels?: any;
@@ -111,11 +113,12 @@ export const ChatHistoryProvider = ({ children }: { children: ReactNode }) => {
     initialMessage?: Message;
     title?: string;
     sourceMeetingId?: string;
+    scope?: ChatScope;
     initialTasks?: ExtractedTaskSchema[];
     initialPeople?: any[];
     allTaskLevels?: any;
   } = {}): Promise<ChatSession | undefined> => {
-    const { initialMessage, title, sourceMeetingId, initialTasks, initialPeople, allTaskLevels } = options;
+    const { initialMessage, title, sourceMeetingId, scope, initialTasks, initialPeople, allTaskLevels } = options;
 
     if (!user?.uid) {
       toast({ title: "Error", description: "You must be logged in to create a session.", variant: "destructive" });
@@ -160,6 +163,10 @@ export const ChatHistoryProvider = ({ children }: { children: ReactNode }) => {
       people: initialPeople || [],
       folderId: null,
       sourceMeetingId: sourceMeetingId || null,
+      scope:
+        sourceMeetingId
+          ? { type: 'meeting', meetingId: sourceMeetingId }
+          : scope ?? { type: 'workspace' },
       allTaskLevels: sanitizedTaskLevels,
     };
     try {
@@ -357,5 +364,4 @@ export const useChatHistory = () => {
   }
   return context;
 };
-
 

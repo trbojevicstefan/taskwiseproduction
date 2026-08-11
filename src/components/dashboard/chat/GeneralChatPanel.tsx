@@ -15,6 +15,7 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Logo } from '@/components/ui/logo';
@@ -26,7 +27,8 @@ import {
 } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 import { apiFetch } from '@/lib/api';
-import type { Message as StoredMessage } from '@/types/chat';
+import type { ChatSession, Message as StoredMessage } from '@/types/chat';
+import type { ChatScope } from '@/types/general-chat';
 
 // ---------------------------------------------------------------------------
 // Types mirroring the POST /api/ai/chat contract
@@ -93,6 +95,26 @@ export type PanelMessage =
 export type StoredChatMessage = StoredMessage & {
   chatAnswer?: GeneralChatAnswer;
 };
+
+export const findSessionForScope = <T extends Pick<ChatSession, 'scope'>>(
+  sessions: T[],
+  scope: ChatScope
+): T | undefined =>
+  sessions.find((session) => {
+    const persisted = session.scope;
+    if (!persisted || persisted.type !== scope.type) return false;
+    switch (scope.type) {
+      case 'meeting':
+        return persisted.type === 'meeting' && persisted.meetingId === scope.meetingId;
+      case 'client':
+        return persisted.type === 'client' && persisted.clientId === scope.clientId;
+      case 'person':
+        return persisted.type === 'person' && persisted.personId === scope.personId;
+      case 'workspace':
+      case 'planner':
+        return true;
+    }
+  });
 
 // ---------------------------------------------------------------------------
 // Pure helpers (exported for tests)
@@ -640,6 +662,10 @@ export const buildChatHistoryPayload = (
     .slice(-HISTORY_MAX_ENTRIES);
 
 export interface GeneralChatPanelProps {
+  /** Server-validated confinement applied to every question. */
+  scope: ChatScope;
+  /** Human-readable scope copy, normally including the canonical entity name. */
+  scopeLabel?: string;
   className?: string;
   /** Override the hero heading (defaults to the Chat page copy). */
   heroTitle?: string;
@@ -649,10 +675,8 @@ export interface GeneralChatPanelProps {
   compact?: boolean;
   /** Chat session backing this conversation (persistence + reload). */
   sessionId?: string;
-  /** Meeting the conversation is scoped to (meeting mode). */
-  meetingId?: string;
-  /** Context mode; defaults to 'meeting' when meetingId is set. */
-  mode?: ChatContextMode;
+  /** Canonical task ids/source ids selected for deterministic task edits. */
+  selectedTaskIds?: string[];
   /** Messages restored from a persisted session (consumed on session switch). */
   initialMessages?: PanelMessage[];
   /** Persist messages to PATCH /api/chat-sessions/[sessionId]. */
@@ -667,13 +691,14 @@ export interface GeneralChatPanelProps {
 }
 
 export default function GeneralChatPanel({
+  scope,
+  scopeLabel,
   className,
   heroTitle,
   suggestedPrompts,
   compact = false,
   sessionId,
-  meetingId,
-  mode,
+  selectedTaskIds,
   initialMessages,
   persistMessages = false,
   onMessagesChange,
@@ -688,7 +713,16 @@ export default function GeneralChatPanel({
   const bottomRef = useRef<HTMLDivElement>(null);
 
   const effectiveMode: ChatContextMode =
-    mode ?? (meetingId ? 'meeting' : 'workspace');
+    scope.type === 'meeting' ? 'meeting' : 'workspace';
+  const effectiveScopeLabel =
+    scopeLabel ??
+    ({
+      workspace: 'Workspace scope',
+      meeting: 'Meeting scope',
+      client: 'Client scope',
+      person: 'Person scope',
+      planner: 'Planner scope',
+    } as const)[scope.type];
 
   const messagesRef = useRef<PanelMessage[]>(messages);
   const initialMessagesRef = useRef<PanelMessage[] | undefined>(initialMessages);
@@ -768,9 +802,11 @@ export default function GeneralChatPanel({
       setIsLoading(true);
       try {
         const targetSessionId = sessionId ?? ensuredSessionIdRef.current;
-        const body: Record<string, unknown> = { question };
+        const body: Record<string, unknown> = { question, scope };
         if (targetSessionId) body.sessionId = targetSessionId;
-        if (effectiveMode === 'meeting' && meetingId) body.meetingId = meetingId;
+        if (selectedTaskIds && selectedTaskIds.length > 0) {
+          body.selectedTaskIds = selectedTaskIds;
+        }
         if (history.length > 0) body.history = history;
         const response = await apiFetch<{ ok?: boolean; data?: unknown }>(
           '/api/ai/chat',
@@ -797,7 +833,7 @@ export default function GeneralChatPanel({
         setIsLoading(false);
       }
     },
-    [commitMessages, effectiveMode, meetingId, sessionId]
+    [commitMessages, scope, selectedTaskIds, sessionId]
   );
 
   const handleSend = useCallback(async () => {
@@ -858,6 +894,12 @@ export default function GeneralChatPanel({
   return (
     <TooltipProvider delayDuration={150}>
       <div className={cn('flex flex-col', compact ? 'gap-4' : 'gap-5', className)}>
+        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+          <Badge variant="outline" className="font-medium">
+            {effectiveScopeLabel}
+          </Badge>
+          <span>Answers and task actions stay within this scope.</span>
+        </div>
         {messages.length === 0 && (
           <HeroState
             onPickPrompt={handlePickPrompt}
