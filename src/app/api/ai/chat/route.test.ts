@@ -9,6 +9,7 @@ import { loadDurableChatMemory } from "@/lib/chat-memory";
 import { assertChatScopeAccess } from "@/lib/chat-scope";
 import { executeRegisteredMcpTool } from "@/lib/mcp-registry";
 import { ApiRouteError } from "@/lib/api-route";
+import { McpToolCallError } from "@/lib/mcp-read-tools";
 import {
   answerMeetingQuestion,
   answerWorkspaceQuestion,
@@ -1201,6 +1202,32 @@ describe("POST /api/ai/chat", () => {
     expect(mockedAnswerWorkspaceQuestion).not.toHaveBeenCalled();
   });
 
+  it("maps a typed task-tool rejection to a safe chat clarification", async () => {
+    tasksFindToArray.mockResolvedValue([
+      {
+        _id: "task-1",
+        title: "Follow up with Casey",
+        status: "todo",
+        workspaceId: "workspace-1",
+        userId: "user-1",
+      },
+    ]);
+    mockedExecuteRegisteredMcpTool.mockRejectedValue(
+      new McpToolCallError("invalid_arguments", "Task not found.")
+    );
+
+    const response = await POST(
+      buildRequest({ question: "Set task Follow up with Casey to done" })
+    );
+
+    expect(response.status).toBe(200);
+    const payload = await response.json();
+    expect(payload.data.confidence).toBe("low");
+    expect(payload.data.answer).toMatch(/couldn't confirm|didn't change/i);
+    expect(mockedRunScopedChatAgent).not.toHaveBeenCalled();
+    expect(mockedSearchWorkspaceContext).not.toHaveBeenCalled();
+  });
+
   it("refuses ambiguous chat task edits instead of mutating multiple matches", async () => {
     tasksFindToArray.mockResolvedValue([
       { _id: "task-1", title: "Follow up with Casey", status: "todo" },
@@ -1221,14 +1248,16 @@ describe("POST /api/ai/chat", () => {
   });
 
   it("resolves a selected source task id and edits the canonical task before the agent", async () => {
-    tasksFindOne.mockResolvedValue({
-      _id: "task-canonical",
-      sourceTaskId: "task-source",
-      title: "Follow up with Casey",
-      status: "todo",
-      workspaceId: "workspace-1",
-      userId: "user-1",
-    });
+    tasksFindToArray.mockResolvedValue([
+      {
+        _id: "task-canonical",
+        sourceTaskId: "task-source",
+        title: "Follow up with Casey",
+        status: "todo",
+        workspaceId: "workspace-1",
+        userId: "user-1",
+      },
+    ]);
     mockedExecuteRegisteredMcpTool.mockResolvedValue({
       toolName: "update_task_status",
       summary: "Updated status to done.",

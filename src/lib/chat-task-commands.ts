@@ -1,6 +1,7 @@
 import type { Db } from "mongodb";
 import "@/lib/mcp-register-all";
 import { executeRegisteredMcpTool } from "@/lib/mcp-registry";
+import { McpToolCallError } from "@/lib/mcp-read-tools";
 import type { GeneralChatAnswer } from "@/types/general-chat";
 
 export type ChatTaskCommand =
@@ -40,8 +41,6 @@ export type ChatTaskCommandOptions = {
   selectedTaskIds?: string[];
   meetingId?: string | null;
 };
-
-const MAX_TASK_MATCHES = 25;
 
 const singleLine = (value: string): string => value.replace(/\s+/g, " ").trim();
 
@@ -172,25 +171,33 @@ const hasSelectedTaskReference = (value: string): boolean =>
 
 const parseUnsafeTaskCommand = (question: string): ChatTaskCommand | null => {
   if (!/\b(?:tasks?|todos?)\b/i.test(question)) return null;
-  const isDueDateRemoval =
-    /\bremove\b/i.test(question) && /\bdue\s+date\b/i.test(question);
-  const hasDestructiveTaskEdit =
-    /\b(?:delete|remove|archive|purge)\b(?=[^.!?]{0,300}\b(?:tasks?|todos?)\b)/i.test(
+
+  const isPureDueDateRemoval =
+    !/\b(?:and|then)\b/i.test(question) &&
+    (/(?:^\s*(?:please\s+)?(?:clear|remove)\s+(?:the\s+)?(?:selected\s+)?(?:task|todo)(?:'s)?\s+due\s+date\s*[.!]?\s*$)/i.test(
       question
-    );
-  if (
-    hasDestructiveTaskEdit &&
-    !isDueDateRemoval
-  ) {
+    ) ||
+      /(?:^\s*(?:please\s+)?(?:clear|remove)\s+(?:the\s+)?(?:task|todo)\s+.+?\s+due\s+date\s*[.!]?\s*$)/i.test(
+        question
+      ) ||
+      /(?:^\s*(?:please\s+)?(?:clear|remove)\s+(?:the\s+)?due\s+date\s+(?:for|on|from)\s+(?:the\s+)?(?:selected\s+)?(?:task|todo)(?:\s+.+?)?\s*[.!]?\s*$)/i.test(
+        question
+      ));
+  const hasDestructiveTaskEdit =
+    /\b(?:delete|archive|purge)\b/i.test(question) ||
+    (/\bremove\b/i.test(question) && !isPureDueDateRemoval);
+  if (hasDestructiveTaskEdit) {
     return { kind: "clarify", reason: "destructive" };
   }
+
   const hasMutationIntent =
     /\b(?:bulk|mark|set|update|change|edit|rename|retitle)\b/i.test(question);
   const hasBulkTarget =
     /\bbulk\b|\b(?:all|every|both|multiple)\s+(?:tasks?|todos?)\b|\b(?:these|those|selected)\s+(?:tasks|todos)\b/i.test(
       question
     );
-  if (hasMutationIntent && hasBulkTarget) {
+  const taskTargetCount = question.match(/\b(?:tasks?|todos?)\b/gi)?.length ?? 0;
+  if (hasMutationIntent && (hasBulkTarget || taskTargetCount > 1)) {
     return { kind: "clarify", reason: "bulk" };
   }
   return null;
@@ -425,49 +432,52 @@ const findTaskMatch = async (
   const normalizedNeedle = normalizeForMatch(matchText);
   if (!normalizedNeedle) return { status: "none" };
 
-  const tasks: any[] = await db
-    .collection("tasks")
-    .find({
-      ...buildScopeFilter(scope),
-      taskState: { $ne: "archived" },
-    })
-    .sort({ lastUpdated: -1, _id: -1 })
-    .limit(MAX_TASK_MATCHES)
-    .toArray();
+  const titlePattern = normalizedNeedle.split(" ").join("[^a-z0-9]+");
+  const queryMatches = (pattern: string): Promise<any[]> =>
+    db
+      .collection("tasks")
+      .find({
+        ...buildScopeFilter(scope),
+        taskState: { $ne: "archived" },
+        title: { $regex: pattern, $options: "i" },
+      })
+      .sort({ lastUpdated: -1, _id: -1 })
+      .limit(2)
+      .toArray();
 
-  const candidates = tasks;
-  const exact = candidates.filter(
-    (task) => normalizeForMatch(String(task?.title ?? "")) === normalizedNeedle
-  );
+  const exact = await queryMatches(`^${titlePattern}$`);
   if (exact.length === 1) return { status: "matched", task: exact[0] };
   if (exact.length > 1) return { status: "ambiguous", matches: exact };
 
-  const contains = candidates.filter((task) =>
-    normalizeForMatch(String(task?.title ?? "")).includes(normalizedNeedle)
-  );
+  const contains = await queryMatches(titlePattern);
   if (contains.length === 1) return { status: "matched", task: contains[0] };
   if (contains.length > 1) return { status: "ambiguous", matches: contains };
 
   return { status: "none" };
 };
 
-const findSelectedTask = async (
+const findSelectedTasks = async (
   db: Db,
   scope: ChatTaskScope,
   selectedTaskId: string
-): Promise<any | null> =>
-  db.collection("tasks").findOne({
-    $and: [
-      buildScopeFilter(scope),
-      { taskState: { $ne: "archived" } },
-      {
-        $or: [
-          { _id: selectedTaskId },
-          { sourceTaskId: selectedTaskId },
-        ],
-      },
-    ],
-  } as any);
+): Promise<any[]> =>
+  db
+    .collection("tasks")
+    .find({
+      $and: [
+        buildScopeFilter(scope),
+        { taskState: { $ne: "archived" } },
+        {
+          $or: [
+            { _id: selectedTaskId },
+            { sourceTaskId: selectedTaskId },
+          ],
+        },
+      ],
+    } as any)
+    .sort({ lastUpdated: -1, _id: -1 })
+    .limit(2)
+    .toArray();
 
 const clarificationAnswer = (answer: string): GeneralChatAnswer => ({
   answer,
@@ -480,7 +490,12 @@ const taskFromToolResult = (result: {
   data: Record<string, unknown>;
 }): any | null => {
   const task = result.data?.task;
-  return task && typeof task === "object" ? task : null;
+  if (!task || typeof task !== "object") return null;
+  const taskRecord = task as Record<string, unknown>;
+  const taskId = String(taskRecord.id ?? taskRecord._id ?? "").trim();
+  const title =
+    typeof taskRecord.title === "string" ? taskRecord.title.trim() : "";
+  return taskId && title ? task : null;
 };
 
 export const runChatTaskCommand = async (
@@ -555,9 +570,12 @@ export const runChatTaskCommand = async (
 
   const match = selectedTaskIds.length
     ? await (async () => {
-        const task = await findSelectedTask(db, scope, selectedTaskIds[0]);
-        return task
-          ? ({ status: "matched", task } as const)
+        const tasks = await findSelectedTasks(db, scope, selectedTaskIds[0]);
+        if (tasks.length > 1) {
+          return { status: "ambiguous", matches: tasks } as const;
+        }
+        return tasks.length === 1
+          ? ({ status: "matched", task: tasks[0] } as const)
           : ({ status: "selected_out_of_scope" } as const);
       })()
     : await findTaskMatch(db, scope, command.matchText);
@@ -619,12 +637,27 @@ export const runChatTaskCommand = async (
     );
   }
 
-  const result = await executeRegisteredMcpTool(
-    { db, workspaceId: scope.workspaceId },
-    toolCall.name,
-    toolCall.args
-  );
-  const updatedTask = taskFromToolResult(result) ?? match.task;
+  let result;
+  try {
+    result = await executeRegisteredMcpTool(
+      { db, workspaceId: scope.workspaceId },
+      toolCall.name,
+      toolCall.args
+    );
+  } catch (error) {
+    if (error instanceof McpToolCallError) {
+      return clarificationAnswer(
+        "The task tool couldn't confirm the authorized task change, so I didn't report it as completed."
+      );
+    }
+    throw error;
+  }
+  const updatedTask = taskFromToolResult(result);
+  if (!updatedTask) {
+    return clarificationAnswer(
+      "The task tool did not return a valid updated task, so I couldn't confirm the change."
+    );
+  }
   return {
     answer: `Updated task "${String(
       updatedTask.title || match.task.title || "Untitled task"

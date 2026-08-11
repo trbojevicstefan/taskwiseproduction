@@ -2,6 +2,10 @@ import { z } from "zod";
 import type { Db } from "mongodb";
 import { publishDomainEvent } from "@/lib/domain-events";
 import { normalizePersonNameKey } from "@/lib/transcript-utils";
+import {
+  buildWorkspaceFallbackScope,
+  getWorkspaceMemberUserIds,
+} from "@/lib/mcp-tool-helpers";
 import { McpToolCallError } from "@/lib/mcp-read-tools";
 
 type JsonSchema = Record<string, unknown>;
@@ -159,10 +163,16 @@ const parseArgs = <TSchema extends z.ZodTypeAny>(
 };
 
 const findTaskInWorkspace = async (db: Db, workspaceId: string, taskId: string) => {
+  const memberUserIds = await getWorkspaceMemberUserIds(db, workspaceId);
+  const scope = buildWorkspaceFallbackScope(workspaceId, memberUserIds);
   return db.collection("tasks").findOne({
-    workspaceId,
-    taskState: { $ne: "archived" },
-    $or: [{ _id: taskId }, { id: taskId }, { sourceTaskId: taskId }],
+    $and: [
+      scope,
+      { taskState: { $ne: "archived" } },
+      {
+        $or: [{ _id: taskId }, { id: taskId }, { sourceTaskId: taskId }],
+      },
+    ],
   } as any);
 };
 

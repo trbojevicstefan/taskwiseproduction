@@ -124,13 +124,20 @@ const scheduleSlackReminderArgsSchema = z.object({
 const toDueIso = (value: unknown): string | null =>
   toDateOrNull(value)?.toISOString() ?? null;
 
-/** Same lookup the legacy write tools use (mcp-write-tools precedent). */
-const findTaskInWorkspace = async (db: Db, workspaceId: string, taskId: string) =>
-  db.collection("tasks").findOne({
-    workspaceId,
-    taskState: { $ne: "archived" },
-    $or: [{ _id: taskId }, { id: taskId }, { sourceTaskId: taskId }],
+/** Same active-workspace plus member-owned legacy lookup as the write boundary. */
+const findTaskInWorkspace = async (db: Db, workspaceId: string, taskId: string) => {
+  const memberUserIds = await getWorkspaceMemberUserIds(db, workspaceId);
+  const scope = buildWorkspaceFallbackScope(workspaceId, memberUserIds);
+  return db.collection("tasks").findOne({
+    $and: [
+      scope,
+      { taskState: { $ne: "archived" } },
+      {
+        $or: [{ _id: taskId }, { id: taskId }, { sourceTaskId: taskId }],
+      },
+    ],
   } as any);
+};
 
 const isDuplicateKeyError = (error: unknown) =>
   Boolean(

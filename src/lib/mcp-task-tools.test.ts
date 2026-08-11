@@ -237,6 +237,66 @@ describe("mcp-task-tools", () => {
     });
   });
 
+  it("set_task_due_date reads a workspace-less member task through the authorized fallback", async () => {
+    const findOne = jest.fn(async (filter: any) =>
+      Array.isArray(filter?.$and)
+        ? {
+            _id: "legacy-task",
+            userId: "user-1",
+            dueAt: "2026-06-10T00:00:00.000Z",
+          }
+        : null
+    );
+    const db = {
+      collection: jest.fn((name: string) => {
+        if (name === "tasks") return { findOne };
+        throw new Error(`Unexpected collection: ${name}`);
+      }),
+    } as any;
+    mockedExecuteMcpWriteTool.mockResolvedValueOnce({
+      toolName: "action_items.update_due_date",
+      summary: "Due date updated.",
+      data: {
+        task: {
+          id: "legacy-task",
+          dueAt: "2026-06-20T00:00:00.000Z",
+        },
+      },
+    } as any);
+
+    await run(db, "set_task_due_date", {
+      taskId: "legacy-task",
+      dueAt: "2026-06-20T00:00:00.000Z",
+    });
+
+    expect(findOne).toHaveBeenCalledWith({
+      $and: [
+        {
+          $or: [
+            { workspaceId: "workspace-1" },
+            {
+              workspaceId: { $exists: false },
+              userId: { $in: ["user-1"] },
+            },
+          ],
+        },
+        { taskState: { $ne: "archived" } },
+        {
+          $or: [
+            { _id: "legacy-task" },
+            { id: "legacy-task" },
+            { sourceTaskId: "legacy-task" },
+          ],
+        },
+      ],
+    });
+    expect(mockedCancelReminders).toHaveBeenCalledWith(
+      db,
+      "legacy-task",
+      "due_date_changed"
+    );
+  });
+
   it("set_task_due_date skips reminder rescheduling when dueAt is unchanged", async () => {
     const findOne = jest.fn(async () => ({
       _id: "task-1",

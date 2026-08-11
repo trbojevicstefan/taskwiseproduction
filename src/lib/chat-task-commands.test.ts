@@ -4,6 +4,7 @@ import {
   type ChatTaskCommand,
 } from "@/lib/chat-task-commands";
 import { executeRegisteredMcpTool } from "@/lib/mcp-registry";
+import { McpToolCallError } from "@/lib/mcp-read-tools";
 
 jest.mock("@/lib/mcp-register-all", () => ({}));
 jest.mock("@/lib/mcp-registry", () => ({
@@ -22,16 +23,31 @@ const scope = {
 };
 
 const createCursor = (rows: any[]) => {
+  let workingRows = [...rows];
   const cursor: any = {};
   cursor.sort = jest.fn(() => cursor);
-  cursor.limit = jest.fn(() => cursor);
-  cursor.toArray = jest.fn(async () => rows);
+  cursor.limit = jest.fn((limit: number) => {
+    workingRows = workingRows.slice(0, limit);
+    return cursor;
+  });
+  cursor.toArray = jest.fn(async () => workingRows);
   return cursor;
 };
 
 const buildDb = (options?: { findOne?: any; rows?: any[] }) => {
   const findOne = jest.fn(async () => options?.findOne ?? null);
-  const find = jest.fn(() => createCursor(options?.rows ?? []));
+  const find = jest.fn((filter: any = {}) => {
+    const titleRegex = filter?.title?.$regex;
+    const rows =
+      typeof titleRegex === "string"
+        ? (options?.rows ?? []).filter((row) =>
+            new RegExp(titleRegex, filter.title.$options).test(
+              String(row?.title ?? "")
+            )
+          )
+        : (options?.rows ?? []);
+    return createCursor(rows);
+  });
   const insertOne = jest.fn();
   const updateOne = jest.fn();
   return {
@@ -120,6 +136,35 @@ describe("chat-task-commands", () => {
     );
   });
 
+  it("preserves create titles containing delete language", async () => {
+    const { db } = buildDb();
+    mockedExecuteRegisteredMcpTool.mockResolvedValue({
+      toolName: "create_task",
+      summary: "Created task.",
+      data: {
+        task: {
+          id: "task-new",
+          title: "Delete stale local notes after review",
+          status: "todo",
+        },
+      },
+    });
+
+    await runChatTaskCommand(
+      db,
+      scope,
+      command("Create a task to delete stale local notes after review")
+    );
+
+    expect(mockedExecuteRegisteredMcpTool).toHaveBeenCalledWith(
+      { db, workspaceId: "workspace-1" },
+      "create_task",
+      expect.objectContaining({
+        title: "Delete stale local notes after review",
+      })
+    );
+  });
+
   it("creates meeting-scoped tasks through create_task_from_meeting", async () => {
     const { db } = buildDb();
     mockedExecuteRegisteredMcpTool.mockResolvedValue({
@@ -190,16 +235,15 @@ describe("chat-task-commands", () => {
   ])(
     "routes a selected task $label edit through its registered typed tool",
     async ({ question, toolName, expectedArgs }) => {
-      const { db, findOne, updateOne } = buildDb({
-        findOne: {
+      const selectedTask = {
           _id: "canonical-1",
           sourceTaskId: "source-1",
           workspaceId: "workspace-1",
           userId: "user-1",
           title: "Follow up",
           status: "todo",
-        },
-      });
+      };
+      const { db, find, updateOne } = buildDb({ rows: [selectedTask] });
       mockedExecuteRegisteredMcpTool.mockResolvedValue({
         toolName,
         summary: "Updated task.",
@@ -219,7 +263,7 @@ describe("chat-task-commands", () => {
         selectedTaskIds: ["source-1"],
       });
 
-      expect(findOne).toHaveBeenCalledWith({
+      expect(find).toHaveBeenCalledWith({
         $and: [
           expect.any(Object),
           { taskState: { $ne: "archived" } },
@@ -277,7 +321,7 @@ describe("chat-task-commands", () => {
     );
   });
 
-  it("does not mistake archive in an existing task title for an archive command", async () => {
+  it("blocks destructive language anywhere in a non-create command", async () => {
     const { db } = buildDb({
       rows: [
         {
@@ -287,29 +331,15 @@ describe("chat-task-commands", () => {
         },
       ],
     });
-    mockedExecuteRegisteredMcpTool.mockResolvedValue({
-      toolName: "action_items.update_title",
-      summary: "Title updated.",
-      data: {
-        task: {
-          id: "canonical-1",
-          title: "File old meeting notes",
-          status: "todo",
-        },
-      },
-    });
-
-    await runChatTaskCommand(
-      db,
-      scope,
-      command("Rename task Archive old meeting notes to File old meeting notes")
+    const planned = command(
+      "Rename task Archive old meeting notes to File old meeting notes"
     );
+    expect(planned.kind).toBe("clarify");
 
-    expect(mockedExecuteRegisteredMcpTool).toHaveBeenCalledWith(
-      { db, workspaceId: "workspace-1" },
-      "action_items.update_title",
-      { taskId: "canonical-1", title: "File old meeting notes" }
-    );
+    const result = await runChatTaskCommand(db, scope, planned);
+
+    expect(result.confidence).toBe("low");
+    expect(mockedExecuteRegisteredMcpTool).not.toHaveBeenCalled();
   });
 
   it("clarifies multi-selection without reading or writing", async () => {
@@ -331,7 +361,7 @@ describe("chat-task-commands", () => {
   });
 
   it("clarifies an out-of-scope selected id without falling back to title", async () => {
-    const { db, find, updateOne } = buildDb({ findOne: null });
+    const { db, find, updateOne } = buildDb({ rows: [] });
 
     const result = await runChatTaskCommand(
       db,
@@ -341,7 +371,37 @@ describe("chat-task-commands", () => {
     );
 
     expect(result.answer).toMatch(/selected task.*workspace/i);
-    expect(find).not.toHaveBeenCalled();
+    expect(find).toHaveBeenCalledTimes(1);
+    expect(updateOne).not.toHaveBeenCalled();
+    expect(mockedExecuteRegisteredMcpTool).not.toHaveBeenCalled();
+  });
+
+  it("clarifies when a selected id collides with another task source id", async () => {
+    const { db, updateOne } = buildDb({
+      findOne: {
+        _id: "shared-id",
+        title: "First task",
+        workspaceId: "workspace-1",
+      },
+      rows: [
+        { _id: "shared-id", title: "First task", workspaceId: "workspace-1" },
+        {
+          _id: "canonical-2",
+          sourceTaskId: "shared-id",
+          title: "Second task",
+          workspaceId: "workspace-1",
+        },
+      ],
+    });
+
+    const result = await runChatTaskCommand(
+      db,
+      scope,
+      command("Mark the selected task done"),
+      { selectedTaskIds: ["shared-id"] }
+    );
+
+    expect(result.answer).toMatch(/multiple matching tasks|selected task.*ambiguous/i);
     expect(updateOne).not.toHaveBeenCalled();
     expect(mockedExecuteRegisteredMcpTool).not.toHaveBeenCalled();
   });
@@ -364,6 +424,97 @@ describe("chat-task-commands", () => {
     expect(insertOne).not.toHaveBeenCalled();
     expect(updateOne).not.toHaveBeenCalled();
     expect(mockedExecuteRegisteredMcpTool).not.toHaveBeenCalled();
+  });
+
+  it("finds ambiguity beyond the former 25-task scan without an unbounded read", async () => {
+    const rows = [
+      { _id: "task-1", title: "Follow up with Casey", status: "todo" },
+      ...Array.from({ length: 24 }, (_, index) => ({
+        _id: `distractor-${index}`,
+        title: `Unrelated task ${index}`,
+        status: "todo",
+      })),
+      { _id: "task-older", title: "Follow up with Casey", status: "todo" },
+    ];
+    const { db, find, updateOne } = buildDb({ rows });
+    mockedExecuteRegisteredMcpTool.mockResolvedValue({
+      toolName: "update_task_status",
+      summary: "Updated status.",
+      data: { task: { id: "task-1", title: "Follow up with Casey" } },
+    });
+
+    const result = await runChatTaskCommand(
+      db,
+      scope,
+      command("Mark task Follow up with Casey done")
+    );
+
+    expect(result.answer).toMatch(/multiple matching tasks/i);
+    expect(find).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: expect.objectContaining({ $regex: expect.any(String) }),
+      })
+    );
+    expect(updateOne).not.toHaveBeenCalled();
+    expect(mockedExecuteRegisteredMcpTool).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    "Mark task Foo done and then delete it",
+    "Delete task Foo and remove task Foo due date",
+    "Mark task Foo done and task Bar done",
+  ])("blocks mixed or multi-target task writes with zero registry calls: %s", async (question) => {
+    const { db, findOne, insertOne, updateOne } = buildDb({
+      findOne: { _id: "task-foo", title: "Foo", workspaceId: "workspace-1" },
+      rows: [{ _id: "task-foo", title: "Foo", workspaceId: "workspace-1" }],
+    });
+
+    const planned = command(question);
+    expect(planned.kind).toBe("clarify");
+
+    const result = await runChatTaskCommand(db, scope, planned);
+
+    expect(result.confidence).toBe("low");
+    expect(findOne).not.toHaveBeenCalled();
+    expect(insertOne).not.toHaveBeenCalled();
+    expect(updateOne).not.toHaveBeenCalled();
+    expect(mockedExecuteRegisteredMcpTool).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { label: "missing", data: {} },
+    { label: "malformed", data: { task: {} } },
+  ])("does not claim success when the update tool returns $label task data", async ({ data }) => {
+    const { db } = buildDb({
+      rows: [{ _id: "task-1", title: "Follow up", status: "todo" }],
+    });
+    mockedExecuteRegisteredMcpTool.mockResolvedValue({
+      toolName: "update_task_status",
+      summary: "Updated status.",
+      data,
+    });
+
+    const result = await runChatTaskCommand(
+      db,
+      scope,
+      command("Mark task Follow up done")
+    );
+
+    expect(result.confidence).toBe("low");
+    expect(result.answer).toMatch(/couldn't confirm|did not return/i);
+  });
+
+  it("maps a known typed-tool rejection to a safe clarification", async () => {
+    const { db } = buildDb({
+      rows: [{ _id: "task-1", title: "Follow up", status: "todo" }],
+    });
+    mockedExecuteRegisteredMcpTool.mockRejectedValue(
+      new McpToolCallError("invalid_arguments", "Task not found.")
+    );
+
+    await expect(
+      runChatTaskCommand(db, scope, command("Mark task Follow up done"))
+    ).resolves.toMatchObject({ confidence: "low" });
   });
 
   it.each([
