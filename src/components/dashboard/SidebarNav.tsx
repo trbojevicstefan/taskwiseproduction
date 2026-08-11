@@ -127,6 +127,7 @@ export default function SidebarNav() {
       baseNavItems[3],
       baseNavItems[4],
       baseNavItems[5],
+      { href: '/clients', label: 'Clients', icon: Building2 },
     ];
   }, [simpleNavEnabled, workspaceId]);
 
@@ -626,5 +627,4 @@ export default function SidebarNav() {
     </nav>
   );
 }
-
 
