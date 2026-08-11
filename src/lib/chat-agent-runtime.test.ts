@@ -235,7 +235,7 @@ describe("runScopedChatAgent", () => {
     expect(mockedExecuteRegisteredMcpTool).toHaveBeenCalledTimes(1);
   });
 
-  it("preserves an explicit low-confidence abstention after an empty authorized read", async () => {
+  it("fails closed on an abstention-shaped final after an empty authorized read", async () => {
     mockedExecuteRegisteredMcpTool.mockResolvedValueOnce({
       toolName: "search_workspace_knowledge",
       summary: "No workspace evidence found.",
@@ -265,7 +265,57 @@ describe("runScopedChatAgent", () => {
         jsonResponse({ output_text: JSON.stringify(abstention), output: [] })
       ) as any;
 
-    await expect(runAgent()).resolves.toEqual(abstention);
+    await expect(runAgent()).resolves.toBeNull();
+  });
+
+  it("fails closed on a low-confidence fabricated claim after an empty authorized read", async () => {
+    mockedExecuteRegisteredMcpTool.mockResolvedValueOnce({
+      toolName: "search_workspace_knowledge",
+      summary: "No workspace evidence found.",
+      data: { meetings: [], tasks: [], people: [], citations: [], isEmpty: true },
+    });
+    global.fetch = jest
+      .fn()
+      .mockImplementationOnce(() =>
+        jsonResponse({
+          output: [
+            {
+              type: "function_call",
+              call_id: "empty-read",
+              name: "search_workspace_knowledge",
+              arguments: '{"query":"enterprise discount"}',
+            },
+          ],
+        })
+      )
+      .mockImplementationOnce(() =>
+        jsonResponse({
+          output_text: JSON.stringify({
+            answer: "The customer may have been promised a 35% enterprise discount.",
+            confidence: "low",
+            sources: [],
+            suggestedActions: [],
+          }),
+          output: [],
+        })
+      ) as any;
+
+    await expect(runAgent()).resolves.toBeNull();
+  });
+
+  it("preserves a generic answer when no evidence tool was called", async () => {
+    const genericAnswer = {
+      answer: "Hello! How can I help with your workspace?",
+      confidence: "low" as const,
+      sources: [],
+      suggestedActions: [],
+    };
+    global.fetch = jest.fn().mockImplementationOnce(() =>
+      jsonResponse({ output_text: JSON.stringify(genericAnswer), output: [] })
+    ) as any;
+
+    await expect(runAgent()).resolves.toEqual(genericAnswer);
+    expect(mockedExecuteRegisteredMcpTool).not.toHaveBeenCalled();
   });
 
   it("returns an unknown tool as a safe output and never executes it", async () => {
@@ -443,7 +493,9 @@ describe("runScopedChatAgent", () => {
     mockedExecuteRegisteredMcpTool.mockImplementation(async (_ctx, _name, args) => ({
       toolName: "search_workspace_knowledge",
       summary: "large",
-      data: { id: String(args?.query), text: "x".repeat(20_000) },
+      data: {
+        meetings: [{ id: String(args?.query), text: "x".repeat(20_000) }],
+      },
     }));
     const fetchMock = jest
       .fn()
@@ -463,7 +515,14 @@ describe("runScopedChatAgent", () => {
           output_text: JSON.stringify({
             answer: "Bounded answer.",
             confidence: "low",
-            sources: [],
+            sources: [
+              {
+                sourceType: "meeting",
+                sourceId: "query-0",
+                title: "Bounded source",
+                snippet: "Observed before output truncation.",
+              },
+            ],
             suggestedActions: [],
           }),
           output: [],

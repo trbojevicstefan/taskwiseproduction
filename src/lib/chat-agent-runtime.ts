@@ -159,11 +159,6 @@ const collectEvidenceIds = (value: unknown, evidence: EvidenceIds) => {
 const hasAuthorizedEvidence = (evidence: EvidenceIds) =>
   Object.values(evidence).some((ids) => ids.size > 0);
 
-const isExplicitNoEvidenceAnswer = (answer: GeneralChatAnswer) =>
-  answer.confidence === "low" &&
-  answer.sources.length === 0 &&
-  answer.suggestedActions.length === 0;
-
 const filterGroundedAnswer = (
   answer: GeneralChatAnswer,
   evidence: EvidenceIds
@@ -371,11 +366,7 @@ export async function runScopedChatAgent(input: {
         extractJsonValue(undefined, extractResponseText(response))
       );
       if (!parsed.success) return null;
-      if (
-        completedAuthorizedRead &&
-        !hasAuthorizedEvidence(evidence) &&
-        !isExplicitNoEvidenceAnswer(parsed.data)
-      ) {
+      if (completedAuthorizedRead && !hasAuthorizedEvidence(evidence)) {
         return null;
       }
       return filterGroundedAnswer(parsed.data, evidence);

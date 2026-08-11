@@ -278,16 +278,46 @@ describe("unified chat deterministic RAG release corpus", () => {
       language: "English",
       question: "What did we decide about the renewal?",
       query: "renewal decision",
+      answerText: "The renewal was approved.",
     },
     {
       language: "Serbian",
       question: "Šta smo odlučili o produženju ugovora?",
       query: "odluka o produženju ugovora",
+      answerText: "Produženje ugovora je odobreno.",
     },
-  ])("routes $language through the real scoped knowledge contract", async ({ question, query }) => {
-    setProviderScript(query, answer("No grounded decision was found."));
+  ])("routes $language through the real scoped knowledge contract", async ({
+    question,
+    query,
+    answerText,
+  }) => {
+    const languageSource = {
+      sourceType: "meeting" as const,
+      sourceId: "meeting-language-routing",
+      title: "Renewal review",
+      snippet: "The renewal was approved.",
+    };
+    searchMock.mockResolvedValue({
+      meetings: [
+        {
+          id: languageSource.sourceId,
+          title: languageSource.title,
+          startTime: "2026-08-01T10:00:00.000Z",
+          summarySnippet: languageSource.snippet,
+          transcriptSnippets: [],
+          score: 8,
+        },
+      ],
+      tasks: [],
+      people: [],
+      isEmpty: false,
+    } as any);
+    setProviderScript(query, answer(answerText, [languageSource]));
 
-    await expect(runAgent({ question })).resolves.toMatchObject({ confidence: "low" });
+    await expect(runAgent({ question })).resolves.toMatchObject({
+      confidence: "high",
+      sources: [expect.objectContaining({ sourceId: languageSource.sourceId })],
+    });
     expect(searchMock).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({ workspaceId: "workspace-1" }),
