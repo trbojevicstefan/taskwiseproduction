@@ -16,9 +16,7 @@ import DashboardHeader from "@/components/dashboard/DashboardHeader";
 import EmptyState from "@/components/common/EmptyState";
 import GeneralChatPanel, {
   findSessionForScope,
-  panelMessagesToStoredMessages,
   storedMessagesToPanelMessages,
-  type PanelMessage,
 } from "@/components/dashboard/chat/GeneralChatPanel";
 import AssignPersonDialog from "@/components/dashboard/planning/AssignPersonDialog";
 import PlanningTaskRow from "@/components/dashboard/planning/PlanningTaskRow";
@@ -180,10 +178,16 @@ function PlanningSectionsSkeleton() {
 
 export default function PlanningWorkspacePageContent() {
   const { toast } = useToast();
-  const { sessions, createNewSession, applySessionMessagesLocal } = useChatHistory();
+  const {
+    sessions,
+    createNewSession,
+    isLoadingHistory,
+    persistSessionMessages,
+  } = useChatHistory();
   const plannerSession = findSessionForScope(sessions, PLANNER_CHAT_SCOPE);
 
   const ensurePlannerSession = useCallback(async () => {
+    if (isLoadingHistory) return null;
     const existing = findSessionForScope(sessions, PLANNER_CHAT_SCOPE);
     if (existing) return existing.id;
     const created = await createNewSession({
@@ -191,18 +195,7 @@ export default function PlanningWorkspacePageContent() {
       scope: PLANNER_CHAT_SCOPE,
     });
     return created?.id ?? null;
-  }, [createNewSession, sessions]);
-
-  const handlePlannerMessages = useCallback(
-    (messages: PanelMessage[]) => {
-      if (!plannerSession) return;
-      applySessionMessagesLocal(
-        plannerSession.id,
-        panelMessagesToStoredMessages(messages)
-      );
-    },
-    [applySessionMessagesLocal, plannerSession]
-  );
+  }, [createNewSession, isLoadingHistory, sessions]);
 
   const [overview, setOverview] = useState<PlanningOverview>(
     EMPTY_PLANNING_OVERVIEW
@@ -496,7 +489,10 @@ export default function PlanningWorkspacePageContent() {
           <aside className="w-full shrink-0 xl:w-[380px]">
             <Card>
               <CardContent className="p-4">
-                <GeneralChatPanel
+                {isLoadingHistory ? (
+                  <Skeleton className="h-64 w-full" />
+                ) : (
+                  <GeneralChatPanel
                   scope={PLANNER_CHAT_SCOPE}
                   scopeLabel="Planner scope"
                   heroTitle="Plan with AI"
@@ -508,8 +504,9 @@ export default function PlanningWorkspacePageContent() {
                   )}
                   persistMessages
                   onEnsureSession={ensurePlannerSession}
-                  onMessagesChange={handlePlannerMessages}
-                />
+                  onPersistMessages={persistSessionMessages}
+                  />
+                )}
               </CardContent>
             </Card>
           </aside>

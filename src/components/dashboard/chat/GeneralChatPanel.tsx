@@ -27,8 +27,9 @@ import {
 } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 import { apiFetch } from '@/lib/api';
-import type { ChatSession, Message as StoredMessage } from '@/types/chat';
+import type { Message as StoredMessage } from '@/types/chat';
 import type { ChatScope } from '@/types/general-chat';
+export { findSessionForScope } from '@/lib/chat-session-scope';
 
 // ---------------------------------------------------------------------------
 // Types mirroring the POST /api/ai/chat contract
@@ -95,26 +96,6 @@ export type PanelMessage =
 export type StoredChatMessage = StoredMessage & {
   chatAnswer?: GeneralChatAnswer;
 };
-
-export const findSessionForScope = <T extends Pick<ChatSession, 'scope'>>(
-  sessions: T[],
-  scope: ChatScope
-): T | undefined =>
-  sessions.find((session) => {
-    const persisted = session.scope;
-    if (!persisted || persisted.type !== scope.type) return false;
-    switch (scope.type) {
-      case 'meeting':
-        return persisted.type === 'meeting' && persisted.meetingId === scope.meetingId;
-      case 'client':
-        return persisted.type === 'client' && persisted.clientId === scope.clientId;
-      case 'person':
-        return persisted.type === 'person' && persisted.personId === scope.personId;
-      case 'workspace':
-      case 'planner':
-        return true;
-    }
-  });
 
 // ---------------------------------------------------------------------------
 // Pure helpers (exported for tests)
@@ -683,6 +664,11 @@ export interface GeneralChatPanelProps {
   persistMessages?: boolean;
   /** Called with the full message list after every change. */
   onMessagesChange?: (messages: PanelMessage[]) => void;
+  /** Context-owned durable, serialized persistence for this session. */
+  onPersistMessages?: (
+    sessionId: string,
+    messages: StoredChatMessage[]
+  ) => Promise<boolean> | void;
   /**
    * Called before the first send when persistence is requested but no
    * sessionId exists yet; should create a session and return its id.
@@ -702,6 +688,7 @@ export default function GeneralChatPanel({
   initialMessages,
   persistMessages = false,
   onMessagesChange,
+  onPersistMessages,
   onEnsureSession,
 }: GeneralChatPanelProps) {
   const [messages, setMessages] = useState<PanelMessage[]>(
@@ -729,6 +716,8 @@ export default function GeneralChatPanel({
   initialMessagesRef.current = initialMessages;
   const onMessagesChangeRef = useRef(onMessagesChange);
   onMessagesChangeRef.current = onMessagesChange;
+  const onPersistMessagesRef = useRef(onPersistMessages);
+  onPersistMessagesRef.current = onPersistMessages;
   const onEnsureSessionRef = useRef(onEnsureSession);
   onEnsureSessionRef.current = onEnsureSession;
 
@@ -737,25 +726,46 @@ export default function GeneralChatPanel({
   // up, and lets persistence target the fresh session immediately.
   const ensuredSessionIdRef = useRef<string | null>(null);
   const lastSessionKeyRef = useRef<string | null | undefined>(undefined);
+  const lastScopeKeyRef = useRef<string | undefined>(undefined);
+  const sendLockRef = useRef(false);
+  const ensureSessionPromiseRef = useRef<Promise<string | null> | null>(null);
+  const scopeKey =
+    scope.type === 'meeting'
+      ? `meeting:${scope.meetingId}`
+      : scope.type === 'client'
+        ? `client:${scope.clientId}`
+        : scope.type === 'person'
+          ? `person:${scope.personId}`
+          : scope.type;
 
   // Reset the conversation when switching sessions; the fresh session's
   // persisted messages come in through initialMessages.
   useEffect(() => {
     const sessionKey = sessionId ?? null;
-    if (lastSessionKeyRef.current === sessionKey) return;
-    if (sessionKey && sessionKey === ensuredSessionIdRef.current) {
+    if (
+      lastSessionKeyRef.current === sessionKey &&
+      lastScopeKeyRef.current === scopeKey
+    ) return;
+    if (
+      sessionKey &&
+      sessionKey === ensuredSessionIdRef.current &&
+      lastScopeKeyRef.current === scopeKey
+    ) {
       // The prop caught up with the session this panel just created.
       lastSessionKeyRef.current = sessionKey;
       return;
     }
-    const isFirstRun = lastSessionKeyRef.current === undefined;
+    const isFirstRun =
+      lastSessionKeyRef.current === undefined &&
+      lastScopeKeyRef.current === undefined;
     lastSessionKeyRef.current = sessionKey;
+    lastScopeKeyRef.current = scopeKey;
     ensuredSessionIdRef.current = null;
     if (isFirstRun) return; // initial state already seeded from initialMessages
     const next = initialMessagesRef.current ?? [];
     messagesRef.current = next;
     setMessages(next);
-  }, [sessionId]);
+  }, [scopeKey, sessionId]);
 
   const persistToSession = useCallback(
     (nextMessages: PanelMessage[]) => {
@@ -763,12 +773,15 @@ export default function GeneralChatPanel({
       const targetSessionId = sessionId ?? ensuredSessionIdRef.current;
       if (!targetSessionId) return;
       const stored = panelMessagesToStoredMessages(nextMessages);
-      void apiFetch(`/api/chat-sessions/${targetSessionId}`, {
-        method: 'PATCH',
-        body: JSON.stringify({ messages: stored }),
-      }).catch((error) => {
-        console.error('Failed to persist chat messages:', error);
-      });
+      const persistence = onPersistMessagesRef.current?.(
+        targetSessionId,
+        stored
+      );
+      if (persistence) {
+        void Promise.resolve(persistence).catch((error) => {
+          console.error('Failed to persist chat messages:', error);
+        });
+      }
     },
     [persistMessages, sessionId]
   );
@@ -838,29 +851,40 @@ export default function GeneralChatPanel({
 
   const handleSend = useCallback(async () => {
     const question = inputValue.trim().slice(0, MAX_QUESTION_LENGTH);
-    if (!question || isLoading) return;
+    if (!question || isLoading || sendLockRef.current) return;
+    sendLockRef.current = true;
     setInputValue('');
-    if (
-      persistMessages &&
-      !sessionId &&
-      !ensuredSessionIdRef.current &&
-      onEnsureSessionRef.current
-    ) {
-      try {
-        const createdId = await onEnsureSessionRef.current(question);
-        if (createdId) {
-          ensuredSessionIdRef.current = createdId;
+    try {
+      if (
+        persistMessages &&
+        !sessionId &&
+        !ensuredSessionIdRef.current &&
+        onEnsureSessionRef.current
+      ) {
+        try {
+          const ensurePromise =
+            ensureSessionPromiseRef.current ??
+            onEnsureSessionRef.current(question);
+          ensureSessionPromiseRef.current = ensurePromise;
+          const createdId = await ensurePromise;
+          if (createdId) {
+            ensuredSessionIdRef.current = createdId;
+          }
+        } catch (error) {
+          console.error('Failed to create chat session before send:', error);
+        } finally {
+          ensureSessionPromiseRef.current = null;
         }
-      } catch (error) {
-        console.error('Failed to create chat session before send:', error);
       }
+      const history = buildChatHistoryPayload(messagesRef.current);
+      commitMessages((prev) => [
+        ...prev,
+        { id: nextMessageId(), role: 'user', text: question, at: Date.now() },
+      ]);
+      await runQuestion(question, history);
+    } finally {
+      sendLockRef.current = false;
     }
-    const history = buildChatHistoryPayload(messagesRef.current);
-    commitMessages((prev) => [
-      ...prev,
-      { id: nextMessageId(), role: 'user', text: question, at: Date.now() },
-    ]);
-    void runQuestion(question, history);
   }, [commitMessages, inputValue, isLoading, persistMessages, runQuestion, sessionId]);
 
   const handleRetry = useCallback(

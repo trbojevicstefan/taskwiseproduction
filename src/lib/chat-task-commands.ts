@@ -3,7 +3,8 @@ import "@/lib/mcp-register-all";
 import { executeRegisteredMcpTool } from "@/lib/mcp-registry";
 import { McpToolCallError } from "@/lib/mcp-read-tools";
 import { escapeRegexPattern } from "@/lib/mcp-tool-helpers";
-import type { GeneralChatAnswer } from "@/types/general-chat";
+import { buildWorkspaceVisibilityFilter } from "@/lib/chat-scope";
+import type { ChatScope, GeneralChatAnswer } from "@/types/general-chat";
 
 export type ChatTaskCommand =
   | {
@@ -41,6 +42,7 @@ export type ChatTaskHistoryEntry = {
 export type ChatTaskCommandOptions = {
   selectedTaskIds?: string[];
   meetingId?: string | null;
+  chatScope?: ChatScope;
 };
 
 const singleLine = (value: string): string => value.replace(/\s+/g, " ").trim();
@@ -450,6 +452,129 @@ const buildScopeFilter = (scope: ChatTaskScope): Record<string, any> => {
   return { userId: { $in: memberUserIds } };
 };
 
+const uniqueStrings = (values: unknown[]): string[] =>
+  Array.from(
+    new Set(
+      values
+        .filter((value): value is string => typeof value === "string")
+        .map((value) => value.trim())
+        .filter(Boolean)
+    )
+  );
+
+const identifierFilter = (id: string) => ({
+  $or: [{ _id: id }, { id }, { uid: id }, { slackId: id }],
+});
+
+const impossibleAssociationFilter = (): Record<string, any> => ({
+  _id: { $in: [] },
+});
+
+const buildAssigneeAssociationFilter = (people: any[]): Record<string, any> => {
+  const ids = uniqueStrings(
+    people.flatMap((person) => [
+      person?._id,
+      person?.id,
+      person?.uid,
+      person?.slackId,
+      person?.personId,
+    ])
+  );
+  const emails = uniqueStrings(
+    people.map((person) =>
+      typeof person?.email === "string" ? person.email.toLowerCase() : null
+    )
+  );
+  const associations: Record<string, any>[] = [];
+  if (ids.length) {
+    associations.push(
+      { assigneeId: { $in: ids } },
+      { personId: { $in: ids } },
+      { "assignee.id": { $in: ids } },
+      { "assignee.uid": { $in: ids } }
+    );
+  }
+  if (emails.length) {
+    associations.push(
+      { assigneeEmail: { $in: emails } },
+      { "assignee.email": { $in: emails } }
+    );
+  }
+  return associations.length ? { $or: associations } : impossibleAssociationFilter();
+};
+
+const resolveTaskAssociationFilter = async (
+  db: Db,
+  scope: ChatTaskScope,
+  chatScope: ChatScope
+): Promise<Record<string, any> | null> => {
+  if (chatScope.type === "workspace" || chatScope.type === "planner") {
+    return null;
+  }
+
+  const visibleUserIds =
+    Array.isArray(scope.memberUserIds) && scope.memberUserIds.length
+      ? scope.memberUserIds
+      : [scope.userId];
+  if (chatScope.type === "meeting") {
+    const meeting = await db.collection("meetings").findOne({
+      $and: [
+        identifierFilter(chatScope.meetingId),
+        buildWorkspaceVisibilityFilter(scope.workspaceId!, visibleUserIds),
+      ],
+    } as any);
+    if (!meeting) return impossibleAssociationFilter();
+    const meetingIds = uniqueStrings([
+      chatScope.meetingId,
+      meeting._id,
+      meeting.id,
+    ]);
+    return {
+      $or: [
+        {
+          $and: [
+            { sourceSessionType: "meeting" },
+            { sourceSessionId: { $in: meetingIds } },
+          ],
+        },
+        { sourceMeetingId: { $in: meetingIds } },
+        { meetingId: { $in: meetingIds } },
+      ],
+    };
+  }
+
+  if (chatScope.type === "person") {
+    const person = await db.collection("people").findOne({
+      $and: [
+        identifierFilter(chatScope.personId),
+        buildWorkspaceVisibilityFilter(scope.workspaceId!, visibleUserIds),
+      ],
+    } as any);
+    return person
+      ? buildAssigneeAssociationFilter([person])
+      : impossibleAssociationFilter();
+  }
+
+  const company = await db.collection("companies").findOne({
+    $and: [identifierFilter(chatScope.clientId), { workspaceId: scope.workspaceId }],
+  } as any);
+  const peopleIds = uniqueStrings(
+    Array.isArray(company?.peopleIds) ? company.peopleIds : []
+  );
+  if (!company || !peopleIds.length) return impossibleAssociationFilter();
+  const people = await db
+    .collection("people")
+    .find({
+      $and: [
+        buildWorkspaceVisibilityFilter(scope.workspaceId!, visibleUserIds),
+        { $or: peopleIds.map(identifierFilter) },
+      ],
+    } as any)
+    .limit(200)
+    .toArray();
+  return buildAssigneeAssociationFilter(people);
+};
+
 const normalizeForMatch = (value: string): string =>
   value
     .toLowerCase()
@@ -460,6 +585,7 @@ const normalizeForMatch = (value: string): string =>
 const findTaskMatch = async (
   db: Db,
   scope: ChatTaskScope,
+  associationFilter: Record<string, any> | null,
   matchText: string
 ): Promise<
   | { status: "none" }
@@ -477,7 +603,10 @@ const findTaskMatch = async (
     db
       .collection("tasks")
       .find({
-        ...buildScopeFilter(scope),
+        $and: [
+          buildScopeFilter(scope),
+          ...(associationFilter ? [associationFilter] : []),
+        ],
         taskState: { $ne: "archived" },
         title: { $regex: pattern, $options: "i" },
       })
@@ -501,6 +630,7 @@ const findTaskMatch = async (
 const findSelectedTasks = async (
   db: Db,
   scope: ChatTaskScope,
+  associationFilter: Record<string, any> | null,
   selectedTaskId: string
 ): Promise<any[]> =>
   db
@@ -509,6 +639,7 @@ const findSelectedTasks = async (
       $and: [
         buildScopeFilter(scope),
         { taskState: { $ne: "archived" } },
+        ...(associationFilter ? [associationFilter] : []),
         {
           $or: [
             { _id: selectedTaskId },
@@ -574,7 +705,17 @@ export const runChatTaskCommand = async (
   }
 
   if (command.kind === "create") {
-    const meetingId = options.meetingId?.trim() || null;
+    const chatScope: ChatScope =
+      options.chatScope ??
+      (options.meetingId?.trim()
+        ? { type: "meeting", meetingId: options.meetingId.trim() }
+        : { type: "workspace" });
+    if (chatScope.type === "client" || chatScope.type === "person") {
+      return clarificationAnswer(
+        "I couldn't create a task in this scope because the task tool cannot persist that entity association safely."
+      );
+    }
+    const meetingId = chatScope.type === "meeting" ? chatScope.meetingId : null;
     const result = meetingId
       ? await executeRegisteredMcpTool(
           { db, workspaceId: scope.workspaceId },
@@ -610,9 +751,25 @@ export const runChatTaskCommand = async (
     };
   }
 
+  const chatScope: ChatScope =
+    options.chatScope ??
+    (options.meetingId?.trim()
+      ? { type: "meeting", meetingId: options.meetingId.trim() }
+      : { type: "workspace" });
+  const associationFilter = await resolveTaskAssociationFilter(
+    db,
+    scope,
+    chatScope
+  );
+
   const match = selectedTaskIds.length
     ? await (async () => {
-        const tasks = await findSelectedTasks(db, scope, selectedTaskIds[0]);
+        const tasks = await findSelectedTasks(
+          db,
+          scope,
+          associationFilter,
+          selectedTaskIds[0]
+        );
         if (tasks.length > 1) {
           return { status: "ambiguous", matches: tasks } as const;
         }
@@ -620,7 +777,7 @@ export const runChatTaskCommand = async (
           ? ({ status: "matched", task: tasks[0] } as const)
           : ({ status: "selected_out_of_scope" } as const);
       })()
-    : await findTaskMatch(db, scope, command.matchText);
+    : await findTaskMatch(db, scope, associationFilter, command.matchText);
   if (match.status === "selected_out_of_scope") {
     return clarificationAnswer(
       "I couldn't resolve the selected task inside the active workspace, so I didn't change anything."

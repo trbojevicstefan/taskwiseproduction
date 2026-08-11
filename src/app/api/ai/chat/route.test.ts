@@ -356,7 +356,7 @@ describe("POST /api/ai/chat", () => {
             },
           ],
         },
-        { projection: { sourceMeetingId: 1 } }
+        { projection: { sourceMeetingId: 1, scope: 1 } }
       );
       expect(mockedRunScopedChatAgent).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -371,6 +371,79 @@ describe("POST /api/ai/chat", () => {
       );
       expect(mockedAnswerMeetingQuestion).not.toHaveBeenCalled();
       expect(mockedSearchWorkspaceContext).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      [
+        "workspace",
+        { type: "workspace" } as const,
+        { type: "client", clientId: "client-request" } as const,
+      ],
+      [
+        "client",
+        { type: "client", clientId: "client-persisted" } as const,
+        { type: "person", personId: "person-request" } as const,
+      ],
+      [
+        "person",
+        { type: "person", personId: "person-persisted" } as const,
+        { type: "planner" } as const,
+      ],
+      [
+        "planner",
+        { type: "planner" } as const,
+        { type: "workspace" } as const,
+      ],
+    ])(
+      "uses persisted %s session scope instead of a swapped request scope",
+      async (_label, persistedScope, requestScope) => {
+        chatSessionsFindOne.mockResolvedValue({
+          _id: "session-1",
+          workspaceId: "workspace-1",
+          userId: "user-1",
+          sourceMeetingId: null,
+          scope: persistedScope,
+        });
+        mockedRunScopedChatAgent.mockResolvedValue(validFlowResult);
+
+        const response = await POST(
+          buildRequest({
+            question: "What is in scope?",
+            sessionId: "session-1",
+            scope: requestScope,
+          })
+        );
+
+        expect(response.status).toBe(200);
+        expect(mockedAssertChatScopeAccess).toHaveBeenCalledWith(
+          expect.objectContaining({ scope: persistedScope })
+        );
+        expect(mockedRunScopedChatAgent).toHaveBeenCalledWith(
+          expect.objectContaining({ scope: persistedScope })
+        );
+      }
+    );
+
+    it("fails closed to the persisted legacy workspace scope instead of adopting a request entity", async () => {
+      chatSessionsFindOne.mockResolvedValue({
+        _id: "session-legacy",
+        workspaceId: "workspace-1",
+        userId: "user-1",
+      });
+      mockedRunScopedChatAgent.mockResolvedValue(validFlowResult);
+
+      const response = await POST(
+        buildRequest({
+          question: "What is in scope?",
+          sessionId: "session-legacy",
+          scope: { type: "person", personId: "person-request" },
+        })
+      );
+
+      expect(response.status).toBe(200);
+      expect(mockedRunScopedChatAgent).toHaveBeenCalledWith(
+        expect.objectContaining({ scope: { type: "workspace" } })
+      );
     });
 
     it("preserves repeated ordered turns while merging the latest twelve history entries", async () => {
@@ -1563,7 +1636,7 @@ describe("POST /api/ai/chat", () => {
             },
           ],
         },
-        { projection: { sourceMeetingId: 1 } }
+        { projection: { sourceMeetingId: 1, scope: 1 } }
       );
       expect(mockedAnswerMeetingQuestion).toHaveBeenCalledTimes(1);
       expect(mockedSearchWorkspaceContext).not.toHaveBeenCalled();

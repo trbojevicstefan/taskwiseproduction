@@ -39,9 +39,7 @@ import { buildBriefContext } from "@/lib/brief-context";
 import { generateBriefsForTasks } from "@/lib/task-briefs";
 import GeneralChatPanel, {
   findSessionForScope,
-  panelMessagesToStoredMessages,
   storedMessagesToPanelMessages,
-  type PanelMessage,
 } from '@/components/dashboard/chat/GeneralChatPanel';
 import { useChatHistory } from '@/contexts/ChatHistoryContext';
 import {
@@ -121,7 +119,12 @@ export default function PersonDetailPageContent({ personId }: PersonDetailPageCo
   const { isSlackConnected } = useIntegrations();
   const router = useRouter();
   const { toast } = useToast();
-  const { sessions, createNewSession, applySessionMessagesLocal } = useChatHistory();
+  const {
+    sessions,
+    createNewSession,
+    isLoadingHistory,
+    persistSessionMessages,
+  } = useChatHistory();
   const [person, setPerson] = useState<PersonWithTaskCount | null>(null);
   const [editablePerson, setEditablePerson] = useState<Partial<Person>>({});
   const [tasks, setTasks] = useState<Task[]>([]);
@@ -161,7 +164,7 @@ export default function PersonDetailPageContent({ personId }: PersonDetailPageCo
     : undefined;
 
   const ensurePersonChatSession = useCallback(async () => {
-    if (!person || !personChatScope) return null;
+    if (isLoadingHistory || !person || !personChatScope) return null;
     const existing = findSessionForScope(sessions, personChatScope);
     if (existing) return existing.id;
     const created = await createNewSession({
@@ -169,18 +172,7 @@ export default function PersonDetailPageContent({ personId }: PersonDetailPageCo
       scope: personChatScope,
     });
     return created?.id ?? null;
-  }, [createNewSession, person, personChatScope, sessions]);
-
-  const handlePersonChatMessages = useCallback(
-    (messages: PanelMessage[]) => {
-      if (!personChatSession) return;
-      applySessionMessagesLocal(
-        personChatSession.id,
-        panelMessagesToStoredMessages(messages)
-      );
-    },
-    [applySessionMessagesLocal, personChatSession]
-  );
+  }, [createNewSession, isLoadingHistory, person, personChatScope, sessions]);
 
   const mapTaskToExtracted = useCallback(
     (task: Task): ExtractedTaskSchema => ({
@@ -288,24 +280,30 @@ export default function PersonDetailPageContent({ personId }: PersonDetailPageCo
       return;
     }
 
+    let active = true;
     const fetchDetails = async () => {
       setIsLoading(true);
       try {
         const personDetails = await getPersonDetails(user.uid, personId);
+        if (!active) return;
         setPerson(personDetails);
         setEditablePerson(personDetails || {});
       } catch (error) {
+        if (!active) return;
         console.error("Error fetching person details:", error);
       } finally {
-        setIsLoading(false);
+        if (active) setIsLoading(false);
       }
     };
     fetchDetails();
 
     const unsubscribe = onTasksForPersonSnapshot(user.uid, personId, (loadedTasks) => {
-        setTasks(loadedTasks);
+        if (active) setTasks(loadedTasks);
     });
-    return () => unsubscribe();
+    return () => {
+      active = false;
+      unsubscribe();
+    };
   }, [user, personId, authLoading]);
 
   useEffect(() => {
@@ -1161,7 +1159,12 @@ export default function PersonDetailPageContent({ personId }: PersonDetailPageCo
                       </CardDescription>
                     </CardHeader>
                     <CardContent>
-                      <GeneralChatPanel
+                      {isLoadingHistory ? (
+                        <div className="py-8 text-center text-sm text-muted-foreground">
+                          Loading chat history…
+                        </div>
+                      ) : (
+                        <GeneralChatPanel
                         scope={{ type: 'person', personId: person.id }}
                         scopeLabel={`Person: ${person.name}`}
                         heroTitle={`Ask about ${person.name}`}
@@ -1178,8 +1181,9 @@ export default function PersonDetailPageContent({ personId }: PersonDetailPageCo
                         persistMessages
                         selectedTaskIds={Array.from(selectedTaskIds)}
                         onEnsureSession={ensurePersonChatSession}
-                        onMessagesChange={handlePersonChatMessages}
-                      />
+                        onPersistMessages={persistSessionMessages}
+                        />
+                      )}
                     </CardContent>
                   </Card>
                 </motion.div>
@@ -1688,4 +1692,3 @@ export default function PersonDetailPageContent({ personId }: PersonDetailPageCo
     </div>
   );
 }
-

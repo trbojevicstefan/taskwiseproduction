@@ -11,11 +11,12 @@ import { useToast } from '@/hooks/use-toast';
 import type { Meeting } from '@/types/meeting';
 import { MeetingDetailSheet } from './MeetingsPageContent';
 import DashboardScreenSkeleton from "@/components/dashboard/DashboardScreenSkeleton";
+import { findSessionForScope } from '@/lib/chat-session-scope';
 
 export default function MeetingDetailPageContent({ meetingId }: { meetingId: string }) {
   const router = useRouter();
   const { meetings, updateMeeting, loadMeetingById, isLoadingMeetingHistory } = useMeetingHistory();
-  const { sessions, createNewSession, setActiveSessionId } = useChatHistory();
+  const { sessions, createNewSession, setActiveSessionId, isLoadingHistory } = useChatHistory();
   const { toast } = useToast();
   const [hasRefreshed, setHasRefreshed] = useState(false);
 
@@ -42,20 +43,23 @@ export default function MeetingDetailPageContent({ meetingId }: { meetingId: str
 
   const handleNavigateToChat = useCallback(
     async (meeting: Meeting) => {
-      if (isNavigating) return;
+      if (isNavigating || isLoadingHistory) return;
       setIsNavigating(true);
       try {
-        const isScopedToMeeting = (session: (typeof sessions)[number]) =>
-          session.sourceMeetingId === meeting.id ||
-          (session.scope?.type === 'meeting' &&
-            session.scope.meetingId === meeting.id);
         const sessionFromMeeting = meeting.chatSessionId
           ? sessions.find(
               (session: any) =>
-                session.id === meeting.chatSessionId && isScopedToMeeting(session)
+                session.id === meeting.chatSessionId &&
+                findSessionForScope([session], {
+                  type: 'meeting',
+                  meetingId: meeting.id,
+                })
             )
           : undefined;
-        const sessionFromLookup = sessions.find(isScopedToMeeting);
+        const sessionFromLookup = findSessionForScope(sessions, {
+          type: 'meeting',
+          meetingId: meeting.id,
+        });
         const existingSession = sessionFromMeeting || sessionFromLookup;
 
         if (existingSession) {
@@ -95,7 +99,7 @@ export default function MeetingDetailPageContent({ meetingId }: { meetingId: str
         setIsNavigating(false);
       }
     },
-    [sessions, updateMeeting, setActiveSessionId, router, toast, createNewSession, isNavigating]
+    [sessions, updateMeeting, setActiveSessionId, router, toast, createNewSession, isLoadingHistory, isNavigating]
   );
 
   const handleClose = useCallback(() => {

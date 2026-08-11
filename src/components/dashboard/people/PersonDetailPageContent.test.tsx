@@ -113,6 +113,7 @@ jest.mock("@/components/dashboard/chat/GeneralChatPanel", () => ({
       data-scope-label={props.scopeLabel}
       data-compact={String(props.compact)}
       data-selected-task-ids={JSON.stringify(props.selectedTaskIds)}
+      data-persist-callback={String(typeof props.onPersistMessages === "function")}
     />
   ),
   findSessionForScope: (sessions: any[], scope: any) =>
@@ -221,6 +222,7 @@ const renderPage = async () => {
   });
   return {
     container,
+    root,
     cleanup: () => {
       act(() => {
         root.unmount();
@@ -248,6 +250,8 @@ describe("PersonDetailPageContent — profile sections", () => {
       sessions: [],
       createNewSession: jest.fn(),
       applySessionMessagesLocal: jest.fn(),
+      persistSessionMessages: jest.fn(),
+      isLoadingHistory: false,
     } as any);
     mockedApiFetch.mockImplementation(async (url: string) => {
       if (url === "/api/people/route-alias/mentions") {
@@ -329,8 +333,41 @@ describe("PersonDetailPageContent — profile sections", () => {
     expect(panel.getAttribute("data-scope-label")).toBe("Person: Jane Client");
     expect(panel.getAttribute("data-compact")).toBe("true");
     expect(panel.getAttribute("data-selected-task-ids")).toBe("[]");
+    expect(panel.getAttribute("data-persist-callback")).toBe("true");
 
     cleanup();
+  });
+
+  it("ignores stale person details after the route identity changes", async () => {
+    let resolveOld!: (value: any) => void;
+    let resolveNew!: (value: any) => void;
+    const oldRequest = new Promise<any>((resolve) => { resolveOld = resolve; });
+    const newRequest = new Promise<any>((resolve) => { resolveNew = resolve; });
+    mockedGetPersonDetails.mockImplementation((_userId, routePersonId) =>
+      routePersonId === "old-route" ? oldRequest : newRequest
+    );
+    const container = document.createElement("div");
+    const root: Root = createRoot(container);
+    await act(async () => {
+      root.render(<PersonDetailPageContent personId="old-route" />);
+    });
+    await act(async () => {
+      root.render(<PersonDetailPageContent personId="new-route" />);
+    });
+    resolveNew({ ...person, id: "new-canonical", name: "New Person" });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    resolveOld({ ...person, id: "old-canonical", name: "Old Person" });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(
+      container.querySelector('[data-testid="person-chat"]')?.getAttribute("data-scope")
+    ).toBe(JSON.stringify({ type: "person", personId: "new-canonical" }));
+    act(() => root.unmount());
   });
 
   it("opens the report dialog pointed at the person report endpoint", async () => {

@@ -348,7 +348,7 @@ describe("buildChatHistoryPayload", () => {
 });
 
 describe("findSessionForScope", () => {
-  const sessions: Array<{ id: string; scope: ChatScope }> = [
+  const sessions: Array<{ id: string; scope: ChatScope; sourceMeetingId?: string | null }> = [
     { id: "workspace", scope: { type: "workspace" } },
     { id: "planner", scope: { type: "planner" } },
     {
@@ -358,6 +358,16 @@ describe("findSessionForScope", () => {
     {
       id: "person",
       scope: { type: "person", personId: "person-1" },
+    },
+    {
+      id: "meeting-legacy",
+      scope: { type: "meeting", meetingId: "meeting-1" },
+      sourceMeetingId: null,
+    },
+    {
+      id: "meeting-conflict",
+      scope: { type: "meeting", meetingId: "meeting-1" },
+      sourceMeetingId: "meeting-2",
     },
   ];
 
@@ -371,6 +381,25 @@ describe("findSessionForScope", () => {
     ).toBe("client");
     expect(
       findSessionForScope(sessions, { type: "client", clientId: "client-2" })
+    ).toBeUndefined();
+  });
+
+  it("uses sourceMeetingId as meeting authority and never reuses conflicts", () => {
+    expect(
+      findSessionForScope(sessions, { type: "meeting", meetingId: "meeting-1" })
+        ?.id
+    ).toBe("meeting-legacy");
+    expect(
+      findSessionForScope([sessions.at(-1)!], {
+        type: "meeting",
+        meetingId: "meeting-1",
+      })
+    ).toBeUndefined();
+    expect(
+      findSessionForScope([sessions.at(-1)!], {
+        type: "meeting",
+        meetingId: "meeting-2",
+      })
     ).toBeUndefined();
   });
 });

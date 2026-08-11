@@ -1,7 +1,7 @@
 // src/contexts/ChatHistoryContext.tsx
 "use client";
 
-import React, { createContext, useContext, useState, useEffect, ReactNode, useCallback } from 'react';
+import React, { createContext, useContext, useState, useEffect, ReactNode, useCallback, useRef } from 'react';
 import { v4 as uuidv4 } from 'uuid';
 import type { Message, ChatSession, ExtractedTaskSchema } from '@/types/chat';
 import { useAuth } from '@/contexts/AuthContext';
@@ -32,6 +32,8 @@ interface ChatHistoryContextType {
   updateActiveSessionSuggestions: (suggestions: ExtractedTaskSchema[]) => Promise<void>;
   removeSuggestionFromActiveSession: (suggestionId: string) => Promise<void>;
   updateSession: (sessionId: string, updatedFields: Partial<Omit<ChatSession, 'id' | 'userId' | 'createdAt' | 'lastActivityAt'>>) => Promise<void>;
+  /** Optimistically apply and serialize a durable message snapshot per session. */
+  persistSessionMessages: (sessionId: string, messages: Message[]) => Promise<boolean>;
   /**
    * Local-only message sync (no network call). Used by the unified chat panel,
    * which persists messages itself via PATCH /api/chat-sessions/[id]; this
@@ -47,49 +49,77 @@ export const ChatHistoryProvider = ({ children }: { children: ReactNode }) => {
   const { user } = useAuth();
   const { toast } = useToast();
   const [sessions, setSessions] = useState<ChatSession[]>([]);
+  const sessionsRef = useRef<ChatSession[]>([]);
   const [activeSessionId, setActiveSessionIdState] = useState<string | null>(null);
   const [isLoadingHistory, setIsLoadingHistory] = useState(true);
+  const messageSaveQueuesRef = useRef(new Map<string, Promise<boolean>>());
+  const messageSaveVersionsRef = useRef(new Map<string, number>());
+  const durableMessagesRef = useRef(new Map<string, Message[]>());
+
+  const replaceSessions = useCallback((next: ChatSession[]) => {
+    sessionsRef.current = next;
+    setSessions(next);
+  }, []);
+
+  const sanitizeLevels = useCallback((levels: any) =>
+    levels
+      ? {
+          light: (levels.light || []).map((task: any) =>
+            normalizeTask(task as ExtractedTaskSchema)
+          ),
+          medium: (levels.medium || []).map((task: any) =>
+            normalizeTask(task as ExtractedTaskSchema)
+          ),
+          detailed: (levels.detailed || []).map((task: any) =>
+            normalizeTask(task as ExtractedTaskSchema)
+          ),
+        }
+      : null, []);
+
+  const sanitizeSession = useCallback((session: ChatSession): ChatSession => ({
+    ...session,
+    suggestedTasks: (session.suggestedTasks || []).map((task) =>
+      normalizeTask(task as ExtractedTaskSchema)
+    ),
+    originalAiTasks: (session.originalAiTasks || []).map((task) =>
+      normalizeTask(task as ExtractedTaskSchema)
+    ),
+    originalAllTaskLevels: sanitizeLevels(session.originalAllTaskLevels),
+    allTaskLevels: sanitizeLevels(session.allTaskLevels),
+    taskRevisions: session.taskRevisions || [],
+    people: session.people || [],
+  }), [sanitizeLevels]);
 
   useEffect(() => {
     if (user?.uid) {
       setIsLoadingHistory(true);
+      const sessionIdsAtRequestStart = new Set(
+        sessionsRef.current.map((session) => session.id)
+      );
       apiFetch<ChatSession[]>("/api/chat-sessions")
         .then((loadedSessions) => {
-          const sanitizeLevels = (levels: any) =>
-            levels
-              ? {
-                  light: (levels.light || []).map((task: any) =>
-                    normalizeTask(task as ExtractedTaskSchema)
-                  ),
-                  medium: (levels.medium || []).map((task: any) =>
-                    normalizeTask(task as ExtractedTaskSchema)
-                  ),
-                  detailed: (levels.detailed || []).map((task: any) =>
-                    normalizeTask(task as ExtractedTaskSchema)
-                  ),
-                }
-              : null;
-          const sanitizedSessions = loadedSessions.map(s => ({
-            ...s,
-            suggestedTasks: (s.suggestedTasks || []).map(t => normalizeTask(t as ExtractedTaskSchema)),
-            originalAiTasks: (s.originalAiTasks || []).map(t => normalizeTask(t as ExtractedTaskSchema)),
-            originalAllTaskLevels: sanitizeLevels(s.originalAllTaskLevels),
-            allTaskLevels: sanitizeLevels(s.allTaskLevels),
-            taskRevisions: s.taskRevisions || [],
-            createdAt: s.createdAt,
-            lastActivityAt: s.lastActivityAt,
-            people: s.people || [],
-          }));
-          setSessions(sanitizedSessions);
+          const sanitizedSessions = loadedSessions.map(sanitizeSession);
+          sanitizedSessions.forEach((session) => {
+            durableMessagesRef.current.set(session.id, session.messages || []);
+          });
+          const createdDuringLoad = sessionsRef.current.filter(
+            (session) => !sessionIdsAtRequestStart.has(session.id)
+          );
+          const createdIds = new Set(createdDuringLoad.map(({ id }) => id));
+          const mergedSessions = [
+            ...createdDuringLoad,
+            ...sanitizedSessions.filter((session) => !createdIds.has(session.id)),
+          ];
+          replaceSessions(mergedSessions);
 
           const timeValue = (value: any) =>
             value?.toMillis ? value.toMillis() : value ? new Date(value).getTime() : 0;
 
           setActiveSessionIdState(prevActiveId => {
-            if (prevActiveId && sanitizedSessions.some(s => s.id === prevActiveId)) {
+            if (prevActiveId && mergedSessions.some(s => s.id === prevActiveId)) {
               return prevActiveId;
             }
-            const sortedSessions = [...sanitizedSessions].sort(
+            const sortedSessions = [...mergedSessions].sort(
               (a, b) => timeValue(b.lastActivityAt) - timeValue(a.lastActivityAt)
             );
             return sortedSessions.length > 0 ? sortedSessions[0].id : null;
@@ -99,11 +129,11 @@ export const ChatHistoryProvider = ({ children }: { children: ReactNode }) => {
           setIsLoadingHistory(false);
         });
     } else {
-      setSessions([]);
+      replaceSessions([]);
       setActiveSessionIdState(null);
       setIsLoadingHistory(false);
     }
-  }, [user?.uid]);
+  }, [replaceSessions, sanitizeSession, user?.uid]);
 
   const setActiveSessionId = useCallback((sessionId: string | null) => {
     setActiveSessionIdState(sessionId);
@@ -175,14 +205,15 @@ export const ChatHistoryProvider = ({ children }: { children: ReactNode }) => {
         body: JSON.stringify(newSessionData),
       });
       setActiveSessionIdState(created.id);
-      setSessions(prev => [created, ...prev]);
+      durableMessagesRef.current.set(created.id, created.messages || []);
+      replaceSessions([created, ...sessionsRef.current.filter(({ id }) => id !== created.id)]);
       return created;
     } catch (error) {
       console.error("Failed to create new session in database", error);
       toast({ title: "Error", description: "Could not create new chat session.", variant: "destructive" });
       return undefined;
     }
-  }, [user, toast]);
+  }, [replaceSessions, user, toast]);
   
   const updateSession = useCallback(async (sessionId: string, updatedFields: Partial<Omit<ChatSession, 'id' | 'userId' | 'createdAt' | 'lastActivityAt'>>) => {
      if (!user?.uid) return;
@@ -192,7 +223,13 @@ export const ChatHistoryProvider = ({ children }: { children: ReactNode }) => {
           method: "PATCH",
           body: JSON.stringify(updatedFields),
         });
-        setSessions(prev => prev.map(session => session.id === updated.id ? updated : session));
+        replaceSessions(
+          sessionsRef.current.map(session =>
+            session.id === updated.id
+              ? { ...updated, messages: session.messages }
+              : session
+          )
+        );
 
         const isMeetingLinked =
           Boolean(targetSession?.sourceMeetingId) ||
@@ -214,17 +251,94 @@ export const ChatHistoryProvider = ({ children }: { children: ReactNode }) => {
         // Do not show toast for every background save. Let caller decide.
         // toast({ title: "Error", description: "Could not save session changes.", variant: "destructive" });
       }
-  }, [user, sessions]);
+  }, [replaceSessions, user, sessions]);
+
+  const applySessionMessagesLocal = useCallback((sessionId: string, messages: Message[]) => {
+    replaceSessions(
+      sessionsRef.current.map(session =>
+        session.id === sessionId
+          ? { ...session, messages, lastActivityAt: new Date() }
+          : session
+      )
+    );
+  }, [replaceSessions]);
+
+  const persistSessionMessages = useCallback((sessionId: string, messages: Message[]) => {
+    if (!user?.uid) return Promise.resolve(false);
+
+    if (!durableMessagesRef.current.has(sessionId)) {
+      const current = sessionsRef.current.find((session) => session.id === sessionId);
+      durableMessagesRef.current.set(sessionId, current?.messages || []);
+    }
+    applySessionMessagesLocal(sessionId, messages);
+    const version = (messageSaveVersionsRef.current.get(sessionId) ?? 0) + 1;
+    messageSaveVersionsRef.current.set(sessionId, version);
+    const previous = messageSaveQueuesRef.current.get(sessionId) ?? Promise.resolve(true);
+    const operation: Promise<boolean> = previous
+      .catch(() => false)
+      .then(async () => {
+        try {
+          await apiFetch(`/api/chat-sessions/${sessionId}`, {
+            method: "PATCH",
+            body: JSON.stringify({ messages }),
+          });
+          durableMessagesRef.current.set(sessionId, messages);
+          return true;
+        } catch (error) {
+          console.error("Failed to persist chat messages:", error);
+          if (messageSaveVersionsRef.current.get(sessionId) === version) {
+            try {
+              const loadedSessions = await apiFetch<ChatSession[]>("/api/chat-sessions");
+              const authoritative = loadedSessions
+                .map(sanitizeSession)
+                .find((session) => session.id === sessionId);
+              if (authoritative) {
+                durableMessagesRef.current.set(
+                  sessionId,
+                  authoritative.messages || []
+                );
+              }
+              replaceSessions(
+                authoritative
+                  ? sessionsRef.current.map((session) =>
+                      session.id === sessionId ? authoritative : session
+                    )
+                  : sessionsRef.current.filter((session) => session.id !== sessionId)
+              );
+            } catch (reloadError) {
+              console.error("Failed to reload chat session after save failure:", reloadError);
+              const durableMessages = durableMessagesRef.current.get(sessionId) || [];
+              replaceSessions(
+                sessionsRef.current.map((session) =>
+                  session.id === sessionId
+                    ? { ...session, messages: durableMessages }
+                    : session
+                )
+              );
+            }
+          }
+          toast({
+            title: "Error",
+            description: "Could not save message.",
+            variant: "destructive",
+          });
+          return false;
+        }
+      })
+      .finally(() => {
+        if (messageSaveQueuesRef.current.get(sessionId) === operation) {
+          messageSaveQueuesRef.current.delete(sessionId);
+        }
+      });
+    messageSaveQueuesRef.current.set(sessionId, operation);
+    return operation;
+  }, [applySessionMessagesLocal, replaceSessions, sanitizeSession, toast, user?.uid]);
 
   const addMessageToActiveSession = useCallback(async (message: Message) => {
     if (!user?.uid || !activeSessionId) return;
 
-    setSessions(currentSessions => {
-        const newSessions = [...currentSessions];
-        const sessionIndex = newSessions.findIndex(s => s.id === activeSessionId);
-        if (sessionIndex === -1) return currentSessions;
-
-        const targetSession = { ...newSessions[sessionIndex] };
+        const targetSession = sessionsRef.current.find(s => s.id === activeSessionId);
+        if (!targetSession) return;
         
         let newMessagesArray;
         const existingIndicatorIndex = targetSession.messages.findIndex(m => m.id === 'ai-typing-indicator');
@@ -233,45 +347,19 @@ export const ChatHistoryProvider = ({ children }: { children: ReactNode }) => {
             if (existingIndicatorIndex === -1) {
                 newMessagesArray = [...targetSession.messages, message];
             } else {
-                return currentSessions;
+                return;
             }
         } else {
              const messagesWithoutIndicator = targetSession.messages.filter(m => m.id !== 'ai-typing-indicator');
              newMessagesArray = [...messagesWithoutIndicator, message];
         }
 
-        const updatedSession = {
-            ...targetSession,
-            messages: newMessagesArray,
-            lastActivityAt: new Date(),
-        };
-
-        newSessions[sessionIndex] = updatedSession;
-        
         if (message.id !== 'ai-typing-indicator') {
-            apiFetch(`/api/chat-sessions/${activeSessionId}`, {
-              method: "PATCH",
-              body: JSON.stringify({ messages: updatedSession.messages }),
-            }).catch(error => {
-                console.error("Failed to update session messages in database", error);
-                toast({ title: "Error", description: "Could not save message.", variant: "destructive" });
-            });
+            await persistSessionMessages(activeSessionId, newMessagesArray);
+        } else {
+            applySessionMessagesLocal(activeSessionId, newMessagesArray);
         }
-        
-        return newSessions;
-    });
-}, [user, activeSessionId, toast]);
-
-
-  const applySessionMessagesLocal = useCallback((sessionId: string, messages: Message[]) => {
-    setSessions(prev =>
-      prev.map(session =>
-        session.id === sessionId
-          ? { ...session, messages, lastActivityAt: new Date() }
-          : session
-      )
-    );
-  }, []);
+}, [activeSessionId, applySessionMessagesLocal, persistSessionMessages, user?.uid]);
 
   const getActiveSession = useCallback((): ChatSession | undefined => {
     return sessions.find(s => s.id === activeSessionId);
@@ -284,12 +372,12 @@ export const ChatHistoryProvider = ({ children }: { children: ReactNode }) => {
         method: "PATCH",
         body: JSON.stringify({ title: newTitle, avoidTimestampUpdate: true }),
       });
-      setSessions(prev => prev.map(session => session.id === sessionId ? { ...session, title: newTitle } : session));
+      replaceSessions(sessionsRef.current.map(session => session.id === sessionId ? { ...session, title: newTitle } : session));
     } catch (error) {
       console.error("Failed to update session title in database", error);
       toast({ title: "Error", description: "Could not update session title.", variant: "destructive" });
     }
-  }, [user, toast]);
+  }, [replaceSessions, user, toast]);
 
   const deleteSession = useCallback(async (sessionId: string) => {
     if (!user?.uid) return;
@@ -303,13 +391,14 @@ export const ChatHistoryProvider = ({ children }: { children: ReactNode }) => {
         });
       }
       await apiFetch(`/api/chat-sessions/${sessionId}`, { method: "DELETE" });
-      setSessions(prev => prev.filter(session => session.id !== sessionId));
+      durableMessagesRef.current.delete(sessionId);
+      replaceSessions(sessionsRef.current.filter(session => session.id !== sessionId));
       toast({ title: "Session Deleted", description: "The chat session has been removed." });
     } catch (error) {
       console.error("Failed to delete session from database", error);
       toast({ title: "Error", description: "Could not delete session.", variant: "destructive" });
     }
-  }, [user, toast, sessions]);
+  }, [replaceSessions, user, toast, sessions]);
 
   const updateActiveSessionSuggestions = useCallback(async (newSuggestions: ExtractedTaskSchema[]) => {
     if (!user?.uid || !activeSessionId) return;
@@ -351,6 +440,7 @@ export const ChatHistoryProvider = ({ children }: { children: ReactNode }) => {
       removeSuggestionFromActiveSession,
       updateSession,
       applySessionMessagesLocal,
+      persistSessionMessages,
     }}>
       {children}
     </ChatHistoryContext.Provider>
@@ -364,4 +454,3 @@ export const useChatHistory = () => {
   }
   return context;
 };
-

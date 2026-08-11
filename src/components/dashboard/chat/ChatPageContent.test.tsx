@@ -101,11 +101,19 @@ describe("resolveChatPanelContext", () => {
     });
   });
 
-  it("uses the linked meeting fallback when the session has no sourceMeetingId yet", () => {
+  it("ignores mutable meeting linkage when persisted session scope is workspace", () => {
     expect(resolveChatPanelContext({ sourceMeetingId: null }, "m2")).toEqual({
-      mode: "meeting",
-      meetingId: "m2",
+      mode: "workspace",
     });
+  });
+
+  it("uses persisted meeting scope only when sourceMeetingId is absent", () => {
+    expect(
+      resolveChatPanelContext({
+        sourceMeetingId: null,
+        scope: { type: "meeting", meetingId: "persisted-scope" },
+      })
+    ).toEqual({ mode: "meeting", meetingId: "persisted-scope" });
   });
 
   it("keeps the persisted meeting scope when a different linked fallback exists", () => {
@@ -130,9 +138,6 @@ describe("resolveChatPanelContext", () => {
     });
     expect(
       resolveChatPanelContext({ sourceMeetingId: "   " }, " linked-meeting ")
-    ).toEqual({
-      mode: "meeting",
-      meetingId: "linked-meeting",
-    });
+    ).toEqual({ mode: "workspace" });
   });
 });

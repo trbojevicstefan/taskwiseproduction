@@ -7,7 +7,7 @@
  * one-click source-grounded report plus inline editing of the company record.
  */
 
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { format, formatDistanceToNow } from 'date-fns';
 import {
@@ -42,9 +42,7 @@ import ProfileReportDialog from '@/components/dashboard/common/ProfileReportDial
 import EmptyState from '@/components/common/EmptyState';
 import GeneralChatPanel, {
   findSessionForScope,
-  panelMessagesToStoredMessages,
   storedMessagesToPanelMessages,
-  type PanelMessage,
 } from '@/components/dashboard/chat/GeneralChatPanel';
 import { useAuth } from '@/contexts/AuthContext';
 import { useChatHistory } from '@/contexts/ChatHistoryContext';
@@ -103,7 +101,12 @@ export default function CompanyDetailPageContent({
   companyId,
 }: CompanyDetailPageContentProps) {
   const { user } = useAuth();
-  const { sessions, createNewSession, applySessionMessagesLocal } = useChatHistory();
+  const {
+    sessions,
+    createNewSession,
+    isLoadingHistory,
+    persistSessionMessages,
+  } = useChatHistory();
   const { toast } = useToast();
   const [profile, setProfile] = useState<CompanyProfileResponse | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -114,6 +117,7 @@ export default function CompanyDetailPageContent({
   const [editName, setEditName] = useState('');
   const [editDomain, setEditDomain] = useState('');
   const [editAliases, setEditAliases] = useState('');
+  const profileRequestVersionRef = useRef(0);
 
   const companyChatScope = profile
     ? ({ type: 'client', clientId: profile.company.id } as const)
@@ -123,7 +127,7 @@ export default function CompanyDetailPageContent({
     : undefined;
 
   const ensureCompanyChatSession = useCallback(async () => {
-    if (!profile || !companyChatScope) return null;
+    if (isLoadingHistory || !profile || !companyChatScope) return null;
     const existing = findSessionForScope(sessions, companyChatScope);
     if (existing) return existing.id;
     const created = await createNewSession({
@@ -131,27 +135,19 @@ export default function CompanyDetailPageContent({
       scope: companyChatScope,
     });
     return created?.id ?? null;
-  }, [companyChatScope, createNewSession, profile, sessions]);
-
-  const handleCompanyChatMessages = useCallback(
-    (messages: PanelMessage[]) => {
-      if (!companyChatSession) return;
-      applySessionMessagesLocal(
-        companyChatSession.id,
-        panelMessagesToStoredMessages(messages)
-      );
-    },
-    [applySessionMessagesLocal, companyChatSession]
-  );
+  }, [companyChatScope, createNewSession, isLoadingHistory, profile, sessions]);
 
   const loadProfile = useCallback(async () => {
+    const requestVersion = ++profileRequestVersionRef.current;
     try {
       const payload = await apiFetch<CompanyProfileResponse>(
         `/api/companies/${companyId}`
       );
+      if (requestVersion !== profileRequestVersionRef.current) return;
       setProfile(payload);
       setLoadError(null);
     } catch (error) {
+      if (requestVersion !== profileRequestVersionRef.current) return;
       console.error('Failed to load company profile:', error);
       setLoadError('Company not found or could not be loaded.');
     }
@@ -169,6 +165,7 @@ export default function CompanyDetailPageContent({
     });
     return () => {
       active = false;
+      profileRequestVersionRef.current += 1;
     };
   }, [user?.uid, loadProfile]);
 
@@ -308,7 +305,12 @@ export default function CompanyDetailPageContent({
               </CardDescription>
             </CardHeader>
             <CardContent>
-              <GeneralChatPanel
+              {isLoadingHistory ? (
+                <div className="py-8 text-center text-sm text-muted-foreground">
+                  Loading chat history…
+                </div>
+              ) : (
+                <GeneralChatPanel
                 scope={{ type: 'client', clientId: company.id }}
                 scopeLabel={`Client: ${company.name}`}
                 heroTitle={`Ask about ${company.name}`}
@@ -324,8 +326,9 @@ export default function CompanyDetailPageContent({
                 )}
                 persistMessages
                 onEnsureSession={ensureCompanyChatSession}
-                onMessagesChange={handleCompanyChatMessages}
-              />
+                onPersistMessages={persistSessionMessages}
+                />
+              )}
             </CardContent>
           </Card>
 

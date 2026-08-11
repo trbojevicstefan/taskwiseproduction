@@ -54,6 +54,21 @@ const collectSessionIds = (session: any, fallbackId?: string | null) => {
   return Array.from(ids);
 };
 
+const chatScopesEqual = (left: ChatScope, right: ChatScope): boolean => {
+  if (left.type !== right.type) return false;
+  switch (left.type) {
+    case "meeting":
+      return right.type === "meeting" && left.meetingId === right.meetingId;
+    case "client":
+      return right.type === "client" && left.clientId === right.clientId;
+    case "person":
+      return right.type === "person" && left.personId === right.personId;
+    case "workspace":
+    case "planner":
+      return true;
+  }
+};
+
 const cleanupChatTasksForSession = async (db: any, userId: string, session: any) => {
   if (!session) return;
   const sessionIds = collectSessionIds(session);
@@ -134,26 +149,46 @@ async function patchChatSession(
   if (!getCurrent) {
     return apiError(404, "request_error", "Chat session not found.");
   }
-  const effectiveSourceMeetingId =
-    update.sourceMeetingId !== undefined
-      ? update.sourceMeetingId
-      : getCurrent.sourceMeetingId;
-  const requestedScope = resolveSessionChatScope(
-    (update.scope as ChatScope | undefined) ?? getCurrent.scope,
-    effectiveSourceMeetingId
+  const persistedSourceMeetingId =
+    typeof getCurrent.sourceMeetingId === "string" &&
+    getCurrent.sourceMeetingId.trim()
+      ? getCurrent.sourceMeetingId.trim()
+      : null;
+  const persistedScope = resolveSessionChatScope(
+    getCurrent.scope as ChatScope | undefined,
+    persistedSourceMeetingId
   );
-  const scope = await assertChatScopeAccess({
+  if (
+    update.sourceMeetingId !== undefined &&
+    update.sourceMeetingId !== persistedSourceMeetingId
+  ) {
+    return apiError(
+      409,
+      "chat_scope_immutable",
+      "Chat session scope cannot be changed."
+    );
+  }
+  if (
+    update.scope !== undefined &&
+    !chatScopesEqual(update.scope as ChatScope, persistedScope)
+  ) {
+    return apiError(
+      409,
+      "chat_scope_immutable",
+      "Chat session scope cannot be changed."
+    );
+  }
+  delete update.sourceMeetingId;
+  delete update.scope;
+  await assertChatScopeAccess({
     db,
     userId,
     workspaceId,
     memberUserIds: workspaceMemberUserIds,
-    scope: requestedScope,
+    scope: persistedScope,
   });
-  update.scope = scope;
-  update.sourceMeetingId =
-    scope.type === "meeting" ? scope.meetingId : effectiveSourceMeetingId ?? null;
   const sessionTitle = getCurrent?.title || body.title || "Chat Session";
-  const sourceMeetingId = update.sourceMeetingId;
+  const sourceMeetingId = persistedSourceMeetingId;
   const sessionOwnerUserId = String(getCurrent.userId || userId);
 
   if (normalizedTasks) {

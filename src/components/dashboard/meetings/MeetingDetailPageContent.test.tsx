@@ -199,4 +199,43 @@ describe("MeetingDetailPageContent — ask about this meeting", () => {
     expect(setActiveSessionId).not.toHaveBeenCalledWith("s-wrong");
     cleanup();
   });
+
+  it("does not reuse a session whose source meeting conflicts with its fallback scope", async () => {
+    createNewSession.mockResolvedValue({ id: "s-correct" });
+    mockedUseChatHistory.mockReturnValue({
+      sessions: [
+        {
+          id: "s-conflict",
+          sourceMeetingId: "m2",
+          scope: { type: "meeting", meetingId: "m1" },
+        },
+      ],
+      createNewSession,
+      setActiveSessionId,
+      isLoadingHistory: false,
+    } as any);
+    const { container, cleanup } = await renderPage(
+      <MeetingDetailPageContent meetingId="m1" />
+    );
+    await clickAsk(container);
+    expect(createNewSession).toHaveBeenCalled();
+    expect(setActiveSessionId).not.toHaveBeenCalledWith("s-conflict");
+    cleanup();
+  });
+
+  it("does not reuse or create a chat before session history finishes loading", async () => {
+    mockedUseChatHistory.mockReturnValue({
+      sessions: [],
+      createNewSession,
+      setActiveSessionId,
+      isLoadingHistory: true,
+    } as any);
+    const { container, cleanup } = await renderPage(
+      <MeetingDetailPageContent meetingId="m1" />
+    );
+    await clickAsk(container);
+    expect(createNewSession).not.toHaveBeenCalled();
+    expect(push).not.toHaveBeenCalled();
+    cleanup();
+  });
 });

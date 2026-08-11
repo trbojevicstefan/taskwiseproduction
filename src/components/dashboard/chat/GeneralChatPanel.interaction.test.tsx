@@ -50,6 +50,14 @@ jest.mock("@/lib/api", () => ({
 
 const mockedApiFetch = apiFetch as jest.MockedFunction<typeof apiFetch>;
 
+const deferred = <T,>() => {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((res) => {
+    resolve = res;
+  });
+  return { promise, resolve };
+};
+
 const chatAnswerResponse = {
   ok: true,
   data: {
@@ -134,6 +142,7 @@ describe("GeneralChatPanel interactions", () => {
     ];
 
     const onMessagesChange = jest.fn();
+    const onPersistMessages = jest.fn().mockResolvedValue(true);
     const { container, cleanup } = await renderPanel(
       <GeneralChatPanel
         scope={{ type: "meeting", meetingId: "m1" }}
@@ -142,6 +151,7 @@ describe("GeneralChatPanel interactions", () => {
         initialMessages={initialMessages}
         persistMessages
         onMessagesChange={onMessagesChange}
+        {...({ onPersistMessages } as any)}
       />
     );
 
@@ -168,14 +178,8 @@ describe("GeneralChatPanel interactions", () => {
     });
 
     // Messages (user + assistant) persist to the chat-sessions endpoint.
-    const persistCalls = mockedApiFetch.mock.calls.filter(
-      ([url]) => url === "/api/chat-sessions/s1"
-    );
-    expect(persistCalls.length).toBeGreaterThanOrEqual(2);
-    const lastPersistBody = JSON.parse(
-      persistCalls[persistCalls.length - 1][1]!.body as string
-    );
-    const persisted = lastPersistBody.messages;
+    expect(onPersistMessages.mock.calls.length).toBeGreaterThanOrEqual(2);
+    const persisted = onPersistMessages.mock.calls.at(-1)![1];
     expect(persisted[persisted.length - 1]).toMatchObject({
       sender: "ai",
       text: "Stefan said pricing is too high.",
@@ -189,7 +193,7 @@ describe("GeneralChatPanel interactions", () => {
     const endpoints = mockedApiFetch.mock.calls.map(([url]) => url);
     expect(
       endpoints.every(
-        (url) => url === "/api/ai/chat" || url === "/api/chat-sessions/s1"
+        (url) => url === "/api/ai/chat"
       )
     ).toBe(true);
 
@@ -221,11 +225,13 @@ describe("GeneralChatPanel interactions", () => {
 
   it("creates a session through onEnsureSession before the first persisted send", async () => {
     const onEnsureSession = jest.fn().mockResolvedValue("fresh-session");
+    const onPersistMessages = jest.fn().mockResolvedValue(true);
     const { container, cleanup } = await renderPanel(
       <GeneralChatPanel
         scope={{ type: "workspace" }}
         persistMessages
         onEnsureSession={onEnsureSession}
+        {...({ onPersistMessages } as any)}
       />
     );
 
@@ -237,15 +243,67 @@ describe("GeneralChatPanel interactions", () => {
     );
     const body = JSON.parse(chatCalls[0][1]!.body as string);
     expect(body.sessionId).toBe("fresh-session");
-    const persistCalls = mockedApiFetch.mock.calls.filter(
-      ([url]) => url === "/api/chat-sessions/fresh-session"
-    );
-    expect(persistCalls.length).toBeGreaterThanOrEqual(1);
-    const firstPersisted = JSON.parse(
-      persistCalls[0][1]!.body as string
-    ).messages;
+    expect(onPersistMessages.mock.calls.length).toBeGreaterThanOrEqual(1);
+    const firstPersisted = onPersistMessages.mock.calls[0][1];
     expect(firstPersisted.filter((message: any) => message.sender === "user"))
       .toHaveLength(1);
+    cleanup();
+  });
+
+  it("resets messages when the canonical scope changes without a session id", async () => {
+    const initialMessages: PanelMessage[] = [
+      { id: "old", role: "user", text: "Old client question", at: 1 },
+    ];
+    const { container, root, cleanup } = await renderPanel(
+      <GeneralChatPanel
+        scope={{ type: "client", clientId: "client-1" }}
+        initialMessages={initialMessages}
+      />
+    );
+    expect(container.textContent).toContain("Old client question");
+
+    await act(async () => {
+      root.render(
+        <GeneralChatPanel scope={{ type: "person", personId: "person-1" }} />
+      );
+    });
+    expect(container.textContent).not.toContain("Old client question");
+    cleanup();
+  });
+
+  it("deduplicates concurrent first sends while session creation is pending", async () => {
+    const ensure = deferred<string | null>();
+    const onEnsureSession = jest.fn(() => ensure.promise);
+    const onPersistMessages = jest.fn().mockResolvedValue(true);
+    const { container, cleanup } = await renderPanel(
+      <GeneralChatPanel
+        scope={{ type: "workspace" }}
+        persistMessages
+        onEnsureSession={onEnsureSession}
+        {...({ onPersistMessages } as any)}
+      />
+    );
+    const input = container.querySelector("input") as HTMLInputElement;
+    const form = container.querySelector("form") as HTMLFormElement;
+    const setter = Object.getOwnPropertyDescriptor(
+      window.HTMLInputElement.prototype,
+      "value"
+    )!.set!;
+    await act(async () => {
+      setter.call(input, "Only once");
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    act(() => {
+      form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+      form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    });
+    expect(onEnsureSession).toHaveBeenCalledTimes(1);
+
+    ensure.resolve("new-session");
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
     cleanup();
   });
 });

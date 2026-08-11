@@ -22,7 +22,10 @@ import {
 import { runInternalChatTool } from "@/lib/internal-chat-tools";
 import { runScopedChatAgent } from "@/lib/chat-agent-runtime";
 import { loadDurableChatMemory } from "@/lib/chat-memory";
-import { assertChatScopeAccess } from "@/lib/chat-scope";
+import {
+  assertChatScopeAccess,
+  resolveSessionChatScope,
+} from "@/lib/chat-scope";
 import {
   searchWorkspaceContext,
   type WorkspaceRetrievalResult,
@@ -542,6 +545,7 @@ export async function POST(request: Request) {
     let durableHistory: ChatHistoryEntry[] = [];
     let memorySummary: string | null = null;
     let sessionSourceMeetingId: string | null = null;
+    let persistedSessionScope: ChatScope | null = null;
     if (sessionId) {
       const durableMemory = await loadDurableChatMemory({
         db,
@@ -566,11 +570,12 @@ export async function POST(request: Request) {
             },
           ],
         },
-        { projection: { sourceMeetingId: 1 } }
+        { projection: { sourceMeetingId: 1, scope: 1 } }
       );
       sessionSourceMeetingId = session?.sourceMeetingId
         ? String(session.sourceMeetingId)
         : null;
+      persistedSessionScope = session?.scope ?? null;
     }
 
     const effectiveHistory = mergeAuthorizedHistory(durableHistory, history);
@@ -598,8 +603,11 @@ export async function POST(request: Request) {
 
     // Server-derived session scope is authoritative. A meeting-linked session
     // cannot be broadened by a later client payload.
-    const requestedScope: ChatScope = sessionSourceMeetingId
-      ? { type: "meeting", meetingId: sessionSourceMeetingId }
+    const requestedScope: ChatScope = sessionId
+      ? resolveSessionChatScope(
+          persistedSessionScope,
+          sessionSourceMeetingId
+        )
       : meetingId
         ? { type: "meeting", meetingId }
         : scope && scope.type !== "workspace"
@@ -633,7 +641,7 @@ export async function POST(request: Request) {
         taskCommand,
         {
           selectedTaskIds,
-          meetingId: effectiveMeetingId,
+          chatScope: effectiveScope,
         }
       );
 

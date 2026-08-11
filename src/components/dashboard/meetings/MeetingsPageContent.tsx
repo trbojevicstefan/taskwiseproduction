@@ -123,6 +123,7 @@ import { useIntegrations } from '@/contexts/IntegrationsContext';
 import PushToGoogleTasksDialog from '../common/PushToGoogleTasksDialog';
 import PushToTrelloDialog from "../common/PushToTrelloDialog";
 import PeopleDiscoveryDialog from '../people/PeopleDiscoveryDialog';
+import { findSessionForScope } from '@/lib/chat-session-scope';
 import SelectionViewDialog from '../explore/SelectionViewDialog';
 import { TASK_TYPE_LABELS, TASK_TYPE_VALUES, type TaskTypeCategory } from '@/lib/task-types';
 import { useWorkspaceBoards } from "@/hooks/use-workspace-boards";
@@ -2546,10 +2547,13 @@ export function MeetingDetailSheet({
   const linkedChatSessions = useMemo(() => {
     if (!meeting) return [] as { id: string; title: string }[];
     return sessions
-      .filter(
-        (session: any) =>
-          session.sourceMeetingId === meeting.id ||
-          (meeting.chatSessionId && session.id === meeting.chatSessionId)
+      .filter((session: any) =>
+        Boolean(
+          findSessionForScope([session], {
+            type: 'meeting',
+            meetingId: meeting.id,
+          })
+        )
       )
       .map((session: any) => ({
         id: session.id,
@@ -3366,7 +3370,12 @@ export default function MeetingsPageContent() {
     deleteMeetings,
     refreshMeetings,
   } = useMeetingHistory();
-  const { sessions, createNewSession, setActiveSessionId } = useChatHistory();
+  const {
+    sessions,
+    createNewSession,
+    setActiveSessionId,
+    isLoadingHistory,
+  } = useChatHistory();
   const {
     isFathomConnected,
     isSlackConnected,
@@ -3432,15 +3441,23 @@ export default function MeetingsPageContent() {
   const [isNavigatingToChat, setIsNavigatingToChat] = useState(false);
 
   const handleChatNavigation = async (meeting: Meeting) => {
-    if (isNavigatingToChat) return;
+    if (isNavigatingToChat || isLoadingHistory) return;
     setIsNavigatingToChat(true);
     try {
       const sessionFromMeeting = meeting.chatSessionId
-        ? sessions.find((session: any) => session.id === meeting.chatSessionId)
+        ? sessions.find(
+            (session: any) =>
+              session.id === meeting.chatSessionId &&
+              findSessionForScope([session], {
+                type: 'meeting',
+                meetingId: meeting.id,
+              })
+          )
         : undefined;
-      const sessionFromLookup = sessions.find(
-        (session) => session.sourceMeetingId === meeting.id
-      );
+      const sessionFromLookup = findSessionForScope(sessions, {
+        type: 'meeting',
+        meetingId: meeting.id,
+      });
       const existingSession = sessionFromMeeting || sessionFromLookup;
 
       if (existingSession) {
@@ -3457,6 +3474,7 @@ export default function MeetingsPageContent() {
       const newSession = await createNewSession({
         title: `Chat about "${meeting.title}"`,
         sourceMeetingId: meeting.id,
+        scope: { type: 'meeting', meetingId: meeting.id },
         initialTasks: getExtractedTasks(meeting.extractedTasks),
         initialPeople: meeting.attendees,
       });
@@ -4232,4 +4250,3 @@ export default function MeetingsPageContent() {
     </div>
   );
 }
-

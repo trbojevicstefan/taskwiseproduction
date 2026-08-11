@@ -5,6 +5,7 @@ import {
 } from "@/lib/chat-task-commands";
 import { executeRegisteredMcpTool } from "@/lib/mcp-registry";
 import { McpToolCallError } from "@/lib/mcp-read-tools";
+import type { ChatScope } from "@/types/general-chat";
 
 jest.mock("@/lib/mcp-register-all", () => ({}));
 jest.mock("@/lib/mcp-registry", () => ({
@@ -34,12 +35,18 @@ const createCursor = (rows: any[]) => {
   return cursor;
 };
 
-const buildDb = (options?: { findOne?: any; rows?: any[] }) => {
+const buildDb = (options?: {
+  findOne?: any;
+  rows?: any[];
+  documents?: Record<string, any>;
+  collectionRows?: Record<string, any[]>;
+}) => {
   const findOne = jest.fn(async () => options?.findOne ?? null);
   const find = jest.fn((filter: any = {}) => {
     const titleRegex = filter?.title?.$regex;
-    const rows =
-      typeof titleRegex === "string"
+    const rows = JSON.stringify(filter).includes('"$in":[]')
+      ? []
+      : typeof titleRegex === "string"
         ? (options?.rows ?? []).filter((row) =>
             new RegExp(titleRegex, filter.title.$options).test(
               String(row?.title ?? "")
@@ -52,7 +59,13 @@ const buildDb = (options?: { findOne?: any; rows?: any[] }) => {
   const updateOne = jest.fn();
   return {
     db: {
-      collection: jest.fn(() => ({ findOne, find, insertOne, updateOne })),
+      collection: jest.fn((name: string) => {
+        if (name === "tasks") return { findOne, find, insertOne, updateOne };
+        return {
+          findOne: jest.fn(async () => options?.documents?.[name] ?? null),
+          find: jest.fn(() => createCursor(options?.collectionRows?.[name] ?? [])),
+        };
+      }),
     } as any,
     findOne,
     find,
@@ -60,6 +73,14 @@ const buildDb = (options?: { findOne?: any; rows?: any[] }) => {
     updateOne,
   };
 };
+
+const chatScopeOptions = (
+  chatScope: ChatScope,
+  selectedTaskIds?: string[]
+) =>
+  ({ chatScope, selectedTaskIds }) as Parameters<typeof runChatTaskCommand>[3] & {
+    chatScope: ChatScope;
+  };
 
 const command = (question: string): ChatTaskCommand => {
   const planned = planChatTaskCommand(
@@ -196,6 +217,183 @@ describe("chat-task-commands", () => {
         dueAt: undefined,
       }
     );
+  });
+
+  it.each([
+    ["client", { type: "client", clientId: "client-1" } as const],
+    ["person", { type: "person", personId: "person-1" } as const],
+  ])("blocks %s-scoped task creation when the typed tool cannot persist the association", async (_label, chatScope) => {
+    const { db } = buildDb();
+
+    const result = await runChatTaskCommand(
+      db,
+      scope,
+      command("Create a task to follow up"),
+      chatScopeOptions(chatScope)
+    );
+
+    expect(result.confidence).toBe("low");
+    expect(result.answer).toMatch(/scope|association|couldn't create/i);
+    expect(mockedExecuteRegisteredMcpTool).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    {
+      label: "meeting",
+      chatScope: { type: "meeting", meetingId: "meeting-1" } as const,
+      documents: {
+        meetings: { _id: "meeting-canonical", id: "meeting-1" },
+      },
+      expectedTokens: ["sourceSessionType", "meeting-canonical"],
+    },
+    {
+      label: "person",
+      chatScope: { type: "person", personId: "person-alias" } as const,
+      documents: {
+        people: {
+          _id: "person-canonical",
+          id: "person-alias",
+          email: "person@example.com",
+        },
+      },
+      expectedTokens: ["assigneeId", "person-canonical"],
+    },
+    {
+      label: "client",
+      chatScope: { type: "client", clientId: "client-1" } as const,
+      documents: {
+        companies: { _id: "client-1", peopleIds: ["person-client"] },
+      },
+      collectionRows: {
+        people: [
+          {
+            _id: "person-client",
+            id: "person-client-alias",
+            email: "client@example.com",
+          },
+        ],
+      },
+      expectedTokens: ["assigneeId", "person-client"],
+    },
+  ])(
+    "adds the stable $label association constraint for selected-id and title matches",
+    async ({ chatScope, documents, collectionRows, expectedTokens }) => {
+      for (const selectionMode of ["selected", "title"] as const) {
+        jest.clearAllMocks();
+        const task = {
+          _id: `task-${selectionMode}`,
+          sourceTaskId: `source-${selectionMode}`,
+          workspaceId: "workspace-1",
+          title: "Follow up",
+          status: "todo",
+        };
+        const { db, find } = buildDb({
+          rows: [task],
+          documents,
+          collectionRows,
+        });
+        mockedExecuteRegisteredMcpTool.mockResolvedValue({
+          toolName: "update_task_status",
+          summary: "Updated task.",
+          data: { task: { id: task._id, title: task.title, status: "done" } },
+        });
+
+        await runChatTaskCommand(
+          db,
+          scope,
+          command(
+            selectionMode === "selected"
+              ? "Mark the selected task done"
+              : "Mark task Follow up done"
+          ),
+          chatScopeOptions(
+            chatScope,
+            selectionMode === "selected" ? [task.sourceTaskId] : undefined
+          )
+        );
+
+        const taskFilter = JSON.stringify(find.mock.calls[0]?.[0] ?? {});
+        for (const token of expectedTokens) {
+          expect(taskFilter).toContain(token);
+        }
+        expect(taskFilter).not.toContain("assignee.name");
+        expect(mockedExecuteRegisteredMcpTool).toHaveBeenCalledWith(
+          { db, workspaceId: "workspace-1" },
+          "update_task_status",
+          { taskId: task._id, status: "done" }
+        );
+      }
+    }
+  );
+
+  it("keeps planner selected-id and title updates workspace-constrained", async () => {
+    for (const selectionMode of ["selected", "title"] as const) {
+      jest.clearAllMocks();
+      const task = {
+        _id: `planner-${selectionMode}`,
+        sourceTaskId: `planner-source-${selectionMode}`,
+        workspaceId: "workspace-1",
+        title: "Plan agenda",
+        status: "todo",
+      };
+      const { db, find } = buildDb({ rows: [task] });
+      mockedExecuteRegisteredMcpTool.mockResolvedValue({
+        toolName: "update_task_status",
+        summary: "Updated task.",
+        data: { task: { id: task._id, title: task.title, status: "done" } },
+      });
+
+      await runChatTaskCommand(
+        db,
+        scope,
+        command(
+          selectionMode === "selected"
+            ? "Mark the selected task done"
+            : "Mark task Plan agenda done"
+        ),
+        chatScopeOptions(
+          { type: "planner" },
+          selectionMode === "selected" ? [task.sourceTaskId] : undefined
+        )
+      );
+
+      expect(JSON.stringify(find.mock.calls[0]?.[0] ?? {})).toContain(
+        "workspace-1"
+      );
+      expect(mockedExecuteRegisteredMcpTool).toHaveBeenCalled();
+    }
+  });
+
+  it.each([
+    { type: "meeting", meetingId: "missing-meeting" } as const,
+    { type: "person", personId: "missing-person" } as const,
+    { type: "client", clientId: "missing-client" } as const,
+  ])("fails closed when the $type association cannot be resolved", async (chatScope) => {
+    for (const selectionMode of ["selected", "title"] as const) {
+      const task = {
+        _id: `task-${selectionMode}`,
+        sourceTaskId: `source-${selectionMode}`,
+        workspaceId: "workspace-1",
+        title: "Follow up",
+      };
+      const { db } = buildDb({ rows: [task] });
+      const result = await runChatTaskCommand(
+        db,
+        scope,
+        command(
+          selectionMode === "selected"
+            ? "Mark the selected task done"
+            : "Mark task Follow up done"
+        ),
+        chatScopeOptions(
+          chatScope,
+          selectionMode === "selected" ? [task.sourceTaskId] : undefined
+        )
+      );
+      expect(result.confidence).toBe("low");
+      expect(mockedExecuteRegisteredMcpTool).not.toHaveBeenCalled();
+      jest.clearAllMocks();
+    }
   });
 
   it.each([

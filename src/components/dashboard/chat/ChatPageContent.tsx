@@ -97,6 +97,7 @@ import {
   normalizeGeneralChatAnswer,
   resolveSourceHref,
 } from '@/components/dashboard/chat/GeneralChatPanel';
+import { findSessionForScope } from '@/lib/chat-session-scope';
 import type { ChatScope, GeneralChatAnswer } from '@/types/general-chat';
 
 let chatMessageCounter = 0;
@@ -107,12 +108,14 @@ export function createChatMessageId(prefix = "msg"): string {
 }
 
 export function resolveChatPanelContext(
-  session?: { sourceMeetingId?: string | null },
-  linkedMeetingId?: string | null
+  session?: { sourceMeetingId?: string | null; scope?: ChatScope },
+  _linkedMeetingId?: string | null
 ): { mode: "workspace" } | { mode: "meeting"; meetingId: string } {
+  void _linkedMeetingId;
   const persistedMeetingId = session?.sourceMeetingId?.trim() || "";
-  const fallbackMeetingId = linkedMeetingId?.trim() || "";
-  const meetingId = persistedMeetingId || fallbackMeetingId;
+  const scopedMeetingId =
+    session?.scope?.type === "meeting" ? session.scope.meetingId.trim() : "";
+  const meetingId = persistedMeetingId || scopedMeetingId;
   return meetingId
     ? { mode: "meeting", meetingId }
     : { mode: "workspace" };
@@ -736,44 +739,22 @@ export default function ChatPageContent() {
     }
   }, [activeSessionId, getActiveSession]);
 
-  const getMeetingByChatSessionId = useCallback(
-    (chatSessionId: string) => {
-      const matching = meetings.filter(
-        (meeting) => meeting.chatSessionId === chatSessionId
-      );
-      if (matching.length === 0) return undefined;
-      const timeValue = (value: any) =>
-        value?.toMillis ? value.toMillis() : value ? new Date(value).getTime() : 0;
-      return [...matching].sort((a: any, b: any) => {
-        const aTime = timeValue(a.lastActivityAt ?? a.createdAt);
-        const bTime = timeValue(b.lastActivityAt ?? b.createdAt);
-        return bTime - aTime;
-      })[0];
-    },
-    [meetings]
-  );
-
   const getInitials = (name: string | null | undefined) => (name ? name.split(' ').map(n => n[0]).join('').toUpperCase().substring(0, 2) : 'U');
   const userAvatar = user?.photoURL || `https://api.dicebear.com/8.x/initials/svg?seed=${user?.displayName || user?.email}`;
   const userName = user?.displayName || 'User';
   const aiName = "TaskWise AI";
   const requestedDetailLevel = user?.taskGranularityPreference ?? 'medium';
   const getMeetingForSession = useCallback(
-    (session?: { sourceMeetingId?: string | null; id?: string | null }) => {
-      if (session?.sourceMeetingId) {
-        const bySource = meetings.find((meeting: any) => meeting.id === session.sourceMeetingId);
-        return bySource;
-      }
-      if (session?.id) {
-        const byChatId = getMeetingByChatSessionId(session.id);
-        if (byChatId) return byChatId;
-      }
-      if (activeSessionId) {
-        return getMeetingByChatSessionId(activeSessionId);
-      }
-      return undefined;
+    (session?: { sourceMeetingId?: string | null; scope?: ChatScope }) => {
+      const sourceMeetingId = session?.sourceMeetingId?.trim() || '';
+      const scopedMeetingId =
+        session?.scope?.type === 'meeting' ? session.scope.meetingId : '';
+      const meetingId = sourceMeetingId || scopedMeetingId;
+      return meetingId
+        ? meetings.find((meeting: any) => meeting.id === meetingId)
+        : undefined;
     },
-    [meetings, activeSessionId, getMeetingByChatSessionId]
+    [meetings]
   );
 
   useEffect(() => {
@@ -1355,6 +1336,7 @@ export default function ChatPageContent() {
   };
 
   const handleSendMessage = async () => {
+    if (isLoadingHistory) return;
     if (inputValue.trim() === '' && selectedTaskIds.size === 0) return;
 
     const currentInput = inputValue;
@@ -1394,6 +1376,7 @@ export default function ChatPageContent() {
                         const newChat = await createNewSession({
                           title: `Chat about "${newMeeting.title}"`,
                           sourceMeetingId: newMeeting.id,
+                          scope: { type: 'meeting', meetingId: newMeeting.id },
                           initialTasks: meetingTasks as any,
                           initialPeople: newMeeting.attendees,
                           allTaskLevels: result.allTaskLevels as any,
@@ -1706,7 +1689,7 @@ export default function ChatPageContent() {
     setRadialMenuState({ open: false, x: 0, y: 0 });
   };
 
-  if (isLoadingHistory && !user) {
+  if (isLoadingHistory) {
     return (
       <div className="flex flex-col lg:flex-row h-full gap-6">
         <div className="flex-1 flex flex-col overflow-hidden">
@@ -1732,6 +1715,7 @@ export default function ChatPageContent() {
   }
 
   const handleNewChat = async () => {
+    if (isLoadingHistory) return;
     await createNewSession();
   };
 
@@ -1789,18 +1773,17 @@ export default function ChatPageContent() {
   );
 
   const handleOpenMeetingChat = async (meetingId: string) => {
+    if (isLoadingHistory) return;
     const meeting = meetings.find((m: any) => m.id === meetingId);
     if (!meeting) return;
 
-    const existingSession =
-      sessions.find((session: any) => session.sourceMeetingId === meetingId) ||
-      (meeting.chatSessionId ? sessions.find((session: any) => session.id === meeting.chatSessionId) : undefined);
+    const existingSession = findSessionForScope(sessions, {
+      type: 'meeting',
+      meetingId,
+    });
 
     if (existingSession) {
       await clearDuplicateChatLinks(existingSession.id, meeting.id);
-      if (!existingSession.sourceMeetingId) {
-        await updateSession(existingSession.id, { sourceMeetingId: meeting.id });
-      }
       if (meeting.chatSessionId !== existingSession.id) {
         await updateMeeting(meeting.id, { chatSessionId: existingSession.id });
       }
@@ -1811,6 +1794,7 @@ export default function ChatPageContent() {
     const newSession = await createNewSession({
       title: `Chat about "${meeting.title}"`,
       sourceMeetingId: meeting.id,
+      scope: { type: 'meeting', meetingId: meeting.id },
       initialTasks: (meeting.extractedTasks || []) as any,
       initialPeople: meeting.attendees || [],
       allTaskLevels: meeting.allTaskLevels as any,
@@ -2129,8 +2113,9 @@ export default function ChatPageContent() {
     toast({title: "Ready to Edit", description: "Type your instructions for the selected tasks and press send."});
   };
 
-  const currentChatScope: ChatScope = sourceMeeting
-    ? { type: 'meeting', meetingId: sourceMeeting.id }
+  const persistedSourceMeetingId = currentSession?.sourceMeetingId?.trim() || '';
+  const currentChatScope: ChatScope = persistedSourceMeetingId
+    ? { type: 'meeting', meetingId: persistedSourceMeetingId }
     : currentSession?.scope ?? { type: 'workspace' };
   const currentScopeCopy =
     currentChatScope.type === 'meeting'

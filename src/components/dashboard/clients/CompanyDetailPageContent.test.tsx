@@ -72,6 +72,14 @@ jest.mock("@/components/dashboard/chat/GeneralChatPanel", () => ({
 const mockedApiFetch = apiFetch as jest.MockedFunction<typeof apiFetch>;
 const mockedUseChatHistory = useChatHistory as jest.MockedFunction<typeof useChatHistory>;
 
+const deferred = <T,>() => {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((res) => {
+    resolve = res;
+  });
+  return { promise, resolve };
+};
+
 const profile = {
   company: {
     id: "company-canonical",
@@ -103,6 +111,8 @@ describe("CompanyDetailPageContent scoped chat", () => {
       sessions: [],
       createNewSession,
       applySessionMessagesLocal: jest.fn(),
+      persistSessionMessages: jest.fn(),
+      isLoadingHistory: false,
     } as any);
   });
 
@@ -135,5 +145,66 @@ describe("CompanyDetailPageContent scoped chat", () => {
 
     act(() => root.unmount());
     container.remove();
+  });
+
+  it("does not create an entity chat while history is loading", async () => {
+    mockedUseChatHistory.mockReturnValue({
+      sessions: [],
+      createNewSession,
+      applySessionMessagesLocal: jest.fn(),
+      persistSessionMessages: jest.fn(),
+      isLoadingHistory: true,
+    } as any);
+    const container = document.createElement("div");
+    const root: Root = createRoot(container);
+    await act(async () => {
+      root.render(<CompanyDetailPageContent companyId="route-alias" />);
+    });
+    const ensure = container.querySelector('[data-testid="company-chat"] button');
+    if (ensure) {
+      await act(async () => {
+        ensure.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      });
+    }
+    expect(createNewSession).not.toHaveBeenCalled();
+    act(() => root.unmount());
+  });
+
+  it("ignores a stale company response after the route identity changes", async () => {
+    const oldResponse = deferred<any>();
+    const newResponse = deferred<any>();
+    mockedApiFetch.mockImplementation((url) => {
+      if (url === "/api/companies/old-route") return oldResponse.promise;
+      if (url === "/api/companies/new-route") return newResponse.promise;
+      return Promise.resolve({}) as any;
+    });
+    const container = document.createElement("div");
+    const root: Root = createRoot(container);
+    await act(async () => {
+      root.render(<CompanyDetailPageContent companyId="old-route" />);
+    });
+    await act(async () => {
+      root.render(<CompanyDetailPageContent companyId="new-route" />);
+    });
+    newResponse.resolve({
+      ...profile,
+      company: { ...profile.company, id: "new-canonical", name: "New Co" },
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    oldResponse.resolve({
+      ...profile,
+      company: { ...profile.company, id: "old-canonical", name: "Old Co" },
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(
+      container.querySelector('[data-testid="company-chat"]')?.getAttribute("data-scope")
+    ).toBe(JSON.stringify({ type: "client", clientId: "new-canonical" }));
+    act(() => root.unmount());
   });
 });
