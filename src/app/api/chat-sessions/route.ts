@@ -22,6 +22,14 @@ import { ChatScopeSchema } from "@/types/general-chat";
 
 const ROUTE = "/api/chat-sessions";
 
+const optionalNullableIdentifierSchema = z
+  .string()
+  .trim()
+  .max(200)
+  .transform((value) => value || null)
+  .nullable()
+  .optional();
+
 const createChatSessionSchema = z
   .object({
     title: z.string().optional(),
@@ -32,7 +40,7 @@ const createChatSessionSchema = z
     taskRevisions: z.array(z.any()).optional(),
     people: z.array(z.any()).optional(),
     folderId: z.string().nullable().optional(),
-    sourceMeetingId: z.string().nullable().optional(),
+    sourceMeetingId: optionalNullableIdentifierSchema,
     scope: ChatScopeSchema.optional(),
     allTaskLevels: z.any().nullable().optional(),
   })
@@ -297,7 +305,7 @@ export async function POST(request: Request) {
       people: body.people || [],
       folderId: body.folderId ?? null,
       sourceMeetingId:
-        scope.type === "meeting" ? scope.meetingId : body.sourceMeetingId ?? null,
+        scope.type === "meeting" ? scope.meetingId : null,
       scope,
       memorySummary: null,
       memorySummarizedThroughMessageId: null,

@@ -51,4 +51,16 @@ describe("resolveChatPanelContext", () => {
       mode: "workspace",
     });
   });
+
+  it("treats whitespace meeting ids as absent and uses a normalized fallback", () => {
+    expect(resolveChatPanelContext({ sourceMeetingId: "   " })).toEqual({
+      mode: "workspace",
+    });
+    expect(
+      resolveChatPanelContext({ sourceMeetingId: "   " }, " linked-meeting ")
+    ).toEqual({
+      mode: "meeting",
+      meetingId: "linked-meeting",
+    });
+  });
 });

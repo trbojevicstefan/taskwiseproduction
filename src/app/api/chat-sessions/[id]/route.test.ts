@@ -9,6 +9,9 @@ jest.mock("@/lib/workspace-scope", () => ({
   resolveWorkspaceScopeForUser: jest.fn(),
 }));
 jest.mock("@/lib/task-sync", () => ({ syncTasksForSource: jest.fn() }));
+jest.mock("@/lib/observability-metrics", () => ({
+  recordRouteMetric: jest.fn(),
+}));
 
 const mockedGetDb = getDb as jest.MockedFunction<typeof getDb>;
 const mockedGetSessionUserId = getSessionUserId as jest.MockedFunction<
@@ -103,5 +106,51 @@ describe("PATCH /api/chat-sessions/[id]", () => {
 
     expect(response.status).toBe(400);
     expect(db.collection).not.toHaveBeenCalled();
+  });
+
+  it("maps a cross-workspace entity scope to a non-disclosing correlated 404", async () => {
+    const scopedSession = {
+      _id: "session-1",
+      userId: "user-1",
+      workspaceId: "workspace-1",
+      title: "Existing",
+      messages: [],
+      suggestedTasks: [],
+    };
+    const chatFindOne = jest.fn().mockResolvedValue(scopedSession);
+    const chatUpdateOne = jest.fn();
+    const meetingFindOne = jest.fn().mockResolvedValue(null);
+    const db = {
+      collection: jest.fn((name: string) => {
+        if (name === "chatSessions") {
+          return { findOne: chatFindOne, updateOne: chatUpdateOne };
+        }
+        if (name === "meetings") return { findOne: meetingFindOne };
+        throw new Error(`Unexpected collection: ${name}`);
+      }),
+    } as any;
+    mockedGetDb.mockResolvedValue(db);
+
+    const response = await PATCH(
+      new Request("http://localhost/api/chat-sessions/session-1", {
+        method: "PATCH",
+        headers: { "x-correlation-id": "correlation-scope-test" },
+        body: JSON.stringify({
+          scope: { type: "meeting", meetingId: "meeting-other" },
+        }),
+      }),
+      { params: Promise.resolve({ id: "session-1" }) }
+    );
+
+    expect(response.status).toBe(404);
+    expect(response.headers.get("x-correlation-id")).toBe(
+      "correlation-scope-test"
+    );
+    await expect(response.json()).resolves.toMatchObject({
+      ok: false,
+      error: "Chat scope was not found.",
+      errorCode: "chat_scope_not_found",
+    });
+    expect(chatUpdateOne).not.toHaveBeenCalled();
   });
 });

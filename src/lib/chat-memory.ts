@@ -20,20 +20,32 @@ type StoredChatMessage = {
 
 type DurableEntry = ChatHistoryEntry & { id: string };
 
-const isGeneralChatSource = (value: unknown): value is GeneralChatSource => {
-  if (!value || typeof value !== "object") return false;
+const parseGeneralChatSource = (value: unknown): GeneralChatSource | null => {
+  if (!value || typeof value !== "object") return null;
   const source = value as Record<string, unknown>;
-  return (
-    ["meeting", "transcript", "task", "person", "client"].includes(
-      String(source.sourceType)
-    ) &&
-    typeof source.sourceId === "string" &&
-    Boolean(source.sourceId.trim()) &&
-    typeof source.title === "string" &&
-    Boolean(source.title.trim()) &&
-    typeof source.snippet === "string" &&
-    Boolean(source.snippet.trim())
-  );
+  const sourceType = String(source.sourceType);
+  if (
+    !["meeting", "transcript", "task", "person", "client"].includes(
+      sourceType
+    ) ||
+    typeof source.sourceId !== "string" ||
+    !source.sourceId.trim() ||
+    typeof source.title !== "string" ||
+    !source.title.trim() ||
+    typeof source.snippet !== "string" ||
+    !source.snippet.trim()
+  ) {
+    return null;
+  }
+  return {
+    sourceType: sourceType as GeneralChatSource["sourceType"],
+    sourceId: source.sourceId,
+    title: source.title,
+    snippet: source.snippet,
+    ...(typeof source.timestamp === "string"
+      ? { timestamp: source.timestamp }
+      : {}),
+  };
 };
 
 const toDurableEntry = (
@@ -47,7 +59,9 @@ const toDurableEntry = (
   if (!text.trim()) return null;
 
   let sources: GeneralChatSource[] = Array.isArray(message.chatAnswer?.sources)
-    ? message.chatAnswer.sources.filter(isGeneralChatSource)
+    ? message.chatAnswer.sources
+        .map(parseGeneralChatSource)
+        .filter((source): source is GeneralChatSource => Boolean(source))
     : [];
   if (!sources.length && sourceMeetingId && Array.isArray(message.sources)) {
     sources = message.sources

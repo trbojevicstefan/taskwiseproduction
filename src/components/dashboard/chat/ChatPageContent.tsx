@@ -106,7 +106,9 @@ export function resolveChatPanelContext(
   session?: { sourceMeetingId?: string | null },
   linkedMeetingId?: string | null
 ): { mode: "workspace" } | { mode: "meeting"; meetingId: string } {
-  const meetingId = session?.sourceMeetingId || linkedMeetingId;
+  const persistedMeetingId = session?.sourceMeetingId?.trim() || "";
+  const fallbackMeetingId = linkedMeetingId?.trim() || "";
+  const meetingId = persistedMeetingId || fallbackMeetingId;
   return meetingId
     ? { mode: "meeting", meetingId }
     : { mode: "workspace" };
@@ -2956,5 +2958,4 @@ export default function ChatPageContent() {
     </>
   );
 }
-
 

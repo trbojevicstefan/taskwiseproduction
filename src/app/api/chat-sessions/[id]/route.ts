@@ -1,6 +1,11 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { apiError } from "@/lib/api-route";
+import {
+  apiError,
+  createRouteRequestContext,
+  getApiErrorStatus,
+  mapApiError,
+} from "@/lib/api-route";
 import { getDb } from "@/lib/db";
 import { getSessionUserId } from "@/lib/server-auth";
 import { normalizeTask } from "@/lib/data";
@@ -12,10 +17,21 @@ import {
 } from "@/lib/chat-scope";
 import { resolveWorkspaceScopeForUser } from "@/lib/workspace-scope";
 import { ChatScopeSchema, type ChatScope } from "@/types/general-chat";
+import { attachCorrelationIdHeader } from "@/lib/observability";
+
+const ROUTE = "/api/chat-sessions/[id]";
+
+const optionalNullableIdentifierSchema = z
+  .string()
+  .trim()
+  .max(200)
+  .transform((value) => value || null)
+  .nullable()
+  .optional();
 
 const patchScopeFieldsSchema = z
   .object({
-    sourceMeetingId: z.string().trim().min(1).max(200).nullable().optional(),
+    sourceMeetingId: optionalNullableIdentifierSchema,
     scope: ChatScopeSchema.optional(),
   })
   .passthrough();
@@ -49,7 +65,7 @@ const cleanupChatTasksForSession = async (db: any, userId: string, session: any)
   });
 };
 
-export async function PATCH(
+async function patchChatSession(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
@@ -71,6 +87,12 @@ export async function PATCH(
   }
   const avoidTimestampUpdate = Boolean(body.avoidTimestampUpdate);
   const update = { ...body };
+  if (parsedScopeFields.data.sourceMeetingId !== undefined) {
+    update.sourceMeetingId = parsedScopeFields.data.sourceMeetingId;
+  }
+  if (parsedScopeFields.data.scope !== undefined) {
+    update.scope = parsedScopeFields.data.scope;
+  }
   delete update.avoidTimestampUpdate;
   delete update._id;
   delete update.id;
@@ -200,6 +222,36 @@ export async function PATCH(
     await cleanupChatTasksForSession(db, sessionOwnerUserId, session);
   }
   return NextResponse.json(serializeSession(session));
+}
+
+export async function PATCH(
+  request: Request,
+  context: { params: Promise<{ id: string }> }
+) {
+  const routeContext = createRouteRequestContext({
+    request,
+    route: ROUTE,
+    method: "PATCH",
+  });
+  const { correlationId, logger, durationMs, emitMetric } = routeContext;
+
+  try {
+    const response = await patchChatSession(request, context);
+    emitMetric(response.status, response.ok ? "success" : "error");
+    return attachCorrelationIdHeader(response, correlationId);
+  } catch (error) {
+    const statusCode = getApiErrorStatus(error);
+    emitMetric(statusCode, "error");
+    return mapApiError(error, "Failed to update chat session.", {
+      correlationId,
+      logger,
+      context: {
+        route: ROUTE,
+        method: "PATCH",
+        durationMs: durationMs(),
+      },
+    });
+  }
 }
 
 export async function DELETE(

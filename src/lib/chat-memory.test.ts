@@ -16,6 +16,7 @@ type StoredMessage = {
       sourceId: string;
       title: string;
       snippet: string;
+      timestamp?: unknown;
     }>;
     suggestedActions: [];
   };
@@ -100,6 +101,21 @@ describe("loadDurableChatMemory", () => {
     expect(result.recentHistory.at(-1)).toEqual({
       role: "assistant",
       text: "assistant turn 13",
+    });
+  });
+
+  it("omits a non-string optional source timestamp from durable history", async () => {
+    const message = assistantMessage("grounded", "Grounded answer", true);
+    message.chatAnswer!.sources[0].timestamp = 12345;
+    const { db } = createDb({ _id: "session-1", messages: [message] });
+
+    const result = await loadDurableChatMemory({ ...params, db });
+
+    expect(result.recentHistory[0].sources?.[0]).toEqual({
+      sourceType: "meeting",
+      sourceId: "source-grounded",
+      title: "Meeting grounded",
+      snippet: "Grounded evidence for grounded",
     });
   });
 
