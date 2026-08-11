@@ -22,10 +22,10 @@ The supported scopes are:
 The durable chat session is authoritative. If a session has
 `sourceMeetingId`, the server restores meeting scope on every request and a
 broader scope in the request body cannot escape it. Client and person ids are
-also validated inside the active workspace. The latest 12 real
-user/assistant turns are sent verbatim; older grounded turns are compacted
-into a capped rolling memory. Typing indicators are never part of model
-history.
+also validated inside the active workspace. Model history is bounded to the
+latest 12 real user/assistant turns, with each entry truncated to 2,000
+characters; older grounded turns are compacted into a capped rolling memory.
+Typing indicators are never part of model history.
 
 ## Tool and write safety
 
@@ -151,5 +151,16 @@ npm run validate:core-first:remaining
 `npm run test:openai-mcp-chat` uses only synthetic evidence and never connects
 to MongoDB. It advertises one read-only function, requires English and Serbian
 function calls, continues each response with the exact returned `call_id`, and
-validates the final JSON answer. Its output is intentionally concise and
-redacted. Both eval commands exit nonzero on failure.
+validates the final JSON against the production answer schema and the source
+ids actually returned as synthetic evidence. Its output is intentionally
+concise and redacted. Both eval commands exit nonzero on failure.
+
+### Current webhook release concern
+
+The controlled 2026-08-11 webhook burst accepted all 600 requests, but it did
+not pass the unchanged latency gate: p95 was 1,936.52 ms against the 1,500 ms
+limit, p50 was 1,070.36 ms, p99 was 2,861.42 ms, and 3 requests exceeded the
+3,000 ms timeout threshold. Consequently `validate:core-first:remaining` is
+not green and this webhook performance gate is not release-ready. The worker
+recovery and SSE latency validators passed when run individually; that does
+not override the failed composite webhook prerequisite.

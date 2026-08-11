@@ -1,8 +1,11 @@
-import dotenv from "dotenv";
+import { loadEnvConfig } from "@next/env";
+import {
+  collectSyntheticEvidenceSourceIds,
+  parseSyntheticGroundedAnswer,
+  parseSyntheticToolArguments,
+} from "./test-openai-mcp-chat-contract";
 
-dotenv.config({ path: ".env.local" });
-dotenv.config({ path: ".env.development.local" });
-dotenv.config({ path: ".env" });
+loadEnvConfig(process.cwd(), process.env.NODE_ENV !== "production");
 
 const DEFAULT_OPENAI_MODEL = "gpt-4.1-mini";
 const DEFAULT_RESPONSES_URL = "https://api.openai.com/v1/responses";
@@ -155,21 +158,7 @@ const extractFunctionCall = (payload: any): FunctionCall => {
   if (call.name !== SYNTHETIC_READ_TOOL.api.name) {
     throw new Error("Configured model selected an unexpected tool.");
   }
-  let args: unknown;
-  try {
-    args = JSON.parse(call.arguments);
-  } catch {
-    throw new Error("Configured model emitted non-JSON tool arguments.");
-  }
-  if (
-    !args ||
-    typeof args !== "object" ||
-    Array.isArray(args) ||
-    typeof (args as Record<string, unknown>).query !== "string" ||
-    !(args as Record<string, string>).query.trim()
-  ) {
-    throw new Error("Configured model emitted invalid tool arguments.");
-  }
+  parseSyntheticToolArguments(call.arguments);
   return call as FunctionCall;
 };
 
@@ -184,26 +173,12 @@ const extractOutputText = (payload: any): string => {
     .join("");
 };
 
-const validateFinalAnswer = (payload: any, language: ProbeLanguage) => {
+const validateFinalAnswer = (
+  payload: any,
+  observedSourceIds: ReadonlySet<string>
+) => {
   const text = extractOutputText(payload);
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(text);
-  } catch {
-    throw new Error("Configured model did not return a JSON final answer.");
-  }
-  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-    throw new Error("Configured model returned an invalid final answer object.");
-  }
-  const value = parsed as Record<string, unknown>;
-  if (
-    typeof value.answer !== "string" ||
-    !value.answer.trim() ||
-    value.language !== language ||
-    value.grounded !== true
-  ) {
-    throw new Error("Configured model returned a final answer outside the contract.");
-  }
+  parseSyntheticGroundedAnswer(text, observedSourceIds);
 };
 
 const runProbe = async (
@@ -218,7 +193,14 @@ const runProbe = async (
           type: "input_text",
           text:
             `You are a read-only Taskwise contract probe. Call the available tool exactly once. ` +
-            `After its output, return only JSON with answer (non-empty string), language (exactly ${probe.language}), and grounded (true).`,
+            `After its output, return only a JSON object matching the production GeneralChatAnswer ` +
+            `contract. Use exactly these English JSON keys and literals: ` +
+            `{"answer":"non-empty ${probe.language} answer text","confidence":"low|medium|high",` +
+            `"sources":[{"sourceType":"meeting","sourceId":"exact tool evidence id",` +
+            `"title":"source title","snippet":"supporting evidence"}],"suggestedActions":[]}. ` +
+            `Only the answer text should use ${probe.language}; do not translate JSON keys, ` +
+            `confidence literals, or sourceType. Every sourceId must exactly match an id in the ` +
+            `synthetic tool output.`,
         },
       ],
     },
@@ -236,6 +218,10 @@ const runProbe = async (
     max_output_tokens: 500,
   });
   const call = extractFunctionCall(first);
+  const observedSourceIds = collectSyntheticEvidenceSourceIds(probe.evidence);
+  if (observedSourceIds.size === 0) {
+    throw new Error("Synthetic probe evidence did not expose a citable source id.");
+  }
 
   const functionOutput = {
     type: "function_call_output",
@@ -258,7 +244,7 @@ const runProbe = async (
     max_output_tokens: 500,
     text: { format: { type: "json_object" } },
   });
-  validateFinalAnswer(final, probe.language);
+  validateFinalAnswer(final, observedSourceIds);
   console.log(
     `PASS language=${probe.language} tool=${SYNTHETIC_READ_TOOL.api.name} continuation=accepted final=valid`
   );

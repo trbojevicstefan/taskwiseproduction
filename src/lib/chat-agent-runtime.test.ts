@@ -199,6 +199,75 @@ describe("runScopedChatAgent", () => {
     expect(result?.suggestedActions).toEqual(validAnswer.suggestedActions);
   });
 
+  it("fails closed when an empty authorized read is followed by an ungrounded confident answer", async () => {
+    mockedExecuteRegisteredMcpTool.mockResolvedValueOnce({
+      toolName: "search_workspace_knowledge",
+      summary: "No workspace evidence found.",
+      data: { meetings: [], tasks: [], people: [], citations: [], isEmpty: true },
+    });
+    global.fetch = jest
+      .fn()
+      .mockImplementationOnce(() =>
+        jsonResponse({
+          output: [
+            {
+              type: "function_call",
+              call_id: "empty-read",
+              name: "search_workspace_knowledge",
+              arguments: '{"query":"enterprise discount"}',
+            },
+          ],
+        })
+      )
+      .mockImplementationOnce(() =>
+        jsonResponse({
+          output_text: JSON.stringify({
+            answer: "The customer was promised a 35% enterprise discount.",
+            confidence: "high",
+            sources: [],
+            suggestedActions: [],
+          }),
+          output: [],
+        })
+      ) as any;
+
+    await expect(runAgent()).resolves.toBeNull();
+    expect(mockedExecuteRegisteredMcpTool).toHaveBeenCalledTimes(1);
+  });
+
+  it("preserves an explicit low-confidence abstention after an empty authorized read", async () => {
+    mockedExecuteRegisteredMcpTool.mockResolvedValueOnce({
+      toolName: "search_workspace_knowledge",
+      summary: "No workspace evidence found.",
+      data: { meetings: [], tasks: [], people: [], citations: [], isEmpty: true },
+    });
+    const abstention = {
+      answer: "I do not have authorized evidence for that claim.",
+      confidence: "low" as const,
+      sources: [],
+      suggestedActions: [],
+    };
+    global.fetch = jest
+      .fn()
+      .mockImplementationOnce(() =>
+        jsonResponse({
+          output: [
+            {
+              type: "function_call",
+              call_id: "empty-read",
+              name: "search_workspace_knowledge",
+              arguments: '{"query":"enterprise discount"}',
+            },
+          ],
+        })
+      )
+      .mockImplementationOnce(() =>
+        jsonResponse({ output_text: JSON.stringify(abstention), output: [] })
+      ) as any;
+
+    await expect(runAgent()).resolves.toEqual(abstention);
+  });
+
   it("returns an unknown tool as a safe output and never executes it", async () => {
     const fetchMock = jest
       .fn()

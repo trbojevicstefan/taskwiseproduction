@@ -32,21 +32,14 @@ const membershipsMock =
   >;
 const originalFetch = global.fetch;
 const originalApiKey = process.env.OPENAI_API_KEY;
+type EvalCaseId = (typeof CHAT_RAG_EVAL_CASE_IDS)[number];
+const executedEvalCases = new Map<EvalCaseId, number>();
 
-const EXPECTED_CASE_IDS = [
-  "serbian-and-english-routing",
-  "all-meeting-comparison",
-  "meeting-confinement",
-  "same-name-client-person-collision",
-  "person-task-ownership",
-  "planner-deadlines",
-  "contradictory-meetings",
-  "no-evidence-abstention",
-  "long-thread-reference",
-  "repeated-tool-call-stop",
-  "cross-workspace-denial",
-  "ambiguous-multi-task-zero-write",
-] as const;
+const recordExecutedEvalCases = (...caseIds: EvalCaseId[]) => {
+  for (const caseId of caseIds) {
+    executedEvalCases.set(caseId, (executedEvalCases.get(caseId) ?? 0) + 1);
+  }
+};
 
 const emptyKnowledge = {
   meetings: [],
@@ -173,6 +166,7 @@ const runAgent = (input: {
   question: string;
   scope?: ChatScope;
   history?: ChatHistoryEntry[];
+  memorySummary?: string | null;
   db?: any;
 }) =>
   runScopedChatAgent({
@@ -182,6 +176,7 @@ const runAgent = (input: {
     scope: input.scope ?? { type: "workspace" },
     question: input.question,
     history: input.history ?? [],
+    memorySummary: input.memorySummary,
     today: "2026-08-11",
   });
 
@@ -267,11 +262,15 @@ describe("unified chat deterministic RAG release corpus", () => {
     global.fetch = originalFetch;
     if (originalApiKey === undefined) delete process.env.OPENAI_API_KEY;
     else process.env.OPENAI_API_KEY = originalApiKey;
+    expect([...executedEvalCases.keys()].sort()).toEqual(
+      [...CHAT_RAG_EVAL_CASE_IDS].sort()
+    );
   });
 
-  it("keeps the binding release corpus complete and uniquely named", () => {
-    expect(CHAT_RAG_EVAL_CASE_IDS).toEqual(EXPECTED_CASE_IDS);
-    expect(new Set(CHAT_RAG_EVAL_CASE_IDS).size).toBe(EXPECTED_CASE_IDS.length);
+  it("keeps the binding release corpus uniquely named", () => {
+    expect(new Set(CHAT_RAG_EVAL_CASE_IDS).size).toBe(
+      CHAT_RAG_EVAL_CASE_IDS.length
+    );
   });
 
   it.each([
@@ -298,6 +297,7 @@ describe("unified chat deterministic RAG release corpus", () => {
     expect(JSON.stringify((global.fetch as jest.Mock).mock.calls[0][1].body)).toContain(
       question
     );
+    recordExecutedEvalCases("serbian-and-english-routing");
   });
 
   it("compares all meetings and preserves contradictory evidence as separate citations", async () => {
@@ -353,6 +353,7 @@ describe("unified chat deterministic RAG release corpus", () => {
     ]);
     expect(result?.answer).toMatch(/conflict/i);
     expect(searchMock.mock.calls[0][3]).toMatchObject({ constraints: undefined });
+    recordExecutedEvalCases("all-meeting-comparison", "contradictory-meetings");
   });
 
   it("confines meeting retrieval even when the model spoofs a broader scope", async () => {
@@ -375,6 +376,7 @@ describe("unified chat deterministic RAG release corpus", () => {
         scopeId: "meeting-allowed",
       },
     });
+    recordExecutedEvalCases("meeting-confinement");
   });
 
   it("keeps a same-name client and person as distinct cited entities", async () => {
@@ -417,6 +419,7 @@ describe("unified chat deterministic RAG release corpus", () => {
         expect.objectContaining({ sourceType: "client", sourceId: "client-acme" }),
       ])
     );
+    recordExecutedEvalCases("same-name-client-person-collision");
   });
 
   it("returns only tasks owned by the selected person despite a same-name person", async () => {
@@ -456,6 +459,7 @@ describe("unified chat deterministic RAG release corpus", () => {
     expect((result.data.citations as any[]).map((item) => item.sourceId)).not.toEqual(
       expect.arrayContaining(["person-collision", "task-collision", "meeting-collision"])
     );
+    recordExecutedEvalCases("person-task-ownership");
   });
 
   it("passes planner deadline bounds and preserves due-task evidence", async () => {
@@ -493,24 +497,26 @@ describe("unified chat deterministic RAG release corpus", () => {
       plannerBias: true,
     });
     expect((result.data.tasks as any[]).map((task) => task.id)).toEqual(["task-due"]);
+    recordExecutedEvalCases("planner-deadlines");
   });
 
-  it("accepts an explicit low-confidence abstention when no evidence exists", async () => {
+  it("fails closed when empty evidence is followed by a confident fabricated answer", async () => {
     setProviderScript(
       "enterprise discount evidence",
-      answer("I don't have evidence for an enterprise discount in this workspace.")
+      answer(
+        "The customer was promised a 35% enterprise discount.",
+        [],
+        "high"
+      )
     );
 
     const result = await runAgent({
       question: "What enterprise discount did we promise?",
     });
 
-    expect(result).toEqual({
-      answer: "I don't have evidence for an enterprise discount in this workspace.",
-      confidence: "low",
-      sources: [],
-      suggestedActions: [],
-    });
+    expect(result).toBeNull();
+    expect(searchMock).toHaveBeenCalledTimes(1);
+    recordExecutedEvalCases("no-evidence-abstention");
   });
 
   it("retains the latest 12 turns and rolls an older grounded reference into memory", async () => {
@@ -563,6 +569,55 @@ describe("unified chat deterministic RAG release corpus", () => {
     expect(memory.summary).toContain("Project Aurora");
     expect(memory.summary).toContain("meeting:meeting-aurora");
     expect(updateOne).toHaveBeenCalledTimes(1);
+
+    searchMock.mockResolvedValue({
+      meetings: [
+        {
+          id: "meeting-aurora",
+          title: "Aurora kickoff",
+          startTime: "2026-07-01T10:00:00.000Z",
+          summarySnippet: "Project Aurora renewal was approved.",
+          transcriptSnippets: [],
+          score: 9,
+        },
+      ],
+      tasks: [],
+      people: [],
+      isEmpty: false,
+    } as any);
+    setProviderScript(
+      "Project Aurora renewal decision",
+      answer("Project Aurora's renewal was approved.", [
+        {
+          sourceType: "meeting",
+          sourceId: "meeting-aurora",
+          title: "Aurora kickoff",
+          snippet: "Project Aurora renewal was approved.",
+        },
+      ])
+    );
+
+    const followUp = await runAgent({
+      question: "What was decided about it?",
+      history: memory.recentHistory,
+      memorySummary: memory.summary,
+    });
+    const initialModelInput = JSON.stringify(
+      JSON.parse((global.fetch as jest.Mock).mock.calls[0][1].body).input
+    );
+
+    expect(initialModelInput).toContain("Project Aurora");
+    expect(searchMock).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ workspaceId: "workspace-1" }),
+      "Project Aurora renewal decision",
+      expect.anything()
+    );
+    expect(followUp).toMatchObject({
+      answer: "Project Aurora's renewal was approved.",
+      sources: [expect.objectContaining({ sourceId: "meeting-aurora" })],
+    });
+    recordExecutedEvalCases("long-thread-reference");
   });
 
   it("stops before executing a repeated identical tool call", async () => {
@@ -578,6 +633,7 @@ describe("unified chat deterministic RAG release corpus", () => {
     await expect(runAgent({ question: "What changed?" })).resolves.toBeNull();
     expect(searchMock).toHaveBeenCalledTimes(1);
     expect(global.fetch).toHaveBeenCalledTimes(2);
+    recordExecutedEvalCases("repeated-tool-call-stop");
   });
 
   it("denies an entity from another workspace without running retrieval", async () => {
@@ -602,6 +658,7 @@ describe("unified chat deterministic RAG release corpus", () => {
       )
     ).rejects.toMatchObject({ code: "chat_scope_not_found", status: 404 });
     expect(searchMock).not.toHaveBeenCalled();
+    recordExecutedEvalCases("cross-workspace-denial");
   });
 
   it("advertises read-only automatic tools and performs zero writes for ambiguous or multi-task mutations", async () => {
@@ -649,5 +706,6 @@ describe("unified chat deterministic RAG release corpus", () => {
     expect(multiResult.confidence).toBe("low");
     expect(insertOne).not.toHaveBeenCalled();
     expect(updateOne).not.toHaveBeenCalled();
+    recordExecutedEvalCases("ambiguous-multi-task-zero-write");
   });
 });

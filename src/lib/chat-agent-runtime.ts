@@ -156,6 +156,14 @@ const collectEvidenceIds = (value: unknown, evidence: EvidenceIds) => {
   Object.values(record).forEach((item) => collectEvidenceIds(item, evidence));
 };
 
+const hasAuthorizedEvidence = (evidence: EvidenceIds) =>
+  Object.values(evidence).some((ids) => ids.size > 0);
+
+const isExplicitNoEvidenceAnswer = (answer: GeneralChatAnswer) =>
+  answer.confidence === "low" &&
+  answer.sources.length === 0 &&
+  answer.suggestedActions.length === 0;
+
 const filterGroundedAnswer = (
   answer: GeneralChatAnswer,
   evidence: EvidenceIds
@@ -339,6 +347,7 @@ export async function runScopedChatAgent(input: {
   let aggregateToolOutputChars = 0;
   const seenCalls = new Set<string>();
   const evidence = newEvidenceIds();
+  let completedAuthorizedRead = false;
 
   for (let round = 0; round < MAX_RESPONSE_ROUNDS; round += 1) {
     const response = await requestOpenAiResponse({
@@ -361,7 +370,15 @@ export async function runScopedChatAgent(input: {
       const parsed = GeneralChatAnswerSchema.safeParse(
         extractJsonValue(undefined, extractResponseText(response))
       );
-      return parsed.success ? filterGroundedAnswer(parsed.data, evidence) : null;
+      if (!parsed.success) return null;
+      if (
+        completedAuthorizedRead &&
+        !hasAuthorizedEvidence(evidence) &&
+        !isExplicitNoEvidenceAnswer(parsed.data)
+      ) {
+        return null;
+      }
+      return filterGroundedAnswer(parsed.data, evidence);
     }
 
     const callOutputs: Array<{
@@ -429,6 +446,7 @@ export async function runScopedChatAgent(input: {
         } else if (!execution.value.ok) {
           toolPayload = execution.value;
         } else {
+          completedAuthorizedRead = true;
           collectEvidenceIds(execution.value.result.data, evidence);
           toolPayload = {
             ok: true,
