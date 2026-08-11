@@ -57,6 +57,16 @@ export interface McpToolDefinition {
   ) => Promise<McpToolResult>;
 }
 
+export type ListedMcpToolDefinition = Readonly<
+  Pick<
+    McpToolDefinition,
+    "name" | "description" | "scope" | "destructive"
+  >
+> & {
+  readonly aliases?: readonly string[];
+  readonly jsonSchema: Readonly<Record<string, unknown>>;
+};
+
 export type McpResourceContents = {
   uri: string;
   mimeType: string;
@@ -170,18 +180,21 @@ export const getMcpToolDefinition = (
 };
 
 /** Canonical tools only — aliases are intentionally not listed. */
-export const listRegisteredMcpTools = (): McpToolDefinition[] =>
+export const listRegisteredMcpTools = (): ListedMcpToolDefinition[] =>
   Object.freeze(
     Array.from(toolRegistry.values(), (definition) =>
       Object.freeze({
-        ...definition,
+        name: definition.name,
+        description: definition.description,
+        scope: definition.scope,
         aliases: definition.aliases
           ? Object.freeze([...definition.aliases])
           : undefined,
+        destructive: definition.destructive,
         jsonSchema: freezePlainSnapshot(definition.jsonSchema),
       })
     )
-  ) as unknown as McpToolDefinition[];
+  ) as unknown as ListedMcpToolDefinition[];
 
 export const resolveToolScope = (nameOrAlias: string): McpToolScope | null =>
   getMcpToolDefinition(nameOrAlias)?.scope ?? null;

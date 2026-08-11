@@ -36,6 +36,7 @@ const cursor = (docs: any[]) => {
 const makeDb = ({
   meetings = [] as any[],
   people = [] as any[],
+  relatedPeople = people as any[],
   companies = [] as any[],
 } = {}) => {
   const findByIdentifier = (docs: any[], filter: any) => {
@@ -56,7 +57,7 @@ const makeDb = ({
     },
     people: {
       findOne: jest.fn(async (filter: any) => findByIdentifier(people, filter)),
-      find: jest.fn(() => cursor(people)),
+      find: jest.fn(() => cursor(relatedPeople)),
     },
     companies: {
       findOne: jest.fn(async (filter: any) => findByIdentifier(companies, filter)),
@@ -74,6 +75,75 @@ const emptyResult = {
   people: [],
   isEmpty: true,
 };
+
+const sameNameCollisionResult = () =>
+  ({
+    meetings: [
+      {
+        id: "meeting-allowed",
+        title: "Allowed meeting",
+        startTime: null,
+        summarySnippet: "Allowed evidence",
+        transcriptSnippets: [],
+        attendeeIds: ["person-allowed"],
+        attendeeEmails: ["alex.allowed@example.com"],
+        score: 8,
+      },
+      {
+        id: "meeting-collision",
+        title: "Same-name collision meeting",
+        startTime: null,
+        summarySnippet: "Unrelated evidence",
+        transcriptSnippets: [],
+        attendeeIds: ["person-collision"],
+        attendeeEmails: ["alex.collision@example.com"],
+        score: 9,
+      },
+    ],
+    tasks: [
+      {
+        id: "task-allowed",
+        title: "Allowed task",
+        status: "todo",
+        dueAt: null,
+        assigneeName: "Alex Morgan",
+        assigneeId: "person-allowed",
+        assigneeEmail: "alex.allowed@example.com",
+        overdue: false,
+        sourceSessionId: "meeting-allowed",
+        score: 4,
+      },
+      {
+        id: "task-collision",
+        title: "Same-name collision task",
+        status: "todo",
+        dueAt: null,
+        assigneeName: "Alex Morgan",
+        assigneeId: "person-collision",
+        assigneeEmail: "alex.collision@example.com",
+        overdue: false,
+        sourceSessionId: "meeting-collision",
+        score: 5,
+      },
+    ],
+    people: [
+      {
+        id: "person-allowed",
+        name: "Alex Morgan",
+        email: "alex.allowed@example.com",
+        personType: "client",
+        score: 3,
+      },
+      {
+        id: "person-collision",
+        name: "Alex Morgan",
+        email: "alex.collision@example.com",
+        personType: "client",
+        score: 3,
+      },
+    ],
+    isEmpty: false,
+  }) as any;
 
 describe("search_workspace_knowledge MCP tool", () => {
   beforeEach(() => {
@@ -240,6 +310,206 @@ describe("search_workspace_knowledge MCP tool", () => {
       )
     ).rejects.toMatchObject({ code: "chat_scope_not_found", status: 404 });
     expect(searchMock).not.toHaveBeenCalled();
+  });
+
+  it("excludes same-name meeting, task, person, and citation collisions in person scope", async () => {
+    const allowedPerson = {
+      _id: "person-allowed",
+      workspaceId: "ws-1",
+      name: "Alex Morgan",
+      email: "alex.allowed@example.com",
+    };
+    const db = makeDb({
+      people: [
+        allowedPerson,
+        {
+          _id: "person-collision",
+          workspaceId: "ws-1",
+          name: "Alex Morgan",
+          email: "alex.collision@example.com",
+        },
+      ],
+      relatedPeople: [allowedPerson],
+    });
+    searchMock.mockResolvedValue(sameNameCollisionResult());
+    const [definition] = getMcpKnowledgeToolDefinitions();
+    registerMcpTools([definition]);
+
+    const result = await executeRegisteredMcpTool(
+      { db, workspaceId: "ws-1" },
+      definition.name,
+      {
+        query: "Alex Morgan commitments",
+        scopeType: "person",
+        scopeId: "person-allowed",
+      }
+    );
+
+    expect((result.data.meetings as any[]).map((item) => item.id)).toEqual([
+      "meeting-allowed",
+    ]);
+    expect((result.data.tasks as any[]).map((item) => item.id)).toEqual([
+      "task-allowed",
+    ]);
+    expect((result.data.people as any[]).map((item) => item.id)).toEqual([
+      "person-allowed",
+    ]);
+    const citationIds = (result.data.citations as any[]).map(
+      (citation) => citation.sourceId
+    );
+    expect(citationIds).not.toContain("meeting-collision");
+    expect(citationIds).not.toContain("task-collision");
+    expect(citationIds).not.toContain("person-collision");
+  });
+
+  it("excludes same-name relationship and citation collisions in client scope", async () => {
+    const allowedPerson = {
+      _id: "person-allowed",
+      workspaceId: "ws-1",
+      name: "Alex Morgan",
+      email: "alex.allowed@example.com",
+      company: "Acme",
+    };
+    const db = makeDb({
+      people: [
+        allowedPerson,
+        {
+          _id: "person-collision",
+          workspaceId: "ws-1",
+          name: "Alex Morgan",
+          email: "alex.collision@example.com",
+        },
+      ],
+      relatedPeople: [allowedPerson],
+      companies: [
+        {
+          _id: "client-allowed",
+          workspaceId: "ws-1",
+          name: "Acme",
+          domain: "acme.com",
+          peopleIds: ["person-allowed"],
+        },
+      ],
+    });
+    searchMock.mockResolvedValue(sameNameCollisionResult());
+    const [definition] = getMcpKnowledgeToolDefinitions();
+    registerMcpTools([definition]);
+
+    const result = await executeRegisteredMcpTool(
+      { db, workspaceId: "ws-1" },
+      definition.name,
+      {
+        query: "Alex Morgan commitments",
+        scopeType: "client",
+        scopeId: "client-allowed",
+      }
+    );
+
+    expect((result.data.meetings as any[]).map((item) => item.id)).toEqual([
+      "meeting-allowed",
+    ]);
+    expect((result.data.tasks as any[]).map((item) => item.id)).toEqual([
+      "task-allowed",
+    ]);
+    expect((result.data.people as any[]).map((item) => item.id)).toEqual([
+      "person-allowed",
+    ]);
+    const citationIds = (result.data.citations as any[]).map(
+      (citation) => citation.sourceId
+    );
+    expect(citationIds).not.toContain("meeting-collision");
+    expect(citationIds).not.toContain("task-collision");
+    expect(citationIds).not.toContain("person-collision");
+  });
+
+  it("returns resolved meeting attendee people/client citations and excludes unrelated people", async () => {
+    const attendee = {
+      _id: "person-allowed",
+      workspaceId: "ws-1",
+      name: "Alex Morgan",
+      email: "alex.allowed@example.com",
+      personType: "client",
+    };
+    const db = makeDb({
+      meetings: [
+        {
+          _id: "meeting-allowed",
+          workspaceId: "ws-1",
+          attendees: [
+            { name: "Alex Morgan", email: "alex.allowed@example.com" },
+          ],
+        },
+      ],
+      people: [
+        attendee,
+        {
+          _id: "person-collision",
+          workspaceId: "ws-1",
+          name: "Alex Morgan",
+          email: "alex.collision@example.com",
+          personType: "client",
+        },
+      ],
+      relatedPeople: [attendee],
+      companies: [
+        {
+          _id: "client-allowed",
+          workspaceId: "ws-1",
+          name: "Acme",
+          domain: "example.com",
+          peopleIds: ["person-allowed"],
+        },
+      ],
+    });
+    const retrieved = sameNameCollisionResult();
+    retrieved.meetings = retrieved.meetings.map((meeting: any) => ({
+      ...meeting,
+      id: "meeting-allowed",
+    })).slice(0, 1);
+    retrieved.tasks = [];
+    searchMock.mockResolvedValue(retrieved);
+    const [definition] = getMcpKnowledgeToolDefinitions();
+    registerMcpTools([definition]);
+
+    const result = await executeRegisteredMcpTool(
+      { db, workspaceId: "ws-1" },
+      definition.name,
+      {
+        query: "attendees",
+        scopeType: "meeting",
+        scopeId: "meeting-allowed",
+      }
+    );
+
+    const options = searchMock.mock.calls[0][3] as any;
+    expect(options.constraints.people).toEqual({
+      $or: [
+        { _id: "person-allowed" },
+        { id: "person-allowed" },
+        { email: "alex.allowed@example.com" },
+      ],
+    });
+    expect((result.data.people as any[]).map((item) => item.id)).toEqual([
+      "person-allowed",
+    ]);
+    expect(result.data.clients).toEqual([
+      expect.objectContaining({ id: "client-allowed" }),
+    ]);
+    expect(result.data.citations).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          sourceType: "person",
+          sourceId: "person-allowed",
+        }),
+        expect.objectContaining({
+          sourceType: "client",
+          sourceId: "client-allowed",
+        }),
+      ])
+    );
+    expect(
+      (result.data.citations as any[]).map((citation) => citation.sourceId)
+    ).not.toContain("person-collision");
   });
 
   it("returns structured entities and normalized grounding citations", async () => {

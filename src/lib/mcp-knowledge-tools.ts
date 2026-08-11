@@ -11,6 +11,7 @@ import type {
 import { searchWorkspaceContext } from "@/lib/workspace-retrieval";
 import { listActiveWorkspaceMembershipsForWorkspace } from "@/lib/workspace-memberships";
 import type { ChatScope } from "@/types/general-chat";
+import { normalizePersonNameKey } from "@/lib/transcript-utils";
 
 const SCOPE_TYPES = [
   "workspace",
@@ -111,14 +112,30 @@ const toScope = (args: KnowledgeArgs): ChatScope => {
   }
 };
 
+const collectPeopleIdentity = (people: any[]) => ({
+  ids: uniqueStrings(
+    people.flatMap((person) => [
+      person?._id,
+      person?.id,
+      person?.uid,
+      person?.slackId,
+    ])
+  ),
+  emails: uniqueStrings(people.map((person) => person?.email)).map((email) =>
+    email.toLowerCase()
+  ),
+});
+
+const uniqueFallbackNames = (people: any[]) =>
+  uniqueStrings(
+    people
+      .filter((person) => person?.__knowledgeUniqueNameFallback === true)
+      .flatMap((person) => [person?.name, ...(person?.aliases || [])])
+  );
+
 const personRelationshipFilter = (people: any[]): Record<string, unknown> => {
-  const ids = uniqueStrings(
-    people.flatMap((person) => [person?._id, person?.id, person?.uid, person?.slackId])
-  );
-  const emails = uniqueStrings(people.map((person) => person?.email));
-  const names = uniqueStrings(
-    people.flatMap((person) => [person?.name, ...(person?.aliases || [])])
-  );
+  const { ids, emails } = collectPeopleIdentity(people);
+  const names = uniqueFallbackNames(people);
   const clauses: Record<string, unknown>[] = [
     ...ids.flatMap((id) => [
       { "assignee.uid": id },
@@ -138,13 +155,8 @@ const personRelationshipFilter = (people: any[]): Record<string, unknown> => {
 };
 
 const attendeeRelationshipFilter = (people: any[]): Record<string, unknown> => {
-  const ids = uniqueStrings(
-    people.flatMap((person) => [person?._id, person?.id, person?.uid, person?.slackId])
-  );
-  const emails = uniqueStrings(people.map((person) => person?.email));
-  const names = uniqueStrings(
-    people.flatMap((person) => [person?.name, ...(person?.aliases || [])])
-  );
+  const { ids, emails } = collectPeopleIdentity(people);
+  const names = uniqueFallbackNames(people);
   const attendeeClauses: Record<string, unknown>[] = [
     ...ids.flatMap((id) => [{ id }, { uid: id }, { personId: id }]),
     ...emails.map((email) => ({ email })),
@@ -153,6 +165,97 @@ const attendeeRelationshipFilter = (people: any[]): Record<string, unknown> => {
   return attendeeClauses.length
     ? { attendees: { $elemMatch: { $or: attendeeClauses } } }
     : { _id: { $in: [] } };
+};
+
+const peopleDocumentIdentityFilter = (
+  people: any[]
+): Record<string, unknown> => {
+  const { ids, emails } = collectPeopleIdentity(people);
+  const names = uniqueFallbackNames(people);
+  const clauses: Record<string, unknown>[] = [
+    ...ids.flatMap((id) => [{ _id: id }, { id }]),
+    ...emails.map((email) => ({ email })),
+    ...names.flatMap((name) => [{ name }, { aliases: name }]),
+  ];
+  return clauses.length ? { $or: clauses } : { _id: { $in: [] } };
+};
+
+const resolveMeetingAttendeePeople = async (
+  db: Db,
+  visibility: Record<string, unknown>,
+  attendees: any[]
+): Promise<any[]> => {
+  const stableClauses: Record<string, unknown>[] = [];
+  const nameOnly: string[] = [];
+  for (const attendee of attendees) {
+    const ids = uniqueStrings([
+      attendee?._id,
+      attendee?.id,
+      attendee?.uid,
+      attendee?.personId,
+    ]);
+    const emails = uniqueStrings([attendee?.email]).map((email) =>
+      email.toLowerCase()
+    );
+    if (ids.length || emails.length) {
+      stableClauses.push(
+        ...ids.flatMap((id) => [{ _id: id }, { id }, { slackId: id }]),
+        ...emails.map((email) => ({ email }))
+      );
+      continue;
+    }
+    if (typeof attendee?.name === "string" && attendee.name.trim()) {
+      nameOnly.push(attendee.name.trim());
+    }
+  }
+
+  const stablePeople = stableClauses.length
+    ? await db
+        .collection("people")
+        .find({ $and: [visibility, { $or: stableClauses }] } as any)
+        .limit(MAX_RELATED_PEOPLE)
+        .toArray()
+    : [];
+
+  const uniqueNamePeople: any[] = [];
+  if (nameOnly.length) {
+    for (const name of uniqueStrings(nameOnly).slice(0, MAX_RELATED_PEOPLE)) {
+      const exact = new RegExp(`^${escapeRegex(name)}$`, "i");
+      const candidates = await db
+        .collection("people")
+        .find({
+          $and: [
+            visibility,
+            { $or: [{ name: exact }, { aliases: exact }] },
+          ],
+        } as any)
+        .limit(2)
+        .toArray();
+      const nameKey = normalizePersonNameKey(name);
+      const matches = candidates.filter((candidate: any) => {
+        const keys = uniqueStrings([
+          candidate?.name,
+          ...(candidate?.aliases || []),
+        ]).map(normalizePersonNameKey);
+        return keys.includes(nameKey);
+      });
+      if (matches.length === 1) {
+        uniqueNamePeople.push({
+          ...matches[0],
+          __knowledgeUniqueNameFallback: true,
+        });
+      }
+    }
+  }
+
+  const deduped = new Map<string, any>();
+  for (const person of [...stablePeople, ...uniqueNamePeople]) {
+    const identity =
+      uniqueStrings([person?._id, person?.id])[0] ||
+      uniqueStrings([person?.email])[0]?.toLowerCase();
+    if (identity && !deduped.has(identity)) deduped.set(identity, person);
+  }
+  return Array.from(deduped.values());
 };
 
 const loadScopeContext = async (
@@ -166,7 +269,11 @@ const loadScopeContext = async (
     const meeting = await db.collection("meetings").findOne({
       $and: [identifierFilter(scope.meetingId), visibility],
     } as any);
-    const relatedPeople = Array.isArray(meeting?.attendees) ? meeting.attendees : [];
+    const relatedPeople = await resolveMeetingAttendeePeople(
+      db,
+      visibility,
+      Array.isArray(meeting?.attendees) ? meeting.attendees : []
+    );
     return { scope, meeting, relatedPeople };
   }
   if (scope.type === "person") {
@@ -223,7 +330,7 @@ const buildConstraints = (context: ScopeContext) => {
             { meetingId },
           ],
         },
-        people: attendeeRelationshipFilter(context.relatedPeople),
+        people: peopleDocumentIdentityFilter(context.relatedPeople),
       };
     }
     case "person":
@@ -290,18 +397,74 @@ const loadRelatedClients = async (
   return clients.map(serializeClient).filter((client) => client.id);
 };
 
-const filterMeetingScope = (context: ScopeContext, result: any) => {
-  if (context.scope.type !== "meeting") return result;
-  const meetingId = context.scope.meetingId;
+const hasIdentityMatch = (
+  ids: unknown,
+  emails: unknown,
+  allowedIds: Set<string>,
+  allowedEmails: Set<string>
+) => {
+  const evidenceIds = Array.isArray(ids) ? uniqueStrings(ids) : uniqueStrings([ids]);
+  const evidenceEmails = (Array.isArray(emails)
+    ? uniqueStrings(emails)
+    : uniqueStrings([emails])
+  ).map((email) => email.toLowerCase());
+  return (
+    evidenceIds.some((id) => allowedIds.has(id)) ||
+    evidenceEmails.some((email) => allowedEmails.has(email))
+  );
+};
+
+const filterScopedResult = (context: ScopeContext, result: any) => {
+  if (context.scope.type === "workspace" || context.scope.type === "planner") {
+    return result;
+  }
+
+  const identity = collectPeopleIdentity(context.relatedPeople);
+  const allowedIds = new Set(identity.ids);
+  const allowedEmails = new Set(identity.emails);
+  const people = result.people.filter((person: any) =>
+    hasIdentityMatch(
+      [person?.id, person?._id],
+      person?.email,
+      allowedIds,
+      allowedEmails
+    )
+  );
+
+  if (context.scope.type === "meeting") {
+    const meetingId = context.scope.meetingId;
+    return {
+      ...result,
+      meetings: result.meetings.filter((meeting: any) => meeting.id === meetingId),
+      tasks: result.tasks.filter(
+        (task: any) =>
+          task.sourceSessionId === meetingId ||
+          task.sourceMeetingId === meetingId ||
+          task.meetingId === meetingId
+      ),
+      people,
+    };
+  }
+
   return {
     ...result,
-    meetings: result.meetings.filter((meeting: any) => meeting.id === meetingId),
-    tasks: result.tasks.filter(
-      (task: any) =>
-        task.sourceSessionId === meetingId ||
-        task.sourceMeetingId === meetingId ||
-        task.meetingId === meetingId
+    meetings: result.meetings.filter((meeting: any) =>
+      hasIdentityMatch(
+        meeting?.attendeeIds,
+        meeting?.attendeeEmails,
+        allowedIds,
+        allowedEmails
+      )
     ),
+    tasks: result.tasks.filter((task: any) =>
+      hasIdentityMatch(
+        task?.assigneeId,
+        task?.assigneeEmail,
+        allowedIds,
+        allowedEmails
+      )
+    ),
+    people,
   };
 };
 
@@ -404,7 +567,7 @@ const executeKnowledgeSearch = async (
       constraints: buildConstraints(context),
     }
   );
-  const scopedResult = filterMeetingScope(context, retrieved);
+  const scopedResult = filterScopedResult(context, retrieved);
   const clients = await loadRelatedClients(
     db,
     workspaceId,

@@ -113,11 +113,26 @@ describe("mcp-registry", () => {
     expect(Object.isFrozen(snapshot[0])).toBe(true);
     expect(Object.isFrozen(snapshot[0].aliases)).toBe(true);
     expect(Object.isFrozen(snapshot[0].jsonSchema)).toBe(true);
-    expect(() => (snapshot as McpToolDefinition[]).push(buildToolDefinition())).toThrow();
+    expect(() => (snapshot as any[]).push(buildToolDefinition())).toThrow();
     expect(() => {
       (snapshot[0] as { name: string }).name = "changed";
     }).toThrow();
     expect(getMcpToolDefinition("people.list")?.name).toBe("people.list");
+  });
+
+  it("does not expose runtime schemas or handlers through public list snapshots", async () => {
+    registerMcpTools([buildToolDefinition({ name: "people.list" })]);
+
+    const [snapshot] = listRegisteredMcpTools();
+    expect(snapshot).not.toHaveProperty("inputSchema");
+    expect(snapshot).not.toHaveProperty("handler");
+    expect(() => {
+      (snapshot as any).inputSchema = z.object({});
+    }).toThrow();
+
+    await expect(
+      executeRegisteredMcpTool(ctx, "people.list", { value: "" })
+    ).rejects.toMatchObject({ code: "invalid_arguments" });
   });
 
   it("rejects duplicate resource URIs and prompt names", () => {

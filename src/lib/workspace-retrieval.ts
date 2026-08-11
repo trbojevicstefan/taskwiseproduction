@@ -72,6 +72,8 @@ export type RetrievedMeeting = {
   score: number;
   /** Best chunk cosine similarity (0..1) when the semantic pass matched. */
   semanticScore?: number | null;
+  attendeeIds?: string[];
+  attendeeEmails?: string[];
 };
 
 export type RetrievedTask = {
@@ -80,6 +82,8 @@ export type RetrievedTask = {
   status: string;
   dueAt: string | null;
   assigneeName: string | null;
+  assigneeId?: string | null;
+  assigneeEmail?: string | null;
   overdue: boolean;
   sourceSessionId: string | null;
   priorityLabel?: string | null;
@@ -498,6 +502,9 @@ const TASK_CANDIDATE_PROJECTION = {
   taskState: 1,
   dueAt: 1,
   assigneeName: 1,
+  assigneeId: 1,
+  assigneeEmail: 1,
+  assignee: 1,
   sourceSessionId: 1,
   lastUpdated: 1,
   priorityScore: 1,
@@ -524,6 +531,30 @@ const extractAttendeeNames = (attendees: unknown): string[] => {
       return "";
     })
     .filter(Boolean);
+};
+
+const extractAttendeeIdentityValues = (attendees: unknown) => {
+  if (!Array.isArray(attendees)) {
+    return { ids: [] as string[], emails: [] as string[] };
+  }
+  const ids = new Set<string>();
+  const emails = new Set<string>();
+  for (const attendee of attendees) {
+    if (!attendee || typeof attendee !== "object") continue;
+    for (const value of [
+      (attendee as any)._id,
+      (attendee as any).id,
+      (attendee as any).uid,
+      (attendee as any).personId,
+    ]) {
+      if (typeof value === "string" && value.trim()) ids.add(value.trim());
+    }
+    const email = (attendee as any).email;
+    if (typeof email === "string" && email.trim()) {
+      emails.add(email.trim().toLowerCase());
+    }
+  }
+  return { ids: Array.from(ids), emails: Array.from(emails) };
 };
 
 const recencyBoost = (startTime: Date | null, now: Date): number => {
@@ -739,6 +770,7 @@ const retrieveMeetings = async (
       const title = typeof doc?.title === "string" ? doc.title : "";
       const summary = typeof doc?.summary === "string" ? doc.summary : "";
       const attendeeNames = extractAttendeeNames(doc?.attendees).join(" ");
+      const attendeeIdentities = extractAttendeeIdentityValues(doc?.attendees);
 
       const titleScore = scoreText(title, query.tokens) * TITLE_WEIGHT;
       const summaryTokenScore = scoreText(summary, query.tokens);
@@ -772,6 +804,8 @@ const retrieveMeetings = async (
         transcriptSnippets: [] as TranscriptSnippet[],
         score,
         semanticScore: semanticHit ? semanticHit.similarity : null,
+        attendeeIds: attendeeIdentities.ids,
+        attendeeEmails: attendeeIdentities.emails,
         semanticHit,
         sortTime: startTime ? startTime.getTime() : 0,
       };
@@ -835,6 +869,8 @@ const retrieveMeetings = async (
     transcriptSnippets: meeting.transcriptSnippets,
     score: meeting.score,
     semanticScore: meeting.semanticScore,
+    attendeeIds: meeting.attendeeIds,
+    attendeeEmails: meeting.attendeeEmails,
   }));
 };
 
@@ -878,7 +914,19 @@ const retrieveTasks = async (
       const description =
         typeof doc?.description === "string" ? doc.description : "";
       const assigneeName =
-        typeof doc?.assigneeName === "string" ? doc.assigneeName : "";
+        typeof doc?.assigneeName === "string"
+          ? doc.assigneeName
+          : typeof doc?.assignee?.name === "string"
+            ? doc.assignee.name
+            : "";
+      const assigneeId = [
+        doc?.assigneeId,
+        doc?.assignee?.uid,
+        doc?.assignee?.id,
+      ].find((value) => typeof value === "string" && value.trim());
+      const assigneeEmail = [doc?.assigneeEmail, doc?.assignee?.email].find(
+        (value) => typeof value === "string" && value.trim()
+      );
       const status = typeof doc?.status === "string" ? doc.status : "todo";
       const dueAt = toDate(doc?.dueAt);
       const overdue =
@@ -898,6 +946,12 @@ const retrieveTasks = async (
         status,
         dueAt: toIsoString(doc?.dueAt),
         assigneeName: assigneeName.trim() || null,
+        assigneeId:
+          typeof assigneeId === "string" ? assigneeId.trim() || null : null,
+        assigneeEmail:
+          typeof assigneeEmail === "string"
+            ? assigneeEmail.trim().toLowerCase() || null
+            : null,
         overdue,
         sourceSessionId:
           typeof doc?.sourceSessionId === "string" && doc.sourceSessionId
