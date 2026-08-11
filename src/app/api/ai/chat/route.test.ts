@@ -5,6 +5,9 @@ import { resolveWorkspaceScopeForUser } from "@/lib/workspace-scope";
 import { searchWorkspaceContext } from "@/lib/workspace-retrieval";
 import { planWorkspaceChatQuestion } from "@/lib/chat-query-planner";
 import { runInternalChatTool } from "@/lib/internal-chat-tools";
+import { loadDurableChatMemory } from "@/lib/chat-memory";
+import { assertChatScopeAccess } from "@/lib/chat-scope";
+import { ApiRouteError } from "@/lib/api-route";
 import {
   answerMeetingQuestion,
   answerWorkspaceQuestion,
@@ -35,6 +38,23 @@ jest.mock("@/lib/internal-chat-tools", () => ({
   runInternalChatTool: jest.fn(),
 }));
 
+jest.mock(
+  "@/lib/chat-agent-runtime",
+  () => ({ runScopedChatAgent: jest.fn() })
+);
+
+jest.mock("@/lib/chat-memory", () => ({
+  loadDurableChatMemory: jest.fn(),
+}));
+
+jest.mock("@/lib/chat-scope", () => {
+  const actual = jest.requireActual("@/lib/chat-scope");
+  return {
+    ...actual,
+    assertChatScopeAccess: jest.fn(),
+  };
+});
+
 jest.mock("@/ai/flows/general-chat-flow", () => ({
   answerWorkspaceQuestion: jest.fn(),
   answerMeetingQuestion: jest.fn(),
@@ -60,6 +80,13 @@ const mockedPlanWorkspaceChatQuestion =
 const mockedRunInternalChatTool = runInternalChatTool as jest.MockedFunction<
   typeof runInternalChatTool
 >;
+const mockedRunScopedChatAgent = jest.requireMock(
+  "@/lib/chat-agent-runtime"
+).runScopedChatAgent as jest.Mock;
+const mockedLoadDurableChatMemory =
+  loadDurableChatMemory as jest.MockedFunction<typeof loadDurableChatMemory>;
+const mockedAssertChatScopeAccess =
+  assertChatScopeAccess as jest.MockedFunction<typeof assertChatScopeAccess>;
 const mockedAnswerWorkspaceQuestion =
   answerWorkspaceQuestion as jest.MockedFunction<typeof answerWorkspaceQuestion>;
 const mockedAnswerMeetingQuestion =
@@ -215,12 +242,224 @@ describe("POST /api/ai/chat", () => {
     });
     mockedAnswerWorkspaceQuestion.mockResolvedValue(validFlowResult);
     mockedAnswerMeetingQuestion.mockResolvedValue(validMeetingFlowResult);
+    mockedRunScopedChatAgent.mockResolvedValue(null);
+    mockedLoadDurableChatMemory.mockResolvedValue({
+      recentHistory: [],
+      summary: null,
+    });
+    mockedAssertChatScopeAccess.mockImplementation(
+      async ({ scope }) => scope as any
+    );
     meetingsFindOne.mockResolvedValue(null);
     chatSessionsFindOne.mockResolvedValue(null);
     tasksFindToArray.mockResolvedValue([]);
     tasksFindOne.mockResolvedValue(null);
     tasksInsertOne.mockResolvedValue({ insertedId: "task-new" });
     tasksUpdateOne.mockResolvedValue({ matchedCount: 1, modifiedCount: 1 });
+  });
+
+  describe("scoped read agent", () => {
+    it("returns a validated agent answer before workspace retrieval", async () => {
+      mockedRunScopedChatAgent.mockResolvedValue(validFlowResult);
+
+      const response = await POST(
+        buildRequest({ question: "What did we decide about pricing?" })
+      );
+
+      expect(response.status).toBe(200);
+      const payload = await response.json();
+      expect(payload.data).toEqual(validFlowResult);
+      expect(mockedRunScopedChatAgent).toHaveBeenCalledWith(
+        expect.objectContaining({
+          db: fakeDb,
+          workspaceId: "workspace-1",
+          userId: "user-1",
+          scope: { type: "workspace" },
+          question: "What did we decide about pricing?",
+        })
+      );
+      expect(mockedSearchWorkspaceContext).not.toHaveBeenCalled();
+      expect(mockedAnswerWorkspaceQuestion).not.toHaveBeenCalled();
+    });
+
+    it("loads authorized durable memory and lets sourceMeetingId override payload scope", async () => {
+      chatSessionsFindOne.mockResolvedValue({
+        _id: "session-1",
+        workspaceId: "workspace-1",
+        userId: "user-1",
+        sourceMeetingId: "m1",
+      });
+      mockedLoadDurableChatMemory.mockResolvedValue({
+        recentHistory: [
+          { role: "user", text: "Summarize the kickoff." },
+          { role: "assistant", text: "The team discussed pricing." },
+        ],
+        summary: "Older grounded kickoff context.",
+      });
+      mockedRunScopedChatAgent.mockResolvedValue(validMeetingFlowResult);
+
+      const response = await POST(
+        buildRequest({
+          question: "Who raised that concern?",
+          sessionId: "session-1",
+          scope: { type: "client", clientId: "client-1" },
+          history: [{ role: "user", text: "The latest browser-only turn." }],
+        })
+      );
+
+      expect(response.status).toBe(200);
+      expect(mockedLoadDurableChatMemory).toHaveBeenCalledWith({
+        db: fakeDb,
+        userId: "user-1",
+        workspaceId: "workspace-1",
+        sessionId: "session-1",
+      });
+      expect(chatSessionsFindOne).toHaveBeenCalledWith(
+        {
+          $and: [
+            { $or: [{ _id: "session-1" }, { id: "session-1" }] },
+            {
+              $or: [
+                { workspaceId: "workspace-1", userId: "user-1" },
+                {
+                  workspaceId: { $exists: false },
+                  userId: "user-1",
+                },
+              ],
+            },
+          ],
+        },
+        { projection: { sourceMeetingId: 1 } }
+      );
+      expect(mockedRunScopedChatAgent).toHaveBeenCalledWith(
+        expect.objectContaining({
+          scope: { type: "meeting", meetingId: "m1" },
+          memorySummary: "Older grounded kickoff context.",
+          history: [
+            { role: "user", text: "Summarize the kickoff." },
+            { role: "assistant", text: "The team discussed pricing." },
+            { role: "user", text: "The latest browser-only turn." },
+          ],
+        })
+      );
+      expect(mockedAnswerMeetingQuestion).not.toHaveBeenCalled();
+      expect(mockedSearchWorkspaceContext).not.toHaveBeenCalled();
+    });
+
+    it("applies meeting source and action filters to the agent result", async () => {
+      mockedRunScopedChatAgent.mockResolvedValue({
+        ...validMeetingFlowResult,
+        sources: [
+          ...validMeetingFlowResult.sources,
+          {
+            sourceType: "transcript",
+            sourceId: "other-meeting",
+            title: "Other meeting",
+            snippet: "Not in scope",
+          },
+        ],
+        suggestedActions: [
+          ...validMeetingFlowResult.suggestedActions,
+          {
+            label: "Open other",
+            actionType: "open_meeting",
+            targetId: "other-meeting",
+          },
+        ],
+      });
+
+      const response = await POST(
+        buildRequest({
+          question: "What did Stefan say?",
+          scope: { type: "meeting", meetingId: "m1" },
+        })
+      );
+
+      expect(response.status).toBe(200);
+      const payload = await response.json();
+      expect(payload.data.sources).toEqual(validMeetingFlowResult.sources);
+      expect(payload.data.suggestedActions).toEqual(
+        validMeetingFlowResult.suggestedActions
+      );
+      expect(mockedAnswerMeetingQuestion).not.toHaveBeenCalled();
+    });
+
+    it("validates entity scope before invoking the agent", async () => {
+      mockedAssertChatScopeAccess.mockRejectedValue(
+        new ApiRouteError(
+          404,
+          "chat_scope_not_found",
+          "Chat scope was not found."
+        )
+      );
+
+      const response = await POST(
+        buildRequest({
+          question: "What are the client commitments?",
+          scope: { type: "client", clientId: "other-client" },
+        })
+      );
+
+      expect(response.status).toBe(404);
+      expect(mockedRunScopedChatAgent).not.toHaveBeenCalled();
+      expect(mockedSearchWorkspaceContext).not.toHaveBeenCalled();
+    });
+
+    it("does not let a history follow-up escape an explicit entity scope", async () => {
+      mockedRunScopedChatAgent.mockResolvedValue({
+        answer: "The scoped client evidence is not conclusive.",
+        confidence: "low",
+        sources: [],
+        suggestedActions: [],
+      });
+
+      const response = await POST(
+        buildRequest({
+          question: "Who attended the first one?",
+          scope: { type: "client", clientId: "client-1" },
+          history: [
+            {
+              role: "assistant",
+              text: "You had two meetings.",
+              sources: [
+                {
+                  sourceType: "meeting",
+                  sourceId: "m1",
+                  title: "Kickoff",
+                  snippet: "Kickoff",
+                },
+                {
+                  sourceType: "meeting",
+                  sourceId: "m2",
+                  title: "Planning",
+                  snippet: "Planning",
+                },
+              ],
+            },
+          ],
+        })
+      );
+
+      expect(response.status).toBe(200);
+      expect(mockedRunScopedChatAgent).toHaveBeenCalledWith(
+        expect.objectContaining({
+          scope: { type: "client", clientId: "client-1" },
+        })
+      );
+    });
+
+    it("keeps the existing retrieval path when the agent returns null", async () => {
+      mockedRunScopedChatAgent.mockResolvedValue(null);
+
+      const response = await POST(
+        buildRequest({ question: "What did we decide about pricing?" })
+      );
+
+      expect(response.status).toBe(200);
+      expect(mockedRunScopedChatAgent).toHaveBeenCalledTimes(1);
+      expect(mockedSearchWorkspaceContext).toHaveBeenCalledTimes(1);
+      expect(mockedAnswerWorkspaceQuestion).toHaveBeenCalledTimes(1);
+    });
   });
 
   it("returns 401 when there is no session", async () => {
@@ -1059,11 +1298,21 @@ describe("POST /api/ai/chat", () => {
 
       expect(response.status).toBe(200);
       expect(chatSessionsFindOne).toHaveBeenCalledWith(
-        expect.objectContaining({
-          userId: "user-1",
-          $or: [{ _id: "s1" }, { id: "s1" }],
-        }),
-        expect.anything()
+        {
+          $and: [
+            { $or: [{ _id: "s1" }, { id: "s1" }] },
+            {
+              $or: [
+                { workspaceId: "workspace-1", userId: "user-1" },
+                {
+                  workspaceId: { $exists: false },
+                  userId: "user-1",
+                },
+              ],
+            },
+          ],
+        },
+        { projection: { sourceMeetingId: 1 } }
       );
       expect(mockedAnswerMeetingQuestion).toHaveBeenCalledTimes(1);
       expect(mockedSearchWorkspaceContext).not.toHaveBeenCalled();

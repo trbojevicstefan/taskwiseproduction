@@ -20,6 +20,9 @@ import {
   runChatTaskCommand,
 } from "@/lib/chat-task-commands";
 import { runInternalChatTool } from "@/lib/internal-chat-tools";
+import { runScopedChatAgent } from "@/lib/chat-agent-runtime";
+import { loadDurableChatMemory } from "@/lib/chat-memory";
+import { assertChatScopeAccess } from "@/lib/chat-scope";
 import {
   searchWorkspaceContext,
   type WorkspaceRetrievalResult,
@@ -29,10 +32,13 @@ import {
   resolveThreadFollowUp,
 } from "@/lib/chat-thread-context";
 import type {
+  ChatHistoryEntry,
+  ChatScope,
   GeneralChatAnswer,
   GeneralChatSource,
   GeneralChatSuggestedAction,
 } from "@/types/general-chat";
+import { ChatScopeSchema } from "@/types/general-chat";
 
 const ROUTE = "/api/ai/chat";
 
@@ -66,10 +72,9 @@ const requestSchema = z.object({
   question: z.string().trim().min(1).max(2000),
   sessionId: z.string().trim().min(1).max(200).optional(),
   meetingId: z.string().trim().min(1).max(200).optional(),
+  scope: ChatScopeSchema.optional(),
   history: z.array(historyEntrySchema).max(MAX_HISTORY_ENTRIES).optional(),
 });
-
-type ChatHistoryEntry = z.infer<typeof historyEntrySchema>;
 
 const NO_EVIDENCE_ANSWER =
   "I couldn't find anything in your workspace that matches this question — no meetings, transcripts, tasks, or people lined up with it. Try syncing your latest meetings, or rephrase the question with a meeting title, person, or task name.";
@@ -106,6 +111,23 @@ const renderHistoryBlock = (
     .join("\n")
     .slice(0, HISTORY_RENDER_MAX_CHARS);
   return rendered || undefined;
+};
+
+const mergeAuthorizedHistory = (
+  durableHistory: ChatHistoryEntry[],
+  requestHistory: ChatHistoryEntry[] | undefined
+): ChatHistoryEntry[] => {
+  const merged: ChatHistoryEntry[] = [];
+  const seen = new Set<string>();
+  for (const entry of [...durableHistory, ...(requestHistory ?? [])]) {
+    const key = `${entry.role}:${singleLine(entry.text)}:${(entry.sources ?? [])
+      .map((source) => `${source.sourceType}:${source.sourceId}`)
+      .join(",")}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    merged.push(entry);
+  }
+  return merged.slice(-HISTORY_RENDER_ENTRIES);
 };
 
 const buildRetrievalQuestion = (
@@ -229,6 +251,29 @@ const filterMeetingSuggestedActions = (
         return false;
     }
   });
+
+const filterAgentAnswerForScope = (
+  answer: GeneralChatAnswer,
+  scope: ChatScope
+): GeneralChatAnswer => {
+  if (scope.type !== "meeting") return answer;
+
+  const meetingIds = new Set([scope.meetingId]);
+  const sources = filterMeetingSources(answer.sources, meetingIds);
+  const suggestedActions = filterMeetingSuggestedActions(
+    answer.suggestedActions,
+    meetingIds
+  );
+  if (answer.sources.length > 0 && sources.length === 0) {
+    return {
+      answer: `${answer.answer.trim()} ${UNVERIFIED_SOURCES_CAVEAT}`,
+      confidence: "low",
+      sources,
+      suggestedActions,
+    };
+  }
+  return { ...answer, sources, suggestedActions };
+};
 
 /**
  * Render the retrieval result as compact labeled context blocks. One entity
@@ -453,7 +498,7 @@ export async function POST(request: Request) {
     }
     setMetricUserId(userId);
 
-    const { question, sessionId, meetingId, history } = await parseJsonBody(
+    const { question, sessionId, meetingId, scope, history } = await parseJsonBody(
       request,
       requestSchema,
       "Invalid chat question payload."
@@ -466,8 +511,43 @@ export async function POST(request: Request) {
         includeMemberUserIds: true,
       });
 
-    const historyBlock = renderHistoryBlock(history);
-    const threadContext = buildThreadContext(history);
+    let durableHistory: ChatHistoryEntry[] = [];
+    let memorySummary: string | null = null;
+    let sessionSourceMeetingId: string | null = null;
+    if (sessionId) {
+      const durableMemory = await loadDurableChatMemory({
+        db,
+        userId,
+        workspaceId,
+        sessionId,
+      });
+      durableHistory = durableMemory.recentHistory;
+      memorySummary = durableMemory.summary;
+      const session = await db.collection("chatSessions").findOne(
+        {
+          $and: [
+            { $or: [{ _id: sessionId }, { id: sessionId }] },
+            {
+              $or: [
+                { workspaceId, userId },
+                {
+                  workspaceId: { $exists: false },
+                  userId,
+                },
+              ],
+            },
+          ],
+        },
+        { projection: { sourceMeetingId: 1 } }
+      );
+      sessionSourceMeetingId = session?.sourceMeetingId
+        ? String(session.sourceMeetingId)
+        : null;
+    }
+
+    const effectiveHistory = mergeAuthorizedHistory(durableHistory, history);
+    const historyBlock = renderHistoryBlock(effectiveHistory);
+    const threadContext = buildThreadContext(effectiveHistory);
     const followUpResolution = resolveThreadFollowUp(question, threadContext);
 
     if (followUpResolution.kind === "ambiguous") {
@@ -488,27 +568,32 @@ export async function POST(request: Request) {
       );
     }
 
-    // Resolve the meeting context: an explicit meetingId wins; otherwise a
-    // sessionId whose chat session carries sourceMeetingId keeps the whole
-    // session meeting-scoped (follow-ups like "Who said that?" stay grounded
-    // in the same transcript even if the client omits meetingId).
-    let effectiveMeetingId = meetingId ?? null;
-    if (!effectiveMeetingId && sessionId) {
-      const session = await db
-        .collection("chatSessions")
-        .findOne(
-          { userId, $or: [{ _id: sessionId }, { id: sessionId }] },
-          { projection: { sourceMeetingId: 1 } }
-        );
-      if (session?.sourceMeetingId) {
-        effectiveMeetingId = String(session.sourceMeetingId);
-      }
-    }
-    if (!effectiveMeetingId && followUpResolution.kind === "meeting") {
-      effectiveMeetingId = followUpResolution.meetingId;
-    }
+    // Server-derived session scope is authoritative. A meeting-linked session
+    // cannot be broadened by a later client payload.
+    const requestedScope: ChatScope = sessionSourceMeetingId
+      ? { type: "meeting", meetingId: sessionSourceMeetingId }
+      : meetingId
+        ? { type: "meeting", meetingId }
+        : scope && scope.type !== "workspace"
+          ? scope
+        : followUpResolution.kind === "meeting"
+          ? { type: "meeting", meetingId: followUpResolution.meetingId }
+          : scope ?? { type: "workspace" };
+    const effectiveScope = await assertChatScopeAccess({
+      db,
+      userId,
+      workspaceId,
+      memberUserIds: workspaceMemberUserIds,
+      scope: requestedScope,
+    });
+    const effectiveMeetingId =
+      effectiveScope.type === "meeting" ? effectiveScope.meetingId : null;
 
-    const taskCommand = planChatTaskCommand(question, new Date(), history);
+    const taskCommand = planChatTaskCommand(
+      question,
+      new Date(),
+      effectiveHistory
+    );
     if (taskCommand) {
       const data = await runChatTaskCommand(
         db,
@@ -530,6 +615,36 @@ export async function POST(request: Request) {
       emitMetric(200, "success", {
         outcome: "task_command_answered",
         confidence: data.confidence,
+      });
+      return apiSuccess({ data }, { correlationId });
+    }
+
+    const today = new Date().toISOString().slice(0, 10);
+    const agentAnswer = await runScopedChatAgent({
+      db,
+      workspaceId,
+      userId,
+      scope: effectiveScope,
+      question,
+      history: effectiveHistory,
+      memorySummary,
+      today,
+    });
+    if (agentAnswer) {
+      const data = filterAgentAnswerForScope(agentAnswer, effectiveScope);
+      logger.info("api.request.succeeded", {
+        status: 200,
+        durationMs: durationMs(),
+        outcome: "scoped_agent_answered",
+        scopeType: effectiveScope.type,
+        confidence: data.confidence,
+        sourceCount: data.sources.length,
+        suggestedActionCount: data.suggestedActions.length,
+      });
+      emitMetric(200, "success", {
+        outcome: "scoped_agent_answered",
+        confidence: data.confidence,
+        sourceCount: data.sources.length,
       });
       return apiSuccess({ data }, { correlationId });
     }
@@ -579,7 +694,6 @@ export async function POST(request: Request) {
         return apiSuccess({ data }, { correlationId });
       }
 
-      const today = new Date().toISOString().slice(0, 10);
       const meetingDateSource =
         meeting.startTime ?? meeting.createdAt ?? meeting.lastActivityAt;
       const meetingDate = (() => {
@@ -647,6 +761,20 @@ export async function POST(request: Request) {
       return apiSuccess({ data }, { correlationId });
     }
 
+    if (effectiveScope.type === "client" || effectiveScope.type === "person") {
+      // Entity scopes must never silently broaden to workspace retrieval when
+      // the provider/tool loop is unavailable.
+      const data = buildNoEvidenceAnswer();
+      logger.info("api.request.succeeded", {
+        status: 200,
+        durationMs: durationMs(),
+        outcome: "scoped_agent_unavailable",
+        scopeType: effectiveScope.type,
+      });
+      emitMetric(200, "success", { outcome: "scoped_agent_unavailable" });
+      return apiSuccess({ data }, { correlationId });
+    }
+
     const queryPlan = planWorkspaceChatQuestion(question);
 
     if (queryPlan.mode === "workspace_tool") {
@@ -656,7 +784,6 @@ export async function POST(request: Request) {
         toolName: queryPlan.toolName,
         toolArgs: queryPlan.toolArgs,
       });
-      const today = new Date().toISOString().slice(0, 10);
       const contextBlocks = toolResult.answerHint
         ? `${toolResult.contextBlocks}\nHINT ${toolResult.answerHint}`
         : toolResult.contextBlocks;
@@ -723,8 +850,6 @@ export async function POST(request: Request) {
     }
 
     const contextBlocks = renderContextBlocks(retrieval);
-    const today = new Date().toISOString().slice(0, 10);
-
     const flowResult = await answerWorkspaceQuestion(
       { question, contextBlocks, today, history: historyBlock },
       { correlationId, userId }

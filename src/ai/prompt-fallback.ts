@@ -5,7 +5,9 @@ import { extractJsonValue } from "@/ai/flows/parse-json-output";
 import { recordExternalApiFailure } from "@/lib/observability-metrics";
 
 const OPENAI_MODEL =
-  process.env.OPENAI_MODEL || process.env.OPENAI_FALLBACK_MODEL || "gpt-4o-mini";
+  process.env.OPENAI_MODEL ||
+  process.env.OPENAI_FALLBACK_MODEL ||
+  "gpt-4.1-mini";
 const OPENAI_RESPONSES_URL =
   process.env.OPENAI_RESPONSES_URL || "https://api.openai.com/v1/responses";
 const OPENAI_USAGE_DEBUG = process.env.OPENAI_USAGE_DEBUG === "1";
@@ -323,4 +325,3 @@ export async function runPromptWithFallback<
     );
   }
 }
-
