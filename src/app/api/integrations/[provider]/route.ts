@@ -1,16 +1,3 @@
-/**
- * Phase 7 — generic meeting-provider connection management.
- *
- * POST   /api/integrations/[provider]  { apiKey } -> validateCredentials ->
- *        upsert the single (workspace, provider) connection. 400 on bad key.
- * GET    /api/integrations/[provider]  -> connection status (never the key).
- * DELETE /api/integrations/[provider]  -> mark the connection revoked.
- *
- * Member+ workspace scope with the "integrations" admin-visibility key,
- * mirroring the fathom connections routes. Fathom itself (OAuth, bespoke
- * routes) and unknown providers 404 here.
- */
-
 import { z } from "zod";
 import {
   apiError,
@@ -31,6 +18,7 @@ import {
   getMeetingProviderAdapter,
   ProviderNotImplementedError,
   type MeetingProviderAdapter,
+  type MeetingProviderCapabilities,
 } from "@/lib/meeting-providers";
 import { getSessionUserId } from "@/lib/server-auth";
 import { resolveWorkspaceScopeForUser } from "@/lib/workspace-scope";
@@ -38,7 +26,7 @@ import { resolveWorkspaceScopeForUser } from "@/lib/workspace-scope";
 const ROUTE = "/api/integrations/[provider]";
 
 const connectRequestSchema = z.object({
-  apiKey: z.string().trim().min(1, "API key is required."),
+  apiKey: z.string().trim().min(1).optional().nullable(),
   webhookSecret: z.string().trim().min(1).optional().nullable(),
 });
 
@@ -46,29 +34,37 @@ type ProviderRouteParams = {
   params: { provider: string } | Promise<{ provider: string }>;
 };
 
+const defaultCapabilities = (
+  adapter: MeetingProviderAdapter
+): MeetingProviderCapabilities =>
+  adapter.capabilities || {
+    connectionMode: "api-key",
+    manualSync:
+      typeof adapter.listMeetings === "function" &&
+      typeof adapter.fetchMeeting === "function",
+    supportsWebhookSecret: true,
+  };
+
 const resolveAdapterOr404 = async (
   params: ProviderRouteParams["params"]
-): Promise<{ adapter: MeetingProviderAdapter } | { response: ReturnType<typeof apiError> }> => {
+): Promise<
+  | { adapter: MeetingProviderAdapter; capabilities: MeetingProviderCapabilities }
+  | { response: ReturnType<typeof apiError> }
+> => {
   const { provider: rawProvider } = await Promise.resolve(params);
   const providerId = (rawProvider || "").trim().toLowerCase();
   const adapter = getMeetingProviderAdapter(providerId);
   if (!adapter || adapter.legacyWebhook) {
-    // Unknown providers 404; fathom 404s too — it has its own routes.
     return {
       response: apiError(404, "not_found", "Unknown integration provider."),
     };
   }
-  return { adapter };
+  return { adapter, capabilities: defaultCapabilities(adapter) };
 };
 
 export async function POST(request: Request, { params }: ProviderRouteParams) {
-  const routeContext = createRouteRequestContext({
-    request,
-    route: ROUTE,
-    method: "POST",
-  });
-  const { correlationId, logger, durationMs, setMetricUserId, emitMetric } =
-    routeContext;
+  const routeContext = createRouteRequestContext({ request, route: ROUTE, method: "POST" });
+  const { correlationId, logger, durationMs, setMetricUserId, emitMetric } = routeContext;
 
   try {
     const resolved = await resolveAdapterOr404(params);
@@ -76,14 +72,12 @@ export async function POST(request: Request, { params }: ProviderRouteParams) {
       emitMetric(404, "error", { reason: "unknown_provider" });
       return resolved.response;
     }
-    const { adapter } = resolved;
+    const { adapter, capabilities } = resolved;
 
     const userId = await getSessionUserId();
     if (!userId) {
       emitMetric(401, "error", { reason: "unauthorized" });
-      return apiError(401, "request_error", "Unauthorized", undefined, {
-        correlationId,
-      });
+      return apiError(401, "request_error", "Unauthorized", undefined, { correlationId });
     }
     setMetricUserId(userId);
 
@@ -92,32 +86,56 @@ export async function POST(request: Request, { params }: ProviderRouteParams) {
       minimumRole: "member",
       adminVisibilityKey: "integrations",
     });
-
     const body = await parseJsonBody(
       request,
       connectRequestSchema,
       "Invalid integration connect payload."
     );
 
-    const validation = await adapter.validateCredentials({ apiKey: body.apiKey });
-    if (!validation.ok) {
-      emitMetric(400, "error", { reason: "invalid_credentials" });
-      return apiError(
-        400,
-        "invalid_credentials",
-        validation.error || "The provided API key is invalid.",
-        undefined,
-        { correlationId }
-      );
+    let apiKey: string | null = body.apiKey?.trim() || null;
+    let accountName: string | null = null;
+
+    if (capabilities.connectionMode === "api-key") {
+      if (!apiKey) {
+        emitMetric(400, "error", { reason: "missing_api_key" });
+        return apiError(400, "invalid_payload", "API key is required.", undefined, {
+          correlationId,
+        });
+      }
+      const validation = await adapter.validateCredentials({ apiKey });
+      if (!validation.ok) {
+        emitMetric(400, "error", { reason: "invalid_credentials" });
+        return apiError(
+          400,
+          "invalid_credentials",
+          validation.error || "The provided API key is invalid.",
+          undefined,
+          { correlationId }
+        );
+      }
+      accountName = validation.accountName ?? null;
+    } else {
+      apiKey = null;
+      if (capabilities.supportsWebhookSecret && !body.webhookSecret?.trim()) {
+        emitMetric(400, "error", { reason: "missing_webhook_secret" });
+        return apiError(
+          400,
+          "invalid_payload",
+          "Webhook signing key is required for this provider.",
+          undefined,
+          { correlationId }
+        );
+      }
+      accountName = `${adapter.displayName} webhook`;
     }
 
     const connection = await upsertMeetingConnection(db, {
       workspaceId,
       userId,
       provider: adapter.provider,
-      apiKey: body.apiKey,
-      accountName: validation.accountName ?? null,
-      webhookSecret: body.webhookSecret ?? undefined,
+      apiKey,
+      accountName,
+      webhookSecret: body.webhookSecret?.trim() || undefined,
     });
 
     logger.info("api.request.succeeded", {
@@ -130,6 +148,7 @@ export async function POST(request: Request, { params }: ProviderRouteParams) {
     return apiSuccess(
       {
         provider: adapter.provider,
+        capabilities,
         connection: serializeMeetingConnection(connection),
       },
       { correlationId }
@@ -156,13 +175,8 @@ export async function POST(request: Request, { params }: ProviderRouteParams) {
 }
 
 export async function GET(request: Request, { params }: ProviderRouteParams) {
-  const routeContext = createRouteRequestContext({
-    request,
-    route: ROUTE,
-    method: "GET",
-  });
-  const { correlationId, logger, durationMs, setMetricUserId, emitMetric } =
-    routeContext;
+  const routeContext = createRouteRequestContext({ request, route: ROUTE, method: "GET" });
+  const { correlationId, logger, durationMs, setMetricUserId, emitMetric } = routeContext;
 
   try {
     const resolved = await resolveAdapterOr404(params);
@@ -170,14 +184,12 @@ export async function GET(request: Request, { params }: ProviderRouteParams) {
       emitMetric(404, "error", { reason: "unknown_provider" });
       return resolved.response;
     }
-    const { adapter } = resolved;
+    const { adapter, capabilities } = resolved;
 
     const userId = await getSessionUserId();
     if (!userId) {
       emitMetric(401, "error", { reason: "unauthorized" });
-      return apiError(401, "request_error", "Unauthorized", undefined, {
-        correlationId,
-      });
+      return apiError(401, "request_error", "Unauthorized", undefined, { correlationId });
     }
     setMetricUserId(userId);
 
@@ -204,6 +216,7 @@ export async function GET(request: Request, { params }: ProviderRouteParams) {
       {
         provider: adapter.provider,
         displayName: adapter.displayName,
+        capabilities,
         connection: serializeMeetingConnection(connection),
       },
       { correlationId }
@@ -220,13 +233,8 @@ export async function GET(request: Request, { params }: ProviderRouteParams) {
 }
 
 export async function DELETE(request: Request, { params }: ProviderRouteParams) {
-  const routeContext = createRouteRequestContext({
-    request,
-    route: ROUTE,
-    method: "DELETE",
-  });
-  const { correlationId, logger, durationMs, setMetricUserId, emitMetric } =
-    routeContext;
+  const routeContext = createRouteRequestContext({ request, route: ROUTE, method: "DELETE" });
+  const { correlationId, logger, durationMs, setMetricUserId, emitMetric } = routeContext;
 
   try {
     const resolved = await resolveAdapterOr404(params);
@@ -234,14 +242,12 @@ export async function DELETE(request: Request, { params }: ProviderRouteParams) 
       emitMetric(404, "error", { reason: "unknown_provider" });
       return resolved.response;
     }
-    const { adapter } = resolved;
+    const { adapter, capabilities } = resolved;
 
     const userId = await getSessionUserId();
     if (!userId) {
       emitMetric(401, "error", { reason: "unauthorized" });
-      return apiError(401, "request_error", "Unauthorized", undefined, {
-        correlationId,
-      });
+      return apiError(401, "request_error", "Unauthorized", undefined, { correlationId });
     }
     setMetricUserId(userId);
 
@@ -251,11 +257,7 @@ export async function DELETE(request: Request, { params }: ProviderRouteParams) 
       adminVisibilityKey: "integrations",
     });
 
-    const connection = await revokeMeetingConnection(
-      db,
-      workspaceId,
-      adapter.provider
-    );
+    const connection = await revokeMeetingConnection(db, workspaceId, adapter.provider);
     if (!connection) {
       emitMetric(404, "error", { reason: "connection_not_found" });
       return apiError(
@@ -277,6 +279,7 @@ export async function DELETE(request: Request, { params }: ProviderRouteParams) 
     return apiSuccess(
       {
         provider: adapter.provider,
+        capabilities,
         connection: serializeMeetingConnection(connection),
       },
       { correlationId }
