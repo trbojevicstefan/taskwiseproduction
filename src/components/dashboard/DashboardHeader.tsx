@@ -2,7 +2,7 @@
 "use client";
 
 import Link from "next/link";
-import { Workflow } from "lucide-react";
+import { CircleHelp, Workflow } from "lucide-react";
 import HeaderNav from "./HeaderNav";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -44,17 +44,31 @@ export default function DashboardHeader({
         </div>
         <div className="flex items-center gap-2 flex-shrink-0 self-center">
           {children}
-          <TooltipProvider delayDuration={250}>
+          <TooltipProvider delayDuration={200}>
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button variant="ghost" size="icon" className="h-9 w-9" asChild>
-                  <Link href="/automations" aria-label="Automations">
+                  <Link href="/automations" aria-label="Open Automations">
                     <Workflow className="h-5 w-5" />
                   </Link>
                 </Button>
               </TooltipTrigger>
-              <TooltipContent side="bottom">
-                <p>Automations — turn meeting events into follow-up workflows</p>
+              <TooltipContent side="bottom" className="max-w-xs">
+                <p className="font-medium">Automations</p>
+                <p className="text-xs text-muted-foreground">Turn meeting events into controlled follow-up workflows.</p>
+              </TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button variant="ghost" size="icon" className="h-9 w-9" asChild>
+                  <Link href="/docs" aria-label="Open help and documentation">
+                    <CircleHelp className="h-5 w-5" />
+                  </Link>
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom" className="max-w-xs">
+                <p className="font-medium">Help & docs</p>
+                <p className="text-xs text-muted-foreground">Learn how meetings, transcript chat, tasks, integrations, MCP and automations fit together.</p>
               </TooltipContent>
             </Tooltip>
           </TooltipProvider>
