@@ -1,19 +1,6 @@
 /**
- * Phase 7 — generic connection storage for adapter-based meeting providers
- * (Fireflies, Grain). Fathom keeps its legacy `fathomConnections` collection
- * (dual-write hazard — DO NOT migrate it here).
- *
- * Collection: `meetingConnections`. String UUID `_id`s. One connection per
- * (workspaceId, provider) — enforced by a unique index; reconnecting
- * reactivates/updates the existing doc instead of inserting a second one.
- *
- * Secrets: `apiKey` and `webhookSecret` are stored as-is on the doc, matching
- * the fathomConnections precedent (plaintext oauth tokens). The serializer
- * redacts them unless `includeSecrets` is passed, again matching
- * `serializeFathomConnection`. `webhookToken` is the routing key embedded in
- * the provider webhook URL (`/api/webhooks/[provider]?token=...`) — like
- * fathom's `webhook.webhookUrl` (which embeds its token) it is exposed by
- * default so users can configure the provider side.
+ * Generic connection storage for adapter-based meeting providers.
+ * Fathom keeps its legacy `fathomConnections` collection.
  */
 
 import { randomUUID } from "crypto";
@@ -25,17 +12,13 @@ export type MeetingConnectionStatus = "active" | "revoked";
 export interface MeetingConnectionDoc {
   _id: string;
   workspaceId: string;
-  /** User who connected the integration; owns ingested meetings and jobs. */
   userId: string;
   provider: MeetingProviderId;
   status: MeetingConnectionStatus;
-  /** Provider API key, stored as-is (fathomConnections plaintext precedent). */
+  /** Null for webhook-only providers such as Read AI. */
   apiKey: string | null;
-  /** Provider-side account label returned by validateCredentials. */
   accountName: string | null;
-  /** Optional webhook signing secret; null follows the fathom "no secret => accept" precedent. */
   webhookSecret: string | null;
-  /** Routing token for /api/webhooks/[provider]?token=<webhookToken>. */
   webhookToken: string | null;
   createdAt: Date;
   updatedAt: Date;
@@ -57,9 +40,7 @@ export const ensureMeetingConnectionIndexes = async (db: Db) => {
 
   meetingConnectionIndexesPromise = (async () => {
     const collection = getMeetingConnectionsCollection(db);
-    if (!collection || typeof collection.createIndex !== "function") {
-      return;
-    }
+    if (!collection || typeof collection.createIndex !== "function") return;
     try {
       await Promise.all([
         collection.createIndex(
@@ -92,8 +73,7 @@ export const findMeetingConnectionForWorkspace = async (
   db: Db,
   workspaceId: string,
   provider: MeetingProviderId
-) =>
-  getMeetingConnectionsCollection(db).findOne({ workspaceId, provider } as any);
+) => getMeetingConnectionsCollection(db).findOne({ workspaceId, provider } as any);
 
 export const findMeetingConnectionById = async (db: Db, connectionId: string) =>
   getMeetingConnectionsCollection(db).findOne({ _id: connectionId } as any);
@@ -126,19 +106,13 @@ export const listMeetingConnectionsForWorkspace = async (
     .sort({ updatedAt: -1, createdAt: -1 })
     .toArray();
 
-/**
- * Create or reactivate the single connection for (workspaceId, provider).
- * Reconnecting updates the apiKey/accountName, flips status back to active
- * and keeps the existing webhookToken so provider-side webhook URLs stay
- * valid.
- */
 export const upsertMeetingConnection = async (
   db: Db,
   input: {
     workspaceId: string;
     userId: string;
     provider: MeetingProviderId;
-    apiKey: string;
+    apiKey: string | null;
     accountName?: string | null;
     webhookSecret?: string | null;
   }
@@ -193,7 +167,6 @@ export const upsertMeetingConnection = async (
   return connection;
 };
 
-/** Mark the workspace connection for a provider as revoked (soft delete). */
 export const revokeMeetingConnection = async (
   db: Db,
   workspaceId: string,
@@ -215,7 +188,6 @@ const serializeDate = (value: Date | string | null | undefined) => {
   return value;
 };
 
-/** Never returns the apiKey/webhookSecret unless includeSecrets is set. */
 export const serializeMeetingConnection = (
   connection: MeetingConnectionDoc | null,
   options: { includeSecrets?: boolean } = {}
