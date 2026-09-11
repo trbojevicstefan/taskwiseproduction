@@ -15,16 +15,21 @@ jest.mock("@/components/ui/logo", () => ({
 }));
 
 describe("features page", () => {
-  it("describes the major product capabilities", () => {
+  it("describes the current meeting-to-execution capabilities", () => {
     const html = renderToStaticMarkup(React.createElement(FeaturesPage));
 
-    expect(html).toContain("AI chat");
-    expect(html).toContain("task cleanup");
-    expect(html).toContain("Deterministic prioritization");
-    expect(html).toContain("Planning workspace");
-    expect(html).toContain("Calendar and people/client views");
-    expect(html).toContain("Slack reminders");
+    expect(html).toContain("Transcript chat");
+    expect(html).toContain("Reviewed task extraction");
+    expect(html).toContain("Swipe Sweep");
+    expect(html).toContain("Explainable prioritization");
+    expect(html).toContain("Automations");
+    expect(html).toContain("People and Clients");
+    expect(html).toContain("Calendar and planning");
+    expect(html).toContain("Shareable meeting follow-up");
+    expect(html).toContain("Slack follow-through");
+    expect(html).toContain("MCP operator controls");
     expect(html).toContain('href="/signup"');
-    expect(html).toContain('href="/"');
+    expect(html).toContain('href="/use-cases/ai-meeting-notes-to-tasks"');
+    expect(html).toContain('href="/integrations"');
   });
 });
