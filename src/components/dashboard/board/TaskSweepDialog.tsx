@@ -2,7 +2,6 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import type { PanInfo } from "framer-motion";
 import {
   ArrowDown,
   ArrowLeft,
@@ -88,6 +87,7 @@ interface TaskSweepDialogProps {
 
 type WizardPhase = "setup" | "sweeping" | "reason" | "done";
 type SweepSummary = Record<TaskSweepAction, number>;
+type DragEndInfo = { offset: { x: number; y: number } };
 
 const flagLabel: Record<TaskSweepFlag, string> = {
   old_timer: "Old timer",
@@ -106,7 +106,7 @@ const reasonLabel: Record<Exclude<TaskSweepDiscardReason, "unspecified">, string
 const flagTone: Record<TaskSweepFlag, string> = {
   old_timer: "border-indigo-200 bg-indigo-50 text-indigo-700 dark:border-indigo-900 dark:bg-indigo-950/40 dark:text-indigo-300",
   vague: "border-fuchsia-200 bg-fuchsia-50 text-fuchsia-700 dark:border-fuchsia-900 dark:bg-fuchsia-950/40 dark:text-fuchsia-300",
-  overdue_loop: "border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-900 dark:bg-rose-950/30 dark:text-rose-300",
+  overdue_loop: "border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-900 dark:bg-rose-950/40 dark:text-rose-300",
   overdue: "border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-300",
   inactive: "border-slate-200 bg-slate-50 text-slate-700 dark:border-slate-700 dark:bg-slate-900/50 dark:text-slate-300",
 };
@@ -404,10 +404,7 @@ export default function TaskSweepDialog({
                     drag={!isSubmitting}
                     dragConstraints={{ left: 0, right: 0, top: 0, bottom: 0 }}
                     dragElastic={0.7}
-                    onDragEnd={(
-                      _event: MouseEvent | TouchEvent | PointerEvent,
-                      info: PanInfo
-                    ) => {
+                    onDragEnd={(_event: unknown, info: DragEndInfo) => {
                       const action = resolveSweepActionFromDrag(info.offset);
                       if (action) void handleAction(action);
                     }}
