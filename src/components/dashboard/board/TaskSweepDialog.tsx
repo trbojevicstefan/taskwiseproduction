@@ -1,13 +1,18 @@
 "use client";
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { AnimatePresence, motion } from "framer-motion";
 import {
+  ArrowDown,
+  ArrowLeft,
+  ArrowRight,
   ArrowUp,
   CalendarClock,
-  CheckCircle2,
   CheckCheck,
+  CheckCircle2,
   Clock3,
   Flag,
+  Keyboard,
   Sparkles,
   Trash2,
   User,
@@ -22,9 +27,14 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import { Slider } from "@/components/ui/slider";
+import {
+  filterSweepCandidatesByStrictness,
+  resolveSweepActionFromDrag,
+  resolveSweepActionFromKey,
+} from "@/components/dashboard/board/task-sweep-interactions";
 
 export type TaskSweepAction = "keep" | "discard" | "snooze" | "complete";
 export type TaskSweepDiscardReason =
@@ -76,6 +86,8 @@ interface TaskSweepDialogProps {
 }
 
 type WizardPhase = "setup" | "sweeping" | "reason" | "done";
+type SweepSummary = Record<TaskSweepAction, number>;
+type DragEndInfo = { offset: { x: number; y: number } };
 
 const flagLabel: Record<TaskSweepFlag, string> = {
   old_timer: "Old timer",
@@ -91,45 +103,29 @@ const reasonLabel: Record<Exclude<TaskSweepDiscardReason, "unspecified">, string
   delegation_issue: "Not my responsibility",
 };
 
-const parsePositiveInt = (value: string, fallback: number, maxValue: number) => {
-  const parsed = Number.parseInt(value, 10);
-  if (!Number.isFinite(parsed) || parsed < 1) return fallback;
-  return Math.min(parsed, maxValue);
+const flagTone: Record<TaskSweepFlag, string> = {
+  old_timer: "border-indigo-200 bg-indigo-50 text-indigo-700 dark:border-indigo-900 dark:bg-indigo-950/40 dark:text-indigo-300",
+  vague: "border-fuchsia-200 bg-fuchsia-50 text-fuchsia-700 dark:border-fuchsia-900 dark:bg-fuchsia-950/40 dark:text-fuchsia-300",
+  overdue_loop: "border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-900 dark:bg-rose-950/40 dark:text-rose-300",
+  overdue: "border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-300",
+  inactive: "border-slate-200 bg-slate-50 text-slate-700 dark:border-slate-700 dark:bg-slate-900/50 dark:text-slate-300",
 };
+
+const emptySummary = (): SweepSummary => ({
+  keep: 0,
+  discard: 0,
+  snooze: 0,
+  complete: 0,
+});
 
 const formatDateLabel = (value?: string | Date | null) => {
   if (!value) return "No date";
   const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "No date";
-  return date.toLocaleDateString();
+  return Number.isNaN(date.getTime()) ? "No date" : date.toLocaleDateString();
 };
 
-const priorityLabelMap: Record<string, string> = {
-  high: "High",
-  medium: "Medium",
-  low: "Low",
-};
-
-const priorityTone: Record<string, string> = {
-  high: "bg-rose-100 text-rose-700 border-rose-200 dark:bg-rose-950/50 dark:text-rose-300 dark:border-rose-900",
-  medium: "bg-amber-100 text-amber-700 border-amber-200 dark:bg-amber-950/50 dark:text-amber-300 dark:border-amber-900",
-  low: "bg-emerald-100 text-emerald-700 border-emerald-200 dark:bg-emerald-950/50 dark:text-emerald-300 dark:border-emerald-900",
-};
-
-const flagTone: Record<TaskSweepFlag, string> = {
-  old_timer: "bg-indigo-100 text-indigo-700 border-indigo-200 dark:bg-indigo-950/50 dark:text-indigo-300 dark:border-indigo-900",
-  vague: "bg-fuchsia-100 text-fuchsia-700 border-fuchsia-200 dark:bg-fuchsia-950/50 dark:text-fuchsia-300 dark:border-fuchsia-900",
-  overdue_loop: "bg-rose-100 text-rose-700 border-rose-200 dark:bg-rose-950/50 dark:text-rose-300 dark:border-rose-900",
-  overdue: "bg-amber-100 text-amber-700 border-amber-200 dark:bg-amber-950/50 dark:text-amber-300 dark:border-amber-900",
-  inactive: "bg-slate-100 text-slate-700 border-slate-200 dark:bg-slate-800/60 dark:text-slate-300 dark:border-slate-700",
-};
-
-type SweepSummary = {
-  keep: number;
-  discard: number;
-  snooze: number;
-  complete: number;
-};
+const clampSessionSize = (value: number, maxSessionSize: number) =>
+  Math.max(1, Math.min(Math.round(value), maxSessionSize));
 
 export default function TaskSweepDialog({
   open,
@@ -139,114 +135,122 @@ export default function TaskSweepDialog({
   defaultSessionSize = 10,
   maxSessionSize = 50,
 }: TaskSweepDialogProps) {
+  const maximum = Math.max(1, Math.min(maxSessionSize, Math.max(candidates.length, 1)));
   const [phase, setPhase] = useState<WizardPhase>("setup");
-  const [sessionSizeInput, setSessionSizeInput] = useState(String(defaultSessionSize));
+  const [sessionSize, setSessionSize] = useState(
+    clampSessionSize(defaultSessionSize, maximum)
+  );
+  const [strictness, setStrictness] = useState(30);
   const [queue, setQueue] = useState<TaskSweepCandidate[]>([]);
   const [index, setIndex] = useState(0);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [pendingDiscardTask, setPendingDiscardTask] = useState<TaskSweepCandidate | null>(null);
-  const [discardReason, setDiscardReason] = useState<Exclude<TaskSweepDiscardReason, "unspecified">>(
-    "low_intent"
-  );
-  const [summary, setSummary] = useState<SweepSummary>({
-    keep: 0,
-    discard: 0,
-    snooze: 0,
-    complete: 0,
-  });
+  const [pendingDiscardTask, setPendingDiscardTask] =
+    useState<TaskSweepCandidate | null>(null);
+  const [discardReason, setDiscardReason] = useState<
+    Exclude<TaskSweepDiscardReason, "unspecified">
+  >("low_intent");
+  const [summary, setSummary] = useState<SweepSummary>(emptySummary);
 
+  const eligibleCandidates = useMemo(
+    () => filterSweepCandidatesByStrictness(candidates, strictness),
+    [candidates, strictness]
+  );
   const currentTask = queue[index] ?? null;
   const staleCount = useMemo(
-    () => candidates.filter((candidate: any) => candidate.sweepFlags.length > 0).length,
+    () => candidates.filter((candidate) => candidate.sweepFlags.length > 0).length,
     [candidates]
   );
 
   const resetWizard = useCallback(() => {
     setPhase("setup");
-    setSessionSizeInput(String(defaultSessionSize));
+    setSessionSize(clampSessionSize(defaultSessionSize, maximum));
+    setStrictness(30);
     setQueue([]);
     setIndex(0);
-    setSummary({ keep: 0, discard: 0, snooze: 0, complete: 0 });
+    setSummary(emptySummary());
     setPendingDiscardTask(null);
     setDiscardReason("low_intent");
     setIsSubmitting(false);
-  }, [defaultSessionSize]);
+  }, [defaultSessionSize, maximum]);
 
   useEffect(() => {
-    if (open) {
-      resetWizard();
-    }
+    if (open) resetWizard();
   }, [open, resetWizard]);
 
+  useEffect(() => {
+    setSessionSize((value) => clampSessionSize(value, maximum));
+  }, [maximum]);
+
   const beginSession = () => {
-    const sessionSize = parsePositiveInt(sessionSizeInput, defaultSessionSize, maxSessionSize);
-    const nextQueue = candidates.slice(0, sessionSize);
-    setSessionSizeInput(String(sessionSize));
+    const nextQueue = eligibleCandidates.slice(
+      0,
+      clampSessionSize(sessionSize, Math.max(eligibleCandidates.length, 1))
+    );
     setQueue(nextQueue);
     setIndex(0);
-    setSummary({ keep: 0, discard: 0, snooze: 0, complete: 0 });
+    setSummary(emptySummary());
     setPendingDiscardTask(null);
-    setDiscardReason("low_intent");
     setPhase(nextQueue.length ? "sweeping" : "done");
   };
 
-  const advance = async (
-    task: TaskSweepCandidate,
-    action: TaskSweepAction,
-    reason?: TaskSweepDiscardReason
-  ) => {
-    setIsSubmitting(true);
-    try {
-      await onApplyAction(task, action, { reason });
-      setSummary((prev) => ({
-        keep: prev.keep + (action === "keep" ? 1 : 0),
-        discard: prev.discard + (action === "discard" ? 1 : 0),
-        snooze: prev.snooze + (action === "snooze" ? 1 : 0),
-        complete: prev.complete + (action === "complete" ? 1 : 0),
-      }));
-      const nextIndex = index + 1;
-      if (nextIndex >= queue.length) {
-        setPhase("done");
-      } else {
-        setIndex(nextIndex);
-        setPhase("sweeping");
+  const advance = useCallback(
+    async (
+      task: TaskSweepCandidate,
+      action: TaskSweepAction,
+      reason?: TaskSweepDiscardReason
+    ) => {
+      setIsSubmitting(true);
+      try {
+        await onApplyAction(task, action, { reason });
+        setSummary((previous) => ({
+          ...previous,
+          [action]: previous[action] + 1,
+        }));
+        const nextIndex = index + 1;
+        if (nextIndex >= queue.length) {
+          setPhase("done");
+        } else {
+          setIndex(nextIndex);
+          setPhase("sweeping");
+        }
+      } finally {
+        setIsSubmitting(false);
       }
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
+    },
+    [index, onApplyAction, queue.length]
+  );
 
-  const handleAction = async (action: TaskSweepAction) => {
-    if (!currentTask || isSubmitting) return;
-    if (action === "discard") {
-      const nextDiscardCount = summary.discard + 1;
-      const shouldAskReason = nextDiscardCount % 3 === 0;
-      if (shouldAskReason) {
-        setPendingDiscardTask(currentTask);
-        setPhase("reason");
+  const handleAction = useCallback(
+    async (action: TaskSweepAction) => {
+      if (!currentTask || isSubmitting) return;
+      if (action === "discard") {
+        const nextDiscardCount = summary.discard + 1;
+        if (nextDiscardCount % 3 === 0) {
+          setPendingDiscardTask(currentTask);
+          setPhase("reason");
+          return;
+        }
+        await advance(currentTask, "discard", "unspecified");
         return;
       }
-      await advance(currentTask, "discard", "unspecified");
-      return;
-    }
-    await advance(currentTask, action);
-  };
+      await advance(currentTask, action);
+    },
+    [advance, currentTask, isSubmitting, summary.discard]
+  );
 
-  const progressLabel =
-    queue.length > 0 ? `${Math.min(index + 1, queue.length)} / ${queue.length}` : "0 / 0";
-  const progressPercent = queue.length ? Math.min(((index + 1) / queue.length) * 100, 100) : 0;
-  const currentPriorityKey = String(currentTask?.priority || "medium").toLowerCase();
-  const currentPriorityLabel =
-    priorityLabelMap[currentPriorityKey] || currentTask?.priority || "Medium";
-  const currentPriorityClass =
-    priorityTone[currentPriorityKey] ||
-    "bg-slate-100 text-slate-700 border-slate-200 dark:bg-slate-800/60 dark:text-slate-300 dark:border-slate-700";
-  const currentScorePercent = currentTask
-    ? Math.max(10, Math.min(100, Math.round((currentTask.sweepScore / 10) * 100)))
-    : 0;
-  const currentAIConfidencePercent = currentTask
-    ? Math.max(1, Math.min(99, Math.round(currentTask.aiConfidence * 100)))
-    : 0;
+  useEffect(() => {
+    if (!open || phase !== "sweeping") return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (target?.closest("input, textarea, select, [contenteditable='true']")) return;
+      const action = resolveSweepActionFromKey(event.key);
+      if (!action) return;
+      event.preventDefault();
+      void handleAction(action);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [handleAction, open, phase]);
 
   const confirmDiscardWithReason = async () => {
     if (!pendingDiscardTask || isSubmitting) return;
@@ -254,85 +258,125 @@ export default function TaskSweepDialog({
     setPendingDiscardTask(null);
   };
 
+  const progressLabel = queue.length
+    ? `${Math.min(index + 1, queue.length)} / ${queue.length}`
+    : "0 / 0";
+  const progressPercent = queue.length
+    ? Math.min(((index + 1) / queue.length) * 100, 100)
+    : 0;
+  const confidencePercent = currentTask
+    ? Math.max(1, Math.min(99, Math.round(currentTask.aiConfidence * 100)))
+    : 0;
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-[760px] overflow-hidden p-0">
-        <div className="border-b bg-gradient-to-r from-sky-50 via-indigo-50 to-emerald-50 px-6 py-4 dark:from-sky-950/40 dark:via-indigo-950/40 dark:to-emerald-950/40">
+      <DialogContent className="max-h-[92vh] max-w-[780px] overflow-y-auto p-0">
+        <div className="border-b bg-muted/30 px-5 py-4 sm:px-6">
           <div className="flex items-center justify-between gap-3">
-            <div className="flex items-center gap-2 text-sm font-semibold text-slate-700 dark:text-slate-200">
-              <Sparkles className="h-4 w-4 text-indigo-600 dark:text-indigo-400" />
-              Task Sweep
+            <div className="flex items-center gap-2 text-sm font-semibold">
+              <Sparkles className="h-4 w-4 text-primary" />
+              Swipe Sweep
             </div>
-            <Badge className="border-indigo-200 bg-indigo-100 text-indigo-700 dark:border-indigo-900 dark:bg-indigo-950/50 dark:text-indigo-300">
-              Session cleanup
-            </Badge>
+            <Badge variant="outline">Board declutter</Badge>
           </div>
         </div>
 
-        <div className="p-6">
+        <div className="p-5 sm:p-6">
           {phase === "setup" && (
             <>
               <DialogHeader>
-                <DialogTitle className="text-xl">Clean task clutter in short bursts</DialogTitle>
+                <DialogTitle className="text-xl">Clear the board without opening every task</DialogTitle>
                 <DialogDescription>
-                  Start from oldest tasks, then quickly keep, complete, snooze, or discard.
+                  Choose how aggressive the cleanup should be, then swipe or use the keyboard to triage each candidate.
                 </DialogDescription>
               </DialogHeader>
-              <div className="mt-5 space-y-5">
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <div className="rounded-xl border border-sky-200 bg-sky-50 p-4 dark:border-sky-900 dark:bg-sky-950/40">
-                    <div className="text-xs uppercase tracking-wide text-sky-700 dark:text-sky-300">Candidates</div>
-                    <div className="mt-1 text-2xl font-semibold text-sky-900 dark:text-sky-100">{candidates.length}</div>
-                  </div>
-                  <div className="rounded-xl border border-indigo-200 bg-indigo-50 p-4 dark:border-indigo-900 dark:bg-indigo-950/40">
-                    <div className="text-xs uppercase tracking-wide text-indigo-700 dark:text-indigo-300">Flagged stale</div>
-                    <div className="mt-1 text-2xl font-semibold text-indigo-900 dark:text-indigo-100">{staleCount}</div>
-                  </div>
-                </div>
 
-                <div className="rounded-xl border bg-muted/30 p-4">
-                  <div className="text-sm font-medium">Action map</div>
-                  <div className="mt-3 grid gap-2 text-xs sm:grid-cols-2">
-                    <div className="flex items-center gap-2 rounded-md border border-emerald-200 bg-emerald-50 p-2 text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-300">
-                      <CheckCircle2 className="h-4 w-4" />
-                      Keep
-                    </div>
-                    <div className="flex items-center gap-2 rounded-md border border-rose-200 bg-rose-50 p-2 text-rose-700 dark:border-rose-900 dark:bg-rose-950/40 dark:text-rose-300">
-                      <Trash2 className="h-4 w-4" />
-                      Discard
-                    </div>
-                    <div className="flex items-center gap-2 rounded-md border border-amber-200 bg-amber-50 p-2 text-amber-700 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-300">
-                      <ArrowUp className="h-4 w-4" />
-                      Snooze
-                    </div>
-                    <div className="flex items-center gap-2 rounded-md border border-sky-200 bg-sky-50 p-2 text-sky-700 dark:border-sky-900 dark:bg-sky-950/40 dark:text-sky-300">
-                      <CheckCheck className="h-4 w-4" />
-                      Complete
-                    </div>
-                  </div>
-                </div>
+              <div className="mt-6 grid gap-3 sm:grid-cols-3">
+                <Stat label="Candidates" value={candidates.length} />
+                <Stat label="Flagged stale" value={staleCount} />
+                <Stat label="After strictness" value={eligibleCandidates.length} />
+              </div>
 
-                <div className="space-y-2">
-                  <Label htmlFor="task-sweep-session-size">Tasks this session</Label>
-                  <Input
-                    id="task-sweep-session-size"
-                    inputMode="numeric"
-                    value={sessionSizeInput}
-                    onChange={(event) => setSessionSizeInput(event.target.value.replace(/[^\d]/g, ""))}
-                    placeholder="10"
+              <div className="mt-6 space-y-6 rounded-2xl border bg-card p-4 sm:p-5">
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <Label>Cleanup strictness</Label>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        Higher values only show tasks with stronger stale/noise signals.
+                      </p>
+                    </div>
+                    <Badge variant="secondary">{strictness}%</Badge>
+                  </div>
+                  <Slider
+                    aria-label="Cleanup strictness"
+                    min={0}
+                    max={90}
+                    step={10}
+                    value={[strictness]}
+                    onValueChange={([value]) => setStrictness(value)}
                   />
-                  <p className="text-xs text-muted-foreground">
-                    Default is 10 tasks. You can pick up to {maxSessionSize} per sweep.
-                  </p>
+                  <div className="flex justify-between text-[11px] text-muted-foreground">
+                    <span>Review broadly</span>
+                    <span>Only obvious clutter</span>
+                  </div>
+                </div>
+
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <Label>Tasks this session</Label>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        Short bursts are easier to finish than a giant cleanup project.
+                      </p>
+                    </div>
+                    <Badge variant="secondary">{Math.min(sessionSize, Math.max(eligibleCandidates.length, 1))}</Badge>
+                  </div>
+                  <Slider
+                    aria-label="Tasks this session"
+                    min={1}
+                    max={Math.max(1, Math.min(maxSessionSize, eligibleCandidates.length || 1))}
+                    step={1}
+                    value={[Math.min(sessionSize, Math.max(1, eligibleCandidates.length))]}
+                    onValueChange={([value]) => setSessionSize(value)}
+                    disabled={eligibleCandidates.length === 0}
+                  />
+                  <div className="flex flex-wrap gap-2">
+                    {[5, 10, 20].map((preset) => (
+                      <Button
+                        key={preset}
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        onClick={() => setSessionSize(Math.min(preset, Math.max(eligibleCandidates.length, 1)))}
+                        disabled={eligibleCandidates.length === 0}
+                      >
+                        {preset}
+                      </Button>
+                    ))}
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      onClick={() => setSessionSize(Math.min(maxSessionSize, Math.max(eligibleCandidates.length, 1)))}
+                      disabled={eligibleCandidates.length === 0}
+                    >
+                      All
+                    </Button>
+                  </div>
                 </div>
               </div>
+
+              <div className="mt-5 grid grid-cols-2 gap-2 text-xs sm:grid-cols-4">
+                <ActionLegend icon={ArrowRight} label="Keep" shortcut="→ / K" />
+                <ActionLegend icon={ArrowLeft} label="Discard" shortcut="← / D" />
+                <ActionLegend icon={ArrowUp} label="Snooze" shortcut="↑ / S" />
+                <ActionLegend icon={ArrowDown} label="Complete" shortcut="↓ / C" />
+              </div>
+
               <DialogFooter className="mt-6">
-                <Button variant="outline" onClick={() => onOpenChange(false)}>
-                  Cancel
-                </Button>
-                <Button onClick={beginSession} disabled={!candidates.length}>
-                  Start sweep
-                </Button>
+                <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
+                <Button onClick={beginSession} disabled={!eligibleCandidates.length}>Start swipe sweep</Button>
               </DialogFooter>
             </>
           )}
@@ -341,194 +385,90 @@ export default function TaskSweepDialog({
             <>
               <DialogHeader>
                 <DialogTitle className="flex items-center justify-between gap-3">
-                  <span>Review task</span>
+                  <span>Decide, don&apos;t administrate</span>
                   <Badge variant="secondary">{progressLabel}</Badge>
                 </DialogTitle>
                 <DialogDescription>
-                  Use action buttons to process tasks quickly.
+                  Swipe the card, use arrow keys, or use the buttons below. Nothing is auto-removed.
                 </DialogDescription>
               </DialogHeader>
-              <div className="mt-4 space-y-4">
-                <div className="h-2 w-full rounded-full bg-muted">
-                  <div
-                    className="h-full rounded-full bg-gradient-to-r from-sky-500 via-indigo-500 to-emerald-500 transition-all"
-                    style={{ width: `${progressPercent}%` }}
-                  />
-                </div>
 
-                <div
-                  key={currentTask.id}
-                  className="rounded-2xl border bg-card p-5 shadow-sm"
-                >
-                  <div className="flex flex-wrap items-center gap-2">
-                    {currentTask.sweepFlags.map((flag) => (
-                      <Badge key={flag} className={`border ${flagTone[flag]}`}>
-                        {flagLabel[flag]}
-                      </Badge>
-                    ))}
-                    <Badge className={`border ${currentPriorityClass}`}>
-                      Priority {currentPriorityLabel}
-                    </Badge>
-                    <Badge variant="secondary">Age {currentTask.taskAgeDays}d</Badge>
-                    <Badge variant="secondary">Inactive {currentTask.inactiveDays}d</Badge>
-                  </div>
+              <div className="mt-4 h-1.5 w-full overflow-hidden rounded-full bg-muted">
+                <div className="h-full bg-primary transition-all" style={{ width: `${progressPercent}%` }} />
+              </div>
 
-                  <h3 className="mt-3 text-lg font-semibold">{currentTask.title}</h3>
-                  <p className="mt-1 text-sm text-muted-foreground">
-                    {currentTask.description || "No description available."}
-                  </p>
-
-                  <div className="mt-4 space-y-2 rounded-lg border bg-muted/20 p-3">
-                    <div className="text-xs font-medium text-muted-foreground">Stale score</div>
-                    <div className="h-1.5 w-full rounded-full bg-slate-200 dark:bg-slate-700">
-                      <div
-                        className="h-full rounded-full bg-gradient-to-r from-amber-400 via-orange-500 to-rose-500"
-                        style={{ width: `${currentScorePercent}%` }}
-                      />
-                    </div>
-                    <div className="text-xs text-muted-foreground">
-                      Score {currentTask.sweepScore.toFixed(1)} / 10
-                    </div>
-                  </div>
-
-                  <div
-                    className={
-                      currentTask.aiShouldRemove
-                        ? "mt-3 space-y-2 rounded-lg border border-rose-200 bg-rose-50 p-3 dark:border-rose-900 dark:bg-rose-950/40"
-                        : "mt-3 space-y-2 rounded-lg border border-emerald-200 bg-emerald-50 p-3 dark:border-emerald-900 dark:bg-emerald-950/40"
-                    }
+              <div className="relative mt-5 min-h-[390px]">
+                <AnimatePresence mode="wait">
+                  <motion.div
+                    key={currentTask.id}
+                    drag={!isSubmitting}
+                    dragConstraints={{ left: 0, right: 0, top: 0, bottom: 0 }}
+                    dragElastic={0.7}
+                    onDragEnd={(_event: unknown, info: DragEndInfo) => {
+                      const action = resolveSweepActionFromDrag(info.offset);
+                      if (action) void handleAction(action);
+                    }}
+                    initial={{ opacity: 0, scale: 0.98 }}
+                    animate={{ opacity: 1, scale: 1, x: 0, y: 0 }}
+                    exit={{ opacity: 0, scale: 0.96 }}
+                    transition={{ duration: 0.16 }}
+                    className="cursor-grab touch-none rounded-2xl border bg-card p-5 shadow-md active:cursor-grabbing sm:p-6"
                   >
-                    <div className="flex items-center justify-between gap-2">
-                      <div
-                        className={
-                          currentTask.aiShouldRemove
-                            ? "text-xs font-semibold text-rose-700 dark:text-rose-300"
-                            : "text-xs font-semibold text-emerald-700 dark:text-emerald-300"
-                        }
-                      >
-                        AI recommendation
-                      </div>
-                      <Badge
-                        className={
-                          currentTask.aiShouldRemove
-                            ? "border-rose-200 bg-rose-100 text-rose-700 dark:border-rose-900 dark:bg-rose-950/50 dark:text-rose-300"
-                            : "border-emerald-200 bg-emerald-100 text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950/50 dark:text-emerald-300"
-                        }
-                      >
-                        {currentTask.aiShouldRemove ? "Suggest remove" : "Suggest keep"}
-                      </Badge>
+                    <div className="flex flex-wrap gap-2">
+                      {currentTask.sweepFlags.map((flag) => (
+                        <Badge key={flag} variant="outline" className={flagTone[flag]}>{flagLabel[flag]}</Badge>
+                      ))}
+                      <Badge variant="secondary">Noise score {currentTask.sweepScore.toFixed(1)}/10</Badge>
+                      <Badge variant="secondary">Age {currentTask.taskAgeDays}d</Badge>
                     </div>
-                    <div
-                      className={
-                        currentTask.aiShouldRemove
-                          ? "text-xs text-rose-700 dark:text-rose-300"
-                          : "text-xs text-emerald-700 dark:text-emerald-300"
-                      }
+
+                    <h3 className="mt-4 text-xl font-semibold leading-tight">{currentTask.title}</h3>
+                    <p className="mt-2 text-sm leading-6 text-muted-foreground">
+                      {currentTask.description || "No description. That can itself be a sign this task needs a decision."}
+                    </p>
+
+                    <div className={currentTask.aiShouldRemove
+                      ? "mt-5 rounded-xl border border-rose-200 bg-rose-50 p-4 dark:border-rose-900 dark:bg-rose-950/30"
+                      : "mt-5 rounded-xl border border-emerald-200 bg-emerald-50 p-4 dark:border-emerald-900 dark:bg-emerald-950/30"}
                     >
-                      {currentTask.aiReason}
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div className="text-sm font-semibold">AI recommendation</div>
+                        <Badge variant="outline">{currentTask.aiShouldRemove ? "Suggest discard" : "Suggest keep"} · {confidencePercent}%</Badge>
+                      </div>
+                      <p className="mt-2 text-sm leading-6">{currentTask.aiReason}</p>
+                      <p className="mt-2 text-xs text-muted-foreground">
+                        Based on {currentTask.aiInteractionCount} prior interactions. Recommendation is advisory only.
+                      </p>
                     </div>
-                    <div className="h-1.5 w-full rounded-full bg-white/70 dark:bg-white/10">
-                      <div
-                        className={
-                          currentTask.aiShouldRemove
-                            ? "h-full rounded-full bg-rose-500"
-                            : "h-full rounded-full bg-emerald-500"
-                        }
-                        style={{ width: `${currentAIConfidencePercent}%` }}
-                      />
-                    </div>
-                    <div className="text-xs text-muted-foreground">
-                      Confidence {currentAIConfidencePercent}% based on {currentTask.aiInteractionCount} prior interactions
-                    </div>
-                  </div>
 
-                  <div className="mt-4 grid gap-2 text-xs text-muted-foreground sm:grid-cols-2">
-                    <div className="flex items-center gap-2 rounded-md border bg-muted/20 px-3 py-2">
-                      <Flag className="h-3.5 w-3.5 text-indigo-600" />
-                      Status:{" "}
-                      <span className="font-medium text-foreground">
-                        {currentTask.statusLabel || currentTask.status || "Unknown"}
-                      </span>
+                    <div className="mt-5 grid gap-2 text-xs text-muted-foreground sm:grid-cols-2">
+                      <TaskMeta icon={Flag} label="Status" value={currentTask.statusLabel || currentTask.status || "Unknown"} />
+                      <TaskMeta icon={User} label="Assignee" value={currentTask.assigneeName || "Unassigned"} />
+                      <TaskMeta icon={CalendarClock} label="Due" value={formatDateLabel(currentTask.dueAt)} />
+                      <TaskMeta icon={Clock3} label="Updated" value={formatDateLabel(currentTask.lastUpdated)} />
                     </div>
-                    <div className="flex items-center gap-2 rounded-md border bg-muted/20 px-3 py-2">
-                      <User className="h-3.5 w-3.5 text-sky-600" />
-                      Assignee:{" "}
-                      <span className="font-medium text-foreground">
-                        {currentTask.assigneeName || "Unassigned"}
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-2 rounded-md border bg-muted/20 px-3 py-2">
-                      <CalendarClock className="h-3.5 w-3.5 text-amber-600" />
-                      Due: <span className="font-medium text-foreground">{formatDateLabel(currentTask.dueAt)}</span>
-                    </div>
-                    <div className="flex items-center gap-2 rounded-md border bg-muted/20 px-3 py-2">
-                      <Clock3 className="h-3.5 w-3.5 text-emerald-600" />
-                      Last updated:{" "}
-                      <span className="font-medium text-foreground">
-                        {formatDateLabel(currentTask.lastUpdated)}
-                      </span>
-                    </div>
-                  </div>
 
-                  <details className="mt-3 rounded-md border bg-muted/10 p-3 text-xs text-muted-foreground">
-                    <summary className="cursor-pointer font-medium text-foreground">
-                      More task details
-                    </summary>
-                    <div className="mt-2 grid gap-1 sm:grid-cols-2">
-                      <div>
-                        Source:{" "}
-                        <span className="text-foreground">{currentTask.sourceSessionName || "General"}</span>
-                      </div>
-                      <div>
-                        Type: <span className="text-foreground">{currentTask.taskType || "General"}</span>
-                      </div>
-                      <div>
-                        Created: <span className="text-foreground">{formatDateLabel(currentTask.createdAt)}</span>
-                      </div>
-                      <div>
-                        Task ID: <span className="text-foreground">{currentTask.id}</span>
-                      </div>
+                    <div className="mt-5 flex items-center justify-center gap-2 text-xs text-muted-foreground">
+                      <Keyboard className="h-4 w-4" />
+                      Drag 80px in a direction, or use arrows / K D S C
                     </div>
-                  </details>
-                </div>
+                  </motion.div>
+                </AnimatePresence>
+              </div>
 
-                <div className="grid grid-cols-2 gap-2">
-                  <Button
-                    variant="outline"
-                    className="gap-2 border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100 dark:border-rose-900 dark:bg-rose-950/40 dark:text-rose-300 dark:hover:bg-rose-950/60"
-                    onClick={() => void handleAction("discard")}
-                    disabled={isSubmitting}
-                  >
-                    <Trash2 className="h-4 w-4" />
-                    Discard
-                  </Button>
-                  <Button
-                    variant="outline"
-                    className="gap-2 border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-300 dark:hover:bg-emerald-950/60"
-                    onClick={() => void handleAction("keep")}
-                    disabled={isSubmitting}
-                  >
-                    <CheckCircle2 className="h-4 w-4" />
-                    Keep
-                  </Button>
-                  <Button
-                    variant="outline"
-                    className="gap-2 border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-300 dark:hover:bg-amber-950/60"
-                    onClick={() => void handleAction("snooze")}
-                    disabled={isSubmitting}
-                  >
-                    <ArrowUp className="h-4 w-4" />
-                    Snooze
-                  </Button>
-                  <Button
-                    className="gap-2 bg-sky-600 text-white hover:bg-sky-700"
-                    onClick={() => void handleAction("complete")}
-                    disabled={isSubmitting}
-                  >
-                    <CheckCheck className="h-4 w-4" />
-                    Complete
-                  </Button>
-                </div>
+              <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
+                <Button variant="outline" onClick={() => void handleAction("discard")} disabled={isSubmitting} className="gap-2">
+                  <Trash2 className="h-4 w-4" /> Discard
+                </Button>
+                <Button variant="outline" onClick={() => void handleAction("keep")} disabled={isSubmitting} className="gap-2">
+                  <CheckCircle2 className="h-4 w-4" /> Keep
+                </Button>
+                <Button variant="outline" onClick={() => void handleAction("snooze")} disabled={isSubmitting} className="gap-2">
+                  <ArrowUp className="h-4 w-4" /> Snooze
+                </Button>
+                <Button onClick={() => void handleAction("complete")} disabled={isSubmitting} className="gap-2">
+                  <CheckCheck className="h-4 w-4" /> Complete
+                </Button>
               </div>
             </>
           )}
@@ -536,34 +476,24 @@ export default function TaskSweepDialog({
           {phase === "reason" && pendingDiscardTask && (
             <>
               <DialogHeader>
-                <DialogTitle>Why was this task irrelevant?</DialogTitle>
+                <DialogTitle>Why did this not belong on your board?</DialogTitle>
                 <DialogDescription>
-                  This helps TaskWise learn what to suppress in future suggestions.
+                  We ask occasionally so future cleanup suggestions become more useful.
                 </DialogDescription>
               </DialogHeader>
               <div className="mt-4 space-y-4">
-                <div className="rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm dark:border-rose-900 dark:bg-rose-950/40">
-                  <p className="font-medium text-rose-800 dark:text-rose-200">{pendingDiscardTask.title}</p>
-                </div>
+                <div className="rounded-lg border bg-muted/30 p-3 text-sm font-medium">{pendingDiscardTask.title}</div>
                 <RadioGroup
                   value={discardReason}
-                  onValueChange={(value) =>
-                    setDiscardReason(value as Exclude<TaskSweepDiscardReason, "unspecified">)
-                  }
+                  onValueChange={(value) => setDiscardReason(value as Exclude<TaskSweepDiscardReason, "unspecified">)}
                   className="space-y-2"
                 >
-                  <div className="flex items-center space-x-2 rounded-md border p-3">
-                    <RadioGroupItem value="low_intent" id="reason-low-intent" />
-                    <Label htmlFor="reason-low-intent">{reasonLabel.low_intent}</Label>
-                  </div>
-                  <div className="flex items-center space-x-2 rounded-md border p-3">
-                    <RadioGroupItem value="sync_issue" id="reason-sync-issue" />
-                    <Label htmlFor="reason-sync-issue">{reasonLabel.sync_issue}</Label>
-                  </div>
-                  <div className="flex items-center space-x-2 rounded-md border p-3">
-                    <RadioGroupItem value="delegation_issue" id="reason-delegation-issue" />
-                    <Label htmlFor="reason-delegation-issue">{reasonLabel.delegation_issue}</Label>
-                  </div>
+                  {(Object.keys(reasonLabel) as Array<Exclude<TaskSweepDiscardReason, "unspecified">>).map((reason) => (
+                    <div key={reason} className="flex items-center space-x-2 rounded-md border p-3">
+                      <RadioGroupItem value={reason} id={`reason-${reason}`} />
+                      <Label htmlFor={`reason-${reason}`}>{reasonLabel[reason]}</Label>
+                    </div>
+                  ))}
                 </RadioGroup>
               </div>
               <DialogFooter className="mt-6">
@@ -577,9 +507,7 @@ export default function TaskSweepDialog({
                 >
                   Back
                 </Button>
-                <Button onClick={() => void confirmDiscardWithReason()} disabled={isSubmitting}>
-                  Save and continue
-                </Button>
+                <Button onClick={() => void confirmDiscardWithReason()} disabled={isSubmitting}>Discard & continue</Button>
               </DialogFooter>
             </>
           )}
@@ -588,35 +516,23 @@ export default function TaskSweepDialog({
             <>
               <DialogHeader>
                 <DialogTitle className="flex items-center gap-2">
-                  <Clock3 className="h-5 w-5 text-primary" />
-                  Sweep complete
+                  <CheckCircle2 className="h-5 w-5 text-primary" /> Sweep complete
                 </DialogTitle>
                 <DialogDescription>
-                  Session finished. You can start another sweep with a fresh task count anytime.
+                  You made explicit decisions instead of carrying ambiguous tasks forward.
                 </DialogDescription>
               </DialogHeader>
-              <div className="mt-4 grid grid-cols-2 gap-2 text-sm sm:grid-cols-4">
-                <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-center dark:border-emerald-900 dark:bg-emerald-950/40">
-                  <div className="text-emerald-700 dark:text-emerald-300">Keep</div>
-                  <div className="text-lg font-semibold text-emerald-900 dark:text-emerald-100">{summary.keep}</div>
-                </div>
-                <div className="rounded-lg border border-sky-200 bg-sky-50 p-3 text-center dark:border-sky-900 dark:bg-sky-950/40">
-                  <div className="text-sky-700 dark:text-sky-300">Complete</div>
-                  <div className="text-lg font-semibold text-sky-900 dark:text-sky-100">{summary.complete}</div>
-                </div>
-                <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-center dark:border-amber-900 dark:bg-amber-950/40">
-                  <div className="text-amber-700 dark:text-amber-300">Snooze</div>
-                  <div className="text-lg font-semibold text-amber-900 dark:text-amber-100">{summary.snooze}</div>
-                </div>
-                <div className="rounded-lg border border-rose-200 bg-rose-50 p-3 text-center dark:border-rose-900 dark:bg-rose-950/40">
-                  <div className="text-rose-700 dark:text-rose-300">Discard</div>
-                  <div className="text-lg font-semibold text-rose-900 dark:text-rose-100">{summary.discard}</div>
-                </div>
+              <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
+                <Stat label="Kept" value={summary.keep} />
+                <Stat label="Discarded" value={summary.discard} />
+                <Stat label="Snoozed" value={summary.snooze} />
+                <Stat label="Completed" value={summary.complete} />
               </div>
+              <p className="mt-4 text-sm text-muted-foreground">
+                Processed {Object.values(summary).reduce((total, value) => total + value, 0)} task decisions in this sweep.
+              </p>
               <DialogFooter className="mt-6">
-                <Button variant="outline" onClick={() => onOpenChange(false)}>
-                  Close
-                </Button>
+                <Button variant="outline" onClick={() => onOpenChange(false)}>Back to board</Button>
                 <Button onClick={resetWizard}>Start another sweep</Button>
               </DialogFooter>
             </>
@@ -624,5 +540,48 @@ export default function TaskSweepDialog({
         </div>
       </DialogContent>
     </Dialog>
+  );
+}
+
+function Stat({ label, value }: { label: string; value: number }) {
+  return (
+    <div className="rounded-xl border bg-muted/20 p-3">
+      <div className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">{label}</div>
+      <div className="mt-1 text-2xl font-semibold">{value}</div>
+    </div>
+  );
+}
+
+function ActionLegend({
+  icon: Icon,
+  label,
+  shortcut,
+}: {
+  icon: React.ElementType;
+  label: string;
+  shortcut: string;
+}) {
+  return (
+    <div className="rounded-lg border bg-muted/20 p-3">
+      <div className="flex items-center gap-2 font-medium"><Icon className="h-4 w-4" /> {label}</div>
+      <div className="mt-1 text-muted-foreground">{shortcut}</div>
+    </div>
+  );
+}
+
+function TaskMeta({
+  icon: Icon,
+  label,
+  value,
+}: {
+  icon: React.ElementType;
+  label: string;
+  value: string;
+}) {
+  return (
+    <div className="flex items-center gap-2 rounded-md border bg-muted/20 px-3 py-2">
+      <Icon className="h-3.5 w-3.5 shrink-0" />
+      <span>{label}: <span className="font-medium text-foreground">{value}</span></span>
+    </div>
   );
 }
