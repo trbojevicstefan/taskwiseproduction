@@ -23,6 +23,13 @@ export const asDate = (value: unknown): Date | null => {
   }
   const text = cleanString(value);
   if (!text) return null;
+  if (/^\d+(?:\.\d+)?$/.test(text)) {
+    const numeric = Number(text);
+    if (Number.isFinite(numeric)) {
+      const date = new Date(numeric > 10_000_000_000 ? numeric : numeric * 1000);
+      return Number.isNaN(date.getTime()) ? null : date;
+    }
+  }
   const date = new Date(text);
   return Number.isNaN(date.getTime()) ? null : date;
 };
@@ -51,9 +58,7 @@ export const normalizeParticipants = (raw: unknown): NormalizedProviderParticipa
     if (typeof value === "string") {
       const email = cleanEmail(value);
       const text = cleanString(value);
-      const name = email
-        ? email.split("@")[0].replace(/[._-]+/g, " ")
-        : text;
+      const name = email ? email.split("@")[0].replace(/[._-]+/g, " ") : text;
       if (!name) continue;
       const participant: NormalizedProviderParticipant = {
         name,
@@ -103,6 +108,7 @@ export const normalizeTranscriptSegments = (
       : raw && typeof raw === "object"
         ? ((raw as any).segments ||
             (raw as any).sentences ||
+            (raw as any).speaker_blocks ||
             (raw as any).transcript ||
             (raw as any).utterances ||
             (raw as any).data)
@@ -116,7 +122,8 @@ export const normalizeTranscriptSegments = (
     const text =
       cleanString(entry.text) ||
       cleanString(entry.content) ||
-      cleanString(entry.transcript);
+      cleanString(entry.transcript) ||
+      cleanString(entry.words);
     if (!text) continue;
     const speakerValue =
       entry.speaker && typeof entry.speaker === "object"
@@ -138,6 +145,8 @@ export const normalizeTranscriptSegments = (
       entry.offset,
     ]) {
       if (typeof rawOffset === "number" && Number.isFinite(rawOffset)) {
+        // Epoch milliseconds/numeric timestamps are handled as absolute times below.
+        if (rawOffset > 10_000_000_000 && meetingStart) break;
         offsetSeconds = Math.max(0, rawOffset);
         break;
       }
