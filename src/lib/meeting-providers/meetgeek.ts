@@ -1,3 +1,4 @@
+import { createHmac, timingSafeEqual } from "crypto";
 import type {
   MeetingProviderAdapter,
   MeetingProviderConnection,
@@ -27,11 +28,15 @@ const MAX_TRANSCRIPT_PAGES = 50;
 
 const meetgeekFetch = (apiKey: string, path: string) =>
   fetch(`${MEETGEEK_API_BASE_URL}${path}`, {
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      Accept: "application/json",
-    },
+    headers: { Authorization: `Bearer ${apiKey}`, Accept: "application/json" },
   });
+
+const safeHexEqual = (provided: string, expected: string) => {
+  if (!/^[0-9a-f]+$/i.test(provided) || provided.length !== expected.length) return false;
+  const a = Buffer.from(provided.toLowerCase(), "hex");
+  const b = Buffer.from(expected.toLowerCase(), "hex");
+  return a.length === b.length && timingSafeEqual(a, b);
+};
 
 const normalizeDetail = ({
   detail,
@@ -48,10 +53,18 @@ const normalizeDetail = ({
       ? detail.meeting
       : detail;
   if (!source || typeof source !== "object") return null;
-  const externalId = firstString(source.id, source.meeting_id, requestedId);
+  const externalId = firstString(source.meeting_id, source.id, requestedId);
   if (!externalId) return null;
-  const startTime = asDate(source.start_time) || asDate(source.startTime) || asDate(source.started_at);
-  const endTime = asDate(source.end_time) || asDate(source.endTime) || asDate(source.ended_at);
+  const startTime =
+    asDate(source.timestamp_start_utc) ||
+    asDate(source.start_time) ||
+    asDate(source.startTime) ||
+    asDate(source.started_at);
+  const endTime =
+    asDate(source.timestamp_end_utc) ||
+    asDate(source.end_time) ||
+    asDate(source.endTime) ||
+    asDate(source.ended_at);
   const host = source.host && typeof source.host === "object" ? source.host : null;
   const actionItems = normalizeActionItems(source.action_items || source.actionItems);
   return {
@@ -64,10 +77,12 @@ const normalizeDetail = ({
         ? Math.round(source.duration_seconds)
         : durationBetween(startTime, endTime),
     recordingUrl: firstString(source.recording_url, source.video_url, source.audio_url),
-    shareUrl: firstString(source.share_url, source.report_url, source.url),
+    shareUrl: firstString(source.share_url, source.report_url, source.url, source.join_link),
     organizerEmail:
-      cleanEmail(host?.email) || cleanEmail(source.host_email) || cleanEmail(source.organizer_email),
-    participants: normalizeParticipants(source.participants || source.attendees || source.guests),
+      cleanEmail(source.host_email) || cleanEmail(host?.email) || cleanEmail(source.organizer_email),
+    participants: normalizeParticipants(
+      source.participant_emails || source.participants || source.attendees || source.guests
+    ),
     transcript: normalizeTranscriptSegments(transcript, startTime),
     summary: firstString(source.summary, source.summary?.text, source.summary?.overview, source.overview),
     ...(actionItems.length ? { actionItems } : {}),
@@ -84,14 +99,12 @@ export const meetgeekMeetingProvider: MeetingProviderAdapter = {
     supportsWebhookSecret: true,
   },
 
-  verifyWebhookRequest(_rawBody, headers, secret) {
+  verifyWebhookRequest(rawBody, headers, secret) {
     if (!secret) return true;
-    const provided = firstString(
-      headers.get("x-meetgeek-signature"),
-      headers.get("x-webhook-secret"),
-      headers.get("authorization")
-    );
-    return provided === secret || provided === `Bearer ${secret}`;
+    const provided = cleanString(headers.get("x-mg-signature"));
+    if (!provided) return false;
+    const expected = createHmac("sha256", secret).update(rawBody, "utf8").digest("hex");
+    return safeHexEqual(provided.replace(/^sha256=/i, "").trim(), expected);
   },
 
   parseWebhookPayload(payload: unknown): ParsedProviderWebhook {
@@ -99,6 +112,10 @@ export const meetgeekMeetingProvider: MeetingProviderAdapter = {
       return { kind: "ignore", reason: "Unrecognized MeetGeek webhook payload." };
     }
     const source = payload as any;
+    const message = firstString(source.message);
+    if (message && /failed/i.test(message)) {
+      return { kind: "ignore", reason: "MeetGeek analysis failed." };
+    }
     const rawEvent = firstString(source.event, source.event_type, source.type);
     const normalized = rawEvent?.toLowerCase().replace(/[._\s-]+/g, "") || "";
     if (
@@ -128,7 +145,7 @@ export const meetgeekMeetingProvider: MeetingProviderAdapter = {
     if (!id) return null;
     const encoded = encodeURIComponent(id);
     const detailResponse = await meetgeekFetch(apiKey, `/meetings/${encoded}`);
-    if (detailResponse.status === 404) return null;
+    if (detailResponse.status === 404 || detailResponse.status === 410) return null;
     if (!detailResponse.ok) {
       throw new Error(`MeetGeek meeting fetch failed with status ${detailResponse.status}.`);
     }
@@ -137,18 +154,17 @@ export const meetgeekMeetingProvider: MeetingProviderAdapter = {
     const transcript: unknown[] = [];
     let cursor: string | null = null;
     for (let page = 0; page < MAX_TRANSCRIPT_PAGES; page += 1) {
-      const params = new URLSearchParams();
+      const params = new URLSearchParams({ limit: "500" });
       if (cursor) params.set("cursor", cursor);
-      const query = params.toString();
       const transcriptResponse = await meetgeekFetch(
         apiKey,
-        `/meetings/${encoded}/transcript${query ? `?${query}` : ""}`
+        `/meetings/${encoded}/transcript?${params.toString()}`
       );
       if (!transcriptResponse.ok) break;
       const body = await safeJson(transcriptResponse);
-      const items = arrayFromEnvelope(body, ["transcript", "segments", "data", "items"]);
+      const items = arrayFromEnvelope(body, ["sentences", "transcript", "segments", "data", "items"]);
       transcript.push(...items);
-      cursor = firstString(body?.next_cursor, body?.pagination?.next_cursor, body?.cursor?.next);
+      cursor = firstString(body?.pagination?.next_cursor, body?.next_cursor, body?.cursor?.next);
       if (!cursor || !items.length) break;
     }
 
@@ -161,20 +177,25 @@ export const meetgeekMeetingProvider: MeetingProviderAdapter = {
     const ids: string[] = [];
     let cursor: string | null = null;
     for (let page = 0; page < MAX_LIST_PAGES && ids.length < limit; page += 1) {
-      const params = new URLSearchParams({ limit: String(Math.min(100, limit)) });
+      const params = new URLSearchParams({ limit: String(Math.min(500, limit)) });
       if (cursor) params.set("cursor", cursor);
-      if (opts?.since) params.set("start_time_gte", opts.since.toISOString());
       const response = await meetgeekFetch(apiKey, `/meetings?${params.toString()}`);
       if (!response.ok) throw new Error(`MeetGeek meetings list failed with status ${response.status}.`);
       const body = await safeJson(response);
       const items = arrayFromEnvelope(body, ["meetings", "data", "items"]);
+      let reachedSince = false;
       for (const item of items) {
-        const id = firstString((item as any)?.id, (item as any)?.meeting_id);
+        const started = asDate((item as any)?.timestamp_start_utc);
+        if (opts?.since && started && started.getTime() < opts.since.getTime()) {
+          reachedSince = true;
+          continue;
+        }
+        const id = firstString((item as any)?.meeting_id, (item as any)?.id);
         if (id && !ids.includes(id)) ids.push(id);
         if (ids.length >= limit) break;
       }
-      cursor = firstString(body?.next_cursor, body?.pagination?.next_cursor, body?.cursor?.next);
-      if (!cursor || !items.length) break;
+      cursor = firstString(body?.pagination?.next_cursor, body?.next_cursor, body?.cursor?.next);
+      if (!cursor || !items.length || reachedSince) break;
     }
     return ids.slice(0, limit);
   },
