@@ -1,5 +1,6 @@
+import type { Metadata } from "next";
 import Link from "next/link";
-import { ArrowRight } from "lucide-react";
+import { ArrowRight, CheckCircle2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { BrandIcon } from "@/components/landing/BrandIcon";
@@ -8,80 +9,113 @@ import { PanoramicHero } from "@/components/landing/PanoramicHero";
 import { MarketingSection } from "@/components/landing/MarketingSection";
 import { integrationCards } from "@/components/landing/marketing-content";
 
+export const metadata: Metadata = {
+  title: "AI Meeting Integrations | Fathom, Fireflies, Grain & More | TaskwiseAI",
+  description:
+    "Turn Fathom, Fireflies and Grain meeting transcripts into reviewed tasks, client context, planning and follow-up workflows with TaskwiseAI.",
+  alternates: { canonical: "/integrations" },
+  openGraph: {
+    title: "AI Meeting Integrations | TaskwiseAI",
+    description:
+      "Connect meeting memory to execution: transcripts, reviewed tasks, client context, reminders and automations.",
+    url: "/integrations",
+    type: "website",
+  },
+};
+
 export default function IntegrationsPage() {
   const visibleIntegrations = integrationCards.filter((card) => card.name !== "MCP");
+  const fathom = visibleIntegrations.find((card) => card.name === "Fathom");
+  const remaining = visibleIntegrations.filter((card) => card.name !== "Fathom");
 
   return (
     <MarketingPageShell>
       <PanoramicHero
-        label="Connected systems"
+        label="Meeting memory, connected"
         title={
           <>
-            The integrations behind <span className="text-white/90">TaskwiseAI</span>
+            Your meeting tools should end in <span className="text-white/90">action</span>
           </>
         }
         subtitle={
           <>
-            TaskwiseAI keeps the live provider story honest: Fathom, Fireflies, Grain, Slack,
-            Google Workspace, manual paste, and the board sync layer all stay visible.
+            Keep your preferred notetaker. TaskwiseAI turns the transcript into searchable context,
+            reviewed commitments, client memory, planning, reminders, and downstream workflows.
           </>
         }
         primaryHref="/signup"
         primaryLabel="Get started"
         secondaryHref="/mcp"
-        secondaryLabel="Open MCP"
+        secondaryLabel="Explore MCP"
       />
+
+      {fathom ? (
+        <MarketingSection
+          title={
+            <>
+              Fathom is our <span className="bg-gradient-to-r from-[#FFB257] via-[#FF8A3D] to-[#FF2E97] bg-clip-text text-transparent">primary meeting source</span>
+            </>
+          }
+          subtitle="Taskwise is designed to make a Fathom meeting useful after the recap arrives — without replacing the notetaker you already trust."
+        >
+          <div className="grid gap-5 rounded-3xl border border-white/10 bg-white/[0.04] p-6 shadow-xl shadow-black/20 lg:grid-cols-[1.1fr_1fr] lg:p-8">
+            <div>
+              <div className="flex items-center gap-4">
+                <BrandIcon src={fathom.iconSrc} alt={fathom.iconAlt} />
+                <div>
+                  <p className="text-xs uppercase tracking-[0.2em] text-white/45">Recommended</p>
+                  <h2 className="text-xl font-medium text-white">Fathom → TaskwiseAI</h2>
+                </div>
+              </div>
+              <p className="mt-5 max-w-2xl text-sm leading-7 text-white/68">
+                Ingest the transcript and meeting context once, then use the same record for transcript chat,
+                task review, people and client context, board cleanup, meeting planning, and automation.
+              </p>
+            </div>
+            <div className="grid gap-2 sm:grid-cols-2">
+              {["Search and chat with transcripts", "Review extracted commitments", "Link people and clients", "Automate downstream follow-up"].map((item) => (
+                <div key={item} className="flex items-start gap-2 rounded-xl border border-white/10 bg-black/10 p-3 text-sm text-white/78">
+                  <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-[#FFB257]" />
+                  <span>{item}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </MarketingSection>
+      ) : null}
 
       <MarketingSection
         title={
           <>
-            <span className="bg-gradient-to-r from-[#FFB257] via-[#FF8A3D] to-[#FF2E97] bg-clip-text text-transparent">
-              Active
-            </span>{" "}
-            integrations
+            Keep the tools your team <span className="bg-gradient-to-r from-[#FFB257] via-[#FF8A3D] to-[#FF2E97] bg-clip-text text-transparent">already uses</span>
           </>
         }
-        subtitle={
-          <span>
-            These are the surfaces that are part of the public product story, including{" "}
-            <span className="text-white/88">Trello</span> as an active board sync option.
-          </span>
-        }
+        subtitle="Meeting sources, delivery channels and execution tools plug into one meeting-to-action workflow instead of becoming separate silos."
       >
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-          {visibleIntegrations.map((card) => {
-            return (
-              <div
-                key={card.name}
-                className="rounded-2xl border border-white/10 bg-white/[0.04] p-5 shadow-lg shadow-black/20"
-              >
-                <div className="mb-4 flex items-center justify-between gap-3">
-                  <BrandIcon src={card.iconSrc} alt={card.iconAlt} />
-                </div>
-                <p className="text-xs uppercase tracking-[0.2em] text-white/45">{card.name}</p>
-                <h2 className="mt-2 text-lg font-medium text-white">{card.title}</h2>
-                <p className="mt-2 text-sm leading-6 text-white/68">{card.description}</p>
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+          {remaining.map((card) => (
+            <div
+              key={card.name}
+              className="rounded-2xl border border-white/10 bg-white/[0.04] p-5 shadow-lg shadow-black/20 transition hover:border-white/20 hover:bg-white/[0.06]"
+            >
+              <div className="mb-4 flex items-center justify-between gap-3">
+                <BrandIcon src={card.iconSrc} alt={card.iconAlt} />
               </div>
-            );
-          })}
+              <p className="text-xs uppercase tracking-[0.2em] text-white/45">{card.name}</p>
+              <h2 className="mt-2 text-lg font-medium text-white">{card.title}</h2>
+              <p className="mt-2 text-sm leading-6 text-white/68">{card.description}</p>
+            </div>
+          ))}
         </div>
       </MarketingSection>
 
       <MarketingSection
         title={
           <>
-            MCP stays on its{" "}
-            <span className="bg-gradient-to-r from-[#FF5C4D] via-[#FF9900] to-[#FFB257] bg-clip-text text-transparent">
-              own page
-            </span>
+            MCP stays on its <span className="bg-gradient-to-r from-[#FF5C4D] via-[#FF9900] to-[#FFB257] bg-clip-text text-transparent">own page</span>
           </>
         }
-        subtitle={
-          <span>
-            The integrations story is for connected systems. The operator story belongs in MCP,
-            where keys, replay, and audit logs live.
-          </span>
-        }
+        subtitle="Integrations move meeting data between systems. MCP lets AI clients query and act on Taskwise workspace context through explicit, scoped tools."
       >
         <div className="flex flex-wrap gap-3">
           <Button
@@ -90,7 +124,7 @@ export default function IntegrationsPage() {
             asChild
           >
             <Link href="/mcp">
-              Open MCP
+              Explore MCP
               <ArrowRight className="ml-1 h-4 w-4" />
             </Link>
           </Button>
