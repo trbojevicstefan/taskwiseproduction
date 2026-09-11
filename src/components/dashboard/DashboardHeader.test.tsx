@@ -13,7 +13,10 @@ jest.mock("@/components/dashboard/HeaderNav", () => ({
   default: () => React.createElement("span", null, "header-nav"),
 }));
 
-jest.mock("lucide-react", () => ({ Workflow: () => React.createElement("span", null, "workflow-icon") }));
+jest.mock("lucide-react", () => ({
+  CircleHelp: () => React.createElement("span", null, "help-icon"),
+  Workflow: () => React.createElement("span", null, "workflow-icon"),
+}));
 
 jest.mock("@/components/ui/tooltip", () => ({
   TooltipProvider: ({ children }: any) => React.createElement(React.Fragment, null, children),
@@ -27,12 +30,14 @@ jest.mock("@/components/ui/button", () => ({
 }));
 
 describe("DashboardHeader", () => {
-  it("keeps Automations one click away from every work surface", () => {
+  it("keeps Automations and Help one click away from every work surface", () => {
     const html = renderToStaticMarkup(
       React.createElement(DashboardHeader, { pageTitle: React.createElement("h1", null, "Meetings") })
     );
 
     expect(html).toContain('href="/automations"');
     expect(html).toContain("Automations");
+    expect(html).toContain('href="/docs"');
+    expect(html).toContain("Help");
   });
 });
