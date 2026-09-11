@@ -26,7 +26,14 @@ const normalizeReadMeeting = (payload: any): NormalizedProviderMeeting | null =>
           : payload;
   if (!source || typeof source !== "object") return null;
 
-  const externalId = firstString(source.id, source.meeting_id, source.meetingId, payload?.meeting_id);
+  const externalId = firstString(
+    source.session_id,
+    source.id,
+    source.meeting_id,
+    source.meetingId,
+    payload?.session_id,
+    payload?.meeting_id
+  );
   if (!externalId) return null;
   const startTime = asDate(source.start_time) || asDate(source.startTime) || asDate(source.started_at);
   const endTime = asDate(source.end_time) || asDate(source.endTime) || asDate(source.ended_at);
@@ -72,6 +79,21 @@ const safeHexEqual = (provided: string, expected: string) => {
   return a.length === b.length && timingSafeEqual(a, b);
 };
 
+const decodeReadSigningKey = (secret: string): Buffer => {
+  const normalized = secret.replace(/\s+/g, "");
+  if (
+    normalized.length >= 16 &&
+    normalized.length % 4 === 0 &&
+    /^[A-Za-z0-9+/]+={0,2}$/.test(normalized)
+  ) {
+    const decoded = Buffer.from(normalized, "base64");
+    if (decoded.length > 0) return decoded;
+  }
+  // Compatibility for tests/legacy manually-entered secrets. New Read AI
+  // signing keys are Base64 and take the branch above.
+  return Buffer.from(secret, "utf8");
+};
+
 export const readMeetingProvider: MeetingProviderAdapter = {
   provider: "read",
   displayName: "Read AI",
@@ -86,7 +108,9 @@ export const readMeetingProvider: MeetingProviderAdapter = {
     const rawSignature = cleanString(headers.get("x-read-signature"));
     if (!rawSignature) return false;
     const provided = rawSignature.replace(/^sha256=/i, "").trim();
-    const expected = createHmac("sha256", secret).update(rawBody, "utf8").digest("hex");
+    const expected = createHmac("sha256", decodeReadSigningKey(secret))
+      .update(rawBody, "utf8")
+      .digest("hex");
     return safeHexEqual(provided, expected);
   },
 
@@ -95,7 +119,7 @@ export const readMeetingProvider: MeetingProviderAdapter = {
       return { kind: "ignore", reason: "Unrecognized Read AI webhook payload." };
     }
     const source = payload as any;
-    const event = firstString(source.event_type, source.event, source.type);
+    const event = firstString(source.trigger, source.event_type, source.event, source.type);
     const normalized = event?.toLowerCase().replace(/[._\s-]+/g, "") || "";
     if (normalized.includes("meetingstart")) {
       return { kind: "ignore", reason: "Read AI meeting_start has no final transcript." };
@@ -105,9 +129,13 @@ export const readMeetingProvider: MeetingProviderAdapter = {
     }
     const meeting = normalizeReadMeeting(source);
     if (!meeting) {
-      return { kind: "ignore", reason: "Read AI meeting_end payload has no meeting id." };
+      return { kind: "ignore", reason: "Read AI meeting_end payload has no session id." };
     }
-    if (!Array.isArray(meeting.transcript) || meeting.transcript.length === 0) {
+    const hasTranscript =
+      typeof meeting.transcript === "string"
+        ? Boolean(meeting.transcript.trim())
+        : Array.isArray(meeting.transcript) && meeting.transcript.length > 0;
+    if (!hasTranscript) {
       return { kind: "ignore", reason: "Read AI meeting_end payload has no transcript." };
     }
     return { kind: "meeting", meeting };
