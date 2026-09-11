@@ -21,55 +21,58 @@ import { BrandIcon } from "@/components/landing/BrandIcon";
 import { MainBranchHero } from "@/components/landing/MainBranchHero";
 import { MarketingPageShell } from "@/components/landing/MarketingPageShell";
 import { MarketingSection } from "@/components/landing/MarketingSection";
+import { StructuredData } from "@/components/landing/StructuredData";
 import TaskwiseGsapSection from "@/components/landing/TaskwiseGsapSection";
 import { integrationCards, productFlowSteps } from "@/components/landing/marketing-content";
+import { PUBLIC_MARKETING_PROVIDERS, PUBLIC_SITE_URL } from "@/lib/public-marketing";
 
 export const metadata: Metadata = {
-  title: "TaskwiseAI | Meetings to execution",
+  title: "Meeting Memory to Reviewed Execution",
   description:
-    "Turn meetings, notes, and recordings into reviewed tasks, priority, reminders, and MCP-ready workflows.",
+    "Turn meeting transcripts into searchable memory, reviewed tasks, clear ownership, priorities, Swipe Sweep cleanup, planning, automations, and follow-through.",
+  alternates: { canonical: "/" },
 };
 
 const capabilityCards = [
   {
     icon: MessagesSquare,
-    title: "Source-grounded AI chat",
-    body: "Ask questions over meetings, tasks, people, and clients with answers grounded in workspace sources instead of generic summaries.",
+    title: "Transcript chat",
+    body: "Ask grounded questions over captured meetings and recover decisions, commitments, people, clients, and unresolved work without rereading entire calls.",
     accent: "from-[#FF5C4D]/18 via-[#FF9900]/12 to-[#FF2E97]/18",
     iconAccent: "from-[#FF5C4D] to-[#FFB257]",
   },
   {
     icon: Wand2,
-    title: "AI task cleanup",
-    body: "Clean up noisy task drafts, remove duplicates, and turn messy output into reviewed work the team can trust.",
+    title: "Reviewed tasks + Swipe Sweep",
+    body: "Confirm meeting-derived work, then clear stale or low-value backlog items quickly so important tasks stay visible.",
     accent: "from-white/[0.07] via-[#FF9900]/10 to-white/[0.04]",
     iconAccent: "from-[#FFB257] to-[#FF5C4D]",
   },
   {
     icon: CheckCircle2,
-    title: "Deterministic prioritization",
-    body: "Use deterministic prioritization so the board stays stable and execution decisions stay explainable.",
+    title: "Explainable prioritization",
+    body: "Keep board ordering stable and reviewable so priority decisions do not disappear inside an opaque AI score.",
     accent: "from-[#FF9900]/16 via-white/[0.05] to-[#FF5C4D]/14",
     iconAccent: "from-[#FF9900] to-[#FF5C4D]",
   },
   {
     icon: NotebookPen,
-    title: "Planning workspace",
-    body: "Use the planning workspace to organize reviewed work into the next steps your team can actually ship.",
+    title: "Planning and automations",
+    body: "Turn reviewed work into a practical plan, then automate the repeatable follow-through that should happen after approval.",
     accent: "from-white/[0.06] via-[#FF2E97]/10 to-white/[0.04]",
     iconAccent: "from-[#FF2E97] to-[#FF9900]",
   },
   {
     icon: CalendarDays,
     title: "Calendar, people, and clients",
-    body: "Move between calendar context, people surfaces, and client views without leaving the execution loop.",
+    body: "Move between meeting context, calendar commitments, people, clients, and tasks without breaking the execution thread.",
     accent: "from-[#FF5C4D]/14 via-white/[0.05] to-[#FF9900]/12",
     iconAccent: "from-[#FF5C4D] to-[#FF9900]",
   },
   {
     icon: Sparkles,
-    title: "Slack reminders",
-    body: "Keep follow-through alive with Slack reminders that keep reviewed work visible after the meeting ends.",
+    title: "Sharing and Slack follow-through",
+    body: "Share the useful output from a meeting and keep reviewed work visible with team updates and reminders after the call ends.",
     accent: "from-[#FF2E97]/14 via-[#FF9900]/10 to-white/[0.04]",
     iconAccent: "from-[#FF2E97] to-[#FF5C4D]",
   },
@@ -78,29 +81,29 @@ const capabilityCards = [
 const operatorCards = [
   {
     icon: ShieldCheck,
-    title: "MCP keys",
-    body: "Issue and manage workspace-scoped MCP keys for approved operator workflows.",
+    title: "Scoped MCP keys",
+    body: "Issue workspace-scoped credentials for approved AI workflows that need Taskwise meeting-memory or task context.",
     accent: "from-[#FF5C4D]/18 via-white/[0.05] to-[#FF9900]/18",
     iconAccent: "from-[#FF5C4D] to-[#FF9900]",
   },
   {
     icon: NotebookPen,
-    title: "Audit logs",
-    body: "Track operator activity with audit logs that make advanced access easier to review.",
+    title: "Audit visibility",
+    body: "Keep advanced operator activity visible and reviewable instead of turning automation into an invisible side channel.",
     accent: "from-white/[0.05] via-[#FF2E97]/12 to-white/[0.04]",
     iconAccent: "from-[#FF2E97] to-[#FF5C4D]",
   },
   {
     icon: ArrowRight,
-    title: "Workflow replay / delivery",
-    body: "Use workflow replay and workflow delivery when you need reliable automation over repeated meeting work.",
+    title: "Workflow replay and delivery",
+    body: "Inspect delivery and replay paths when repeatable meeting-driven workflows need operational traceability.",
     accent: "from-[#FF9900]/16 via-white/[0.05] to-[#FF5C4D]/16",
     iconAccent: "from-[#FF9900] to-[#FF2E97]",
   },
   {
     icon: Settings2,
-    title: "Advanced settings",
-    body: "Expose the controls advanced teams need without cluttering the main execution experience.",
+    title: "Operator controls",
+    body: "Keep advanced capabilities in their own control lane so the normal meeting-to-execution experience stays focused.",
     accent: "from-[#FF5C4D]/14 via-[#FF2E97]/10 to-white/[0.04]",
     iconAccent: "from-[#FF5C4D] to-[#FF2E97]",
   },
@@ -109,6 +112,36 @@ const operatorCards = [
 export default function HomePage() {
   return (
     <MarketingPageShell>
+      <StructuredData
+        data={[
+          {
+            "@context": "https://schema.org",
+            "@type": "SoftwareApplication",
+            name: "TaskwiseAI",
+            applicationCategory: "BusinessApplication",
+            operatingSystem: "Web",
+            url: PUBLIC_SITE_URL,
+            description: metadata.description,
+            featureList: [
+              "Meeting transcript chat",
+              "Reviewed task extraction",
+              "Swipe Sweep backlog cleanup",
+              "Task prioritization and planning",
+              "Meeting workflow automations",
+              "People and client context",
+              "MCP operator controls",
+            ],
+          },
+          {
+            "@context": "https://schema.org",
+            "@type": "WebSite",
+            name: "TaskwiseAI",
+            url: PUBLIC_SITE_URL,
+            description: metadata.description,
+          },
+        ]}
+      />
+
       <MainBranchHero />
 
       <MarketingSection
@@ -120,14 +153,13 @@ export default function HomePage() {
         }
         subtitle={
           <span>
-            A tighter public story, with{" "}
+            Taskwise connects{" "}
             <span className="bg-gradient-to-r from-[#FFB257] via-[#FF8A3D] to-[#FF2E97] bg-clip-text font-medium text-transparent">
-              Taskwise
+              meeting memory
             </span>{" "}
-            bringing{" "}
-            <span className="text-white/88">meetings, tasks, and reminders</span> into one{" "}
+            to reviewed tasks, people, priorities, planning, and{" "}
             <span className="bg-gradient-to-r from-[#FF5C4D] via-[#FF9900] to-[#FFB257] bg-clip-text font-medium text-transparent">
-              execution surface
+              follow-through
             </span>
             .
           </span>
@@ -137,20 +169,20 @@ export default function HomePage() {
           {[
             {
               icon: BrainCircuit,
-              title: "Capture the meeting",
-              text: "Pull in transcripts, notes, and recordings from the tools your team already uses.",
+              title: "Capture the conversation",
+              text: "Bring transcripts and meeting context in from the recorder your team already uses.",
               accent: "from-[#FF5C4D]/18 via-[#FF9900]/10 to-white/[0.03]",
             },
             {
               icon: Eye,
-              title: "Shape the work",
-              text: "Clean up draft tasks, score what matters, and surface the next move with context.",
+              title: "Review what matters",
+              text: "Ask questions, inspect proposed commitments, confirm ownership, and clear backlog noise with context.",
               accent: "from-[#FF9900]/16 via-[#FF2E97]/10 to-white/[0.03]",
             },
             {
               icon: Clock3,
-              title: "Keep it moving",
-              text: "Plan the week, route reminders to Slack, and keep the work from stalling out.",
+              title: "Keep work moving",
+              text: "Prioritize, plan, share, and automate repeatable follow-through after the team approves the work.",
               accent: "from-white/[0.06] via-[#FF5C4D]/10 to-[#FF9900]/14",
             },
           ].map((item, index) => (
@@ -180,7 +212,7 @@ export default function HomePage() {
             The four-step <span className="text-white/90">meeting-to-execution flow</span>
           </>
         }
-        subtitle="Taskwise keeps the public story simple: capture work, understand it, review it, then execute without losing the source context."
+        subtitle="Capture the conversation, understand the context, review proposed work, then execute without losing the source meeting."
       >
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
           {productFlowSteps.map((step, index) => (
@@ -219,7 +251,7 @@ export default function HomePage() {
             Core capabilities for <span className="text-white/90">reviewed execution</span>
           </>
         }
-        subtitle="These are the surfaces the homepage should advertise: grounded chat, cleanup, prioritization, planning, calendar context, and reminder follow-through."
+        subtitle="Search meeting memory, review AI-proposed work, keep the board clean, connect people and planning, and automate the follow-through that should be repeatable."
       >
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
           {capabilityCards.map((card) => {
@@ -239,16 +271,21 @@ export default function HomePage() {
             );
           })}
         </div>
+        <div className="mt-6">
+          <Link href="/features" className="inline-flex items-center gap-2 text-sm text-white/75 hover:text-white">
+            Explore all features <ArrowRight className="h-4 w-4" />
+          </Link>
+        </div>
       </MarketingSection>
 
       <MarketingSection
         id="integrations"
         title={
           <>
-            Integrations that match <span className="text-white/90">how people already work</span>
+            Keep the meeting tools <span className="text-white/90">your team already uses</span>
           </>
         }
-        subtitle="The launch page should name the real sources and surfaces, with Trello treated as an active board sync option."
+        subtitle={`Taskwise supports ${PUBLIC_MARKETING_PROVIDERS.map((provider) => provider.name).join(", ")} as meeting sources, with provider-specific connection modes.`}
       >
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
           {integrationCards.map((card) => (
@@ -269,16 +306,24 @@ export default function HomePage() {
             </div>
           ))}
         </div>
+        <div className="mt-6 flex flex-wrap gap-5 text-sm">
+          <Link href="/integrations" className="inline-flex items-center gap-2 text-white/75 hover:text-white">
+            Compare meeting sources <ArrowRight className="h-4 w-4" />
+          </Link>
+          <Link href="/use-cases" className="inline-flex items-center gap-2 text-white/75 hover:text-white">
+            Explore use cases <ArrowRight className="h-4 w-4" />
+          </Link>
+        </div>
       </MarketingSection>
 
       <MarketingSection
         id="mcp"
         title={
           <>
-            Operator layer with <span className="text-white/90">safe advanced controls</span>
+            Operator layer with <span className="text-white/90">scoped advanced controls</span>
           </>
         }
-        subtitle="MCP is part of the public platform story, but it should read like an operator surface, not a consumer feature."
+        subtitle="MCP gives compatible AI clients a controlled path to Taskwise meeting memory and tasks while operator credentials and activity stay in their own lane."
       >
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
           {operatorCards.map((card) => {
@@ -302,19 +347,19 @@ export default function HomePage() {
 
       <MarketingSection
         id="cta"
-        title="Ready to turn meetings into reviewed work?"
-        subtitle="Start with the launch flow, explore the platform surfaces, or go deeper into MCP and integrations."
+        title="Ready to make meetings useful after the call?"
+        subtitle="Start with a meeting source, explore a workflow, or go deeper into the operator layer."
       >
         <div className="rounded-[2rem] border border-white/10 bg-gradient-to-br from-white/10 via-white/[0.06] to-white/[0.03] p-6 shadow-2xl shadow-black/30 sm:p-8">
           <div className="flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between">
             <div className="max-w-2xl space-y-3">
-              <p className="text-xs uppercase tracking-[0.22em] text-[#FFB257]">Launch CTA</p>
+              <p className="text-xs uppercase tracking-[0.22em] text-[#FFB257]">Meeting to execution</p>
               <h2 className="text-3xl font-semibold tracking-tight text-white sm:text-4xl">
-                Explore the product surfaces, integrations, and operator layer in one place.
+                Keep the context and move the work forward.
               </h2>
               <p className="text-base leading-7 text-white/72">
-                Taskwise gives teams one place to capture work, clean it up, prioritize it, and keep
-                it moving with reminders and operator-grade controls.
+                Taskwise connects meeting memory to reviewed tasks, ownership, priorities, planning,
+                sharing, automations, and follow-through.
               </p>
             </div>
 
@@ -340,7 +385,7 @@ export default function HomePage() {
                 className="border border-white/10 bg-white/10 text-white hover:bg-white/20"
                 asChild
               >
-                <Link href="/integrations">Integrations</Link>
+                <Link href="/use-cases">Use cases</Link>
               </Button>
               <Button
                 size="lg"
