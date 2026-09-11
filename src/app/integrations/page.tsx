@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { ArrowRight, CheckCircle2 } from "lucide-react";
+import { ArrowRight, CheckCircle2, Radio, Video, Mic2, Bot } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { BrandIcon } from "@/components/landing/BrandIcon";
@@ -10,9 +10,9 @@ import { MarketingSection } from "@/components/landing/MarketingSection";
 import { integrationCards } from "@/components/landing/marketing-content";
 
 export const metadata: Metadata = {
-  title: "AI Meeting Integrations | Fathom, Fireflies, Grain & More | TaskwiseAI",
+  title: "AI Meeting Integrations | Fathom, tl;dv, Otter, MeetGeek & More | TaskwiseAI",
   description:
-    "Turn Fathom, Fireflies and Grain meeting transcripts into reviewed tasks, client context, planning and follow-up workflows with TaskwiseAI.",
+    "Turn Fathom, Fireflies, Grain, tl;dv, Otter.ai, MeetGeek and Read AI meeting memory into reviewed tasks, client context, planning and follow-up workflows.",
   alternates: { canonical: "/integrations" },
   openGraph: {
     title: "AI Meeting Integrations | TaskwiseAI",
@@ -22,6 +22,41 @@ export const metadata: Metadata = {
     type: "website",
   },
 };
+
+const newMeetingSources = [
+  {
+    name: "tl;dv",
+    title: "Transcripts and notes into the same action rail",
+    description:
+      "Connect with an API key, backfill recent meetings, and route completed meeting events into Taskwise.",
+    Icon: Video,
+    badge: "API + webhook",
+  },
+  {
+    name: "Otter.ai",
+    title: "Enterprise conversation memory, connected",
+    description:
+      "Import eligible Otter workspace conversations, transcripts and action-item context without creating a separate task silo.",
+    Icon: Mic2,
+    badge: "Enterprise API",
+  },
+  {
+    name: "MeetGeek",
+    title: "Meeting intelligence with durable follow-through",
+    description:
+      "Bring meeting records and transcript pages into Taskwise for search, people context, review and automation.",
+    Icon: Bot,
+    badge: "API + webhook",
+  },
+  {
+    name: "Read AI",
+    title: "Completed reports through a signed webhook",
+    description:
+      "Webhook-first integration for completed Read AI reports. Taskwise does not pretend short-lived OAuth access is a static API-key connection.",
+    Icon: Radio,
+    badge: "Webhook-first",
+  },
+];
 
 export default function IntegrationsPage() {
   const visibleIntegrations = integrationCards.filter((card) => card.name !== "MCP");
@@ -87,20 +122,38 @@ export default function IntegrationsPage() {
       <MarketingSection
         title={
           <>
+            More meeting sources, <span className="bg-gradient-to-r from-[#FFB257] via-[#FF8A3D] to-[#FF2E97] bg-clip-text text-transparent">one memory layer</span>
+          </>
+        }
+        subtitle="The source can change without changing what happens next: normalize the meeting, review commitments, keep client context, then automate deliberately."
+      >
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+          {newMeetingSources.map(({ name, title, description, Icon, badge }) => (
+            <div key={name} className="rounded-2xl border border-white/10 bg-white/[0.04] p-5 shadow-lg shadow-black/20 transition hover:border-white/20 hover:bg-white/[0.06]">
+              <div className="mb-4 flex items-center justify-between gap-3">
+                <span className="grid h-11 w-11 place-items-center rounded-xl border border-white/10 bg-white/[0.06]"><Icon className="h-5 w-5 text-white/85" /></span>
+                <span className="rounded-full border border-white/10 px-2.5 py-1 text-[10px] uppercase tracking-[0.16em] text-white/55">{badge}</span>
+              </div>
+              <p className="text-xs uppercase tracking-[0.2em] text-white/45">{name}</p>
+              <h2 className="mt-2 text-lg font-medium text-white">{title}</h2>
+              <p className="mt-2 text-sm leading-6 text-white/68">{description}</p>
+            </div>
+          ))}
+        </div>
+      </MarketingSection>
+
+      <MarketingSection
+        title={
+          <>
             Keep the tools your team <span className="bg-gradient-to-r from-[#FFB257] via-[#FF8A3D] to-[#FF2E97] bg-clip-text text-transparent">already uses</span>
           </>
         }
-        subtitle="Meeting sources, delivery channels and execution tools plug into one meeting-to-action workflow instead of becoming separate silos."
+        subtitle="Delivery channels and execution tools plug into the same meeting-to-action workflow instead of becoming separate silos."
       >
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
           {remaining.map((card) => (
-            <div
-              key={card.name}
-              className="rounded-2xl border border-white/10 bg-white/[0.04] p-5 shadow-lg shadow-black/20 transition hover:border-white/20 hover:bg-white/[0.06]"
-            >
-              <div className="mb-4 flex items-center justify-between gap-3">
-                <BrandIcon src={card.iconSrc} alt={card.iconAlt} />
-              </div>
+            <div key={card.name} className="rounded-2xl border border-white/10 bg-white/[0.04] p-5 shadow-lg shadow-black/20 transition hover:border-white/20 hover:bg-white/[0.06]">
+              <div className="mb-4 flex items-center justify-between gap-3"><BrandIcon src={card.iconSrc} alt={card.iconAlt} /></div>
               <p className="text-xs uppercase tracking-[0.2em] text-white/45">{card.name}</p>
               <h2 className="mt-2 text-lg font-medium text-white">{card.title}</h2>
               <p className="mt-2 text-sm leading-6 text-white/68">{card.description}</p>
@@ -110,30 +163,14 @@ export default function IntegrationsPage() {
       </MarketingSection>
 
       <MarketingSection
-        title={
-          <>
-            MCP stays on its <span className="bg-gradient-to-r from-[#FF5C4D] via-[#FF9900] to-[#FFB257] bg-clip-text text-transparent">own page</span>
-          </>
-        }
+        title={<>MCP stays on its <span className="bg-gradient-to-r from-[#FF5C4D] via-[#FF9900] to-[#FFB257] bg-clip-text text-transparent">own page</span></>}
         subtitle="Integrations move meeting data between systems. MCP lets AI clients query and act on Taskwise workspace context through explicit, scoped tools."
       >
         <div className="flex flex-wrap gap-3">
-          <Button
-            size="lg"
-            className="gem-button bg-gradient-to-r from-[#FF4D4D] via-[#FF9900] to-[#FF2E97] text-white"
-            asChild
-          >
-            <Link href="/mcp">
-              Explore MCP
-              <ArrowRight className="ml-1 h-4 w-4" />
-            </Link>
+          <Button size="lg" className="gem-button bg-gradient-to-r from-[#FF4D4D] via-[#FF9900] to-[#FF2E97] text-white" asChild>
+            <Link href="/mcp">Explore MCP<ArrowRight className="ml-1 h-4 w-4" /></Link>
           </Button>
-          <Button
-            size="lg"
-            variant="secondary"
-            className="border border-white/10 bg-white/10 text-white hover:bg-white/20"
-            asChild
-          >
+          <Button size="lg" variant="secondary" className="border border-white/10 bg-white/10 text-white hover:bg-white/20" asChild>
             <Link href="/">Back home</Link>
           </Button>
         </div>
