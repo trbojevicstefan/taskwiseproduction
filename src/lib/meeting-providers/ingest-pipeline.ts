@@ -1,8 +1,33 @@
 /**
- * Shared provider-agnostic meeting ingestion pipeline.
+ * Phase 7 — shared provider-agnostic meeting ingestion pipeline.
  *
- * All generic meeting providers normalize into `NormalizedProviderMeeting`
- * and ride the same idempotent Taskwise meeting -> task/domain-event rail.
+ * `ingestProviderMeeting` is the generic counterpart of
+ * `ingestFathomMeeting` (src/lib/fathom-ingest.ts) for adapter-based
+ * providers (Fireflies, Grain). It reuses the exact same internals so
+ * ingested meetings ride the existing rails:
+ *
+ * 1. dedupe indexes (`ensureMeetingRecordingHashIndex`)
+ * 2. workspace scope filter tolerating legacy null-workspace docs
+ * 3. duplicate lookup by connection-scoped recording hash + providerSourceId
+ * 4. shared LLM task extraction (`extractFathomMeetingTasks` — provider
+ *    neutral; NOT forked)
+ * 5. meeting + planningSession docs via `buildCreatedFathomMeetingRecords`
+ *    (parameterized `ingestSource`/default title)
+ * 6. idempotent upsert (`upsertMeetingIdempotently`, also called by the
+ *    fathom path)
+ * 7. `meeting.ingested`/`meeting.updated` through
+ *    `runMeetingIngestionCommand` (people upsert incl. Phase 6 personType
+ *    hooks + task sync + workflow automation happen in the domain-event
+ *    handler)
+ * 8. Slack meeting automation
+ *
+ * Intentional differences from the fathom path (bespoke fathom behavior that
+ * stays in fathom-ingest.ts): no duplicate reanalysis window, no legacy
+ * user-scoped hash aliases, no cross-note-taker fingerprint dedupe (that
+ * query pins `ingestSource: "fathom"`), no fathom integration logs.
+ * Provider action items are persisted verbatim as `providerActionItems` and
+ * are NOT mapped into extractedTasks (fathom parity: tasks come only from
+ * the shared LLM extraction).
  */
 
 import { ApiRouteError } from "@/lib/api-route";
@@ -34,10 +59,6 @@ const PROVIDER_DEFAULT_TITLES: Record<MeetingProviderId, string> = {
   fathom: "Fathom Meeting",
   fireflies: "Fireflies Meeting",
   grain: "Grain Meeting",
-  tldv: "tl;dv Meeting",
-  otter: "Otter.ai Meeting",
-  meetgeek: "MeetGeek Meeting",
-  read: "Read AI Meeting",
 };
 
 export const isDuplicateKeyError = (error: any) => {
@@ -57,6 +78,11 @@ const formatSegmentTimestamp = (offsetSeconds: number) => {
   return `${minutes}:${String(seconds).padStart(2, "0")}`;
 };
 
+/**
+ * Format transcript segments into the same "M:SS - Speaker: text" line shape
+ * `formatFathomTranscript` produces, so downstream chat/snippets behave
+ * identically for every provider.
+ */
 export const formatProviderTranscriptSegments = (
   segments: NormalizedTranscriptSegment[]
 ): string =>
@@ -83,6 +109,12 @@ export const resolveProviderTranscriptText = (
   return "";
 };
 
+/**
+ * Idempotent meeting upsert extracted from the fathom path (strangler
+ * pattern — fathom-ingest.ts calls this too). Upserts by the caller-built
+ * dedupe filter with `$setOnInsert: { createdAt, _id }`; a duplicate-key
+ * race resolves the canonical meeting id instead of double-inserting.
+ */
 export const upsertMeetingIdempotently = async ({
   meetingsCollection,
   filter,
@@ -106,6 +138,7 @@ export const upsertMeetingIdempotently = async ({
     const { _id: insertId } = meeting;
     const setFields: Record<string, any> = { ...meeting };
     delete setFields._id;
+    // Avoid conflicting updates when using $setOnInsert for createdAt
     delete setFields.createdAt;
     const upsertResult = await meetingsCollection.updateOne(
       filter,
@@ -123,6 +156,7 @@ export const upsertMeetingIdempotently = async ({
     if (isDuplicateKeyError(error)) {
       canonicalMeetingId = (await resolveCanonicalMeetingId()) || canonicalMeetingId;
     } else {
+      // Fallback to a plain insert if something unexpected happens
       console.error("Meeting upsert failed, falling back to insert:", error);
       await meetingsCollection.insertOne(meeting);
       insertedMeeting = true;
@@ -153,7 +187,11 @@ export const ingestProviderMeeting = async ({
 }): Promise<ProviderIngestResult> => {
   const externalId = String(meeting.externalId || "").trim();
   if (!externalId) {
-    throw new ApiRouteError(400, "invalid_payload", "Provider meeting is missing an external id.");
+    throw new ApiRouteError(
+      400,
+      "invalid_payload",
+      "Provider meeting is missing an external id."
+    );
   }
 
   const user = await findUserById(userId);
@@ -167,112 +205,229 @@ export const ingestProviderMeeting = async ({
     userId,
     workspaceId,
   });
+
+  // Provider-prefixed recording id hashed under the connection scope. The
+  // `connection:<id>` scope string is provider-neutral (do-not-touch fathom
+  // semantics are preserved: same function, new connection ids). The
+  // provider prefix guarantees no cross-provider hash collisions under the
+  // legacy `user:<userId>` scope.
   const recordingHashScope = getFathomRecordingHashScope({ userId, connectionId });
-  const recordingIdHash = hashFathomRecordingId(recordingHashScope, `${provider}:${externalId}`);
+  const recordingIdHash = hashFathomRecordingId(
+    recordingHashScope,
+    `${provider}:${externalId}`
+  );
 
   const dedupeMatcher = {
-    ...workspaceScopeFilter,
-    connectionId,
-    recordingIdHash,
+    $or: [
+      { recordingIdHash },
+      { recordingIdHashes: recordingIdHash },
+      { ingestSource: provider, providerSourceId: externalId },
+    ],
   };
+  const dedupeFilter = { $and: [workspaceScopeFilter, dedupeMatcher] };
+
+  const transcriptText = resolveProviderTranscriptText(meeting.transcript);
+  const summaryText =
+    typeof meeting.summary === "string" && meeting.summary.trim()
+      ? meeting.summary.trim()
+      : null;
+  const participants = ingestHelpers.mergeMeetingPeopleLists(
+    (meeting.participants || []).map((participant) => ({
+      name: participant.name,
+      email: participant.email || undefined,
+      title: participant.title || undefined,
+      role: "attendee" as const,
+    }))
+  );
+  const actionItems = Array.isArray(meeting.actionItems)
+    ? meeting.actionItems.filter(
+        (item): item is string => typeof item === "string" && Boolean(item.trim())
+      )
+    : [];
+
   const meetingsCollection = db.collection("meetings");
-  const existing = await meetingsCollection.findOne(dedupeMatcher, { projection: { _id: 1 } });
-  if (existing?._id) {
+  const existing = await meetingsCollection.findOne(dedupeFilter);
+
+  if (existing) {
+    // Duplicate path: fill only missing fields, never clobber, and re-emit
+    // meeting.updated when tasks already exist (mirrors the fathom path
+    // without its reanalysis window).
+    const update: Record<string, any> = {
+      lastActivityAt: new Date(),
+      ingestSource: existing.ingestSource || provider,
+    };
+    if (!existing.recordingIdHash) update.recordingIdHash = recordingIdHash;
+    const existingHashes = Array.isArray(existing.recordingIdHashes)
+      ? existing.recordingIdHashes.filter((value: any) => typeof value === "string")
+      : [];
+    const mergedHashes = Array.from(new Set([...existingHashes, recordingIdHash]));
+    if (mergedHashes.length) update.recordingIdHashes = mergedHashes;
+    if (connectionId && existing.connectionId !== connectionId) {
+      update.connectionId = connectionId;
+    }
+    if (existing.providerSourceId !== externalId) {
+      update.providerSourceId = externalId;
+    }
+    if (transcriptText && !String(existing.originalTranscript || "").trim()) {
+      update.originalTranscript = transcriptText;
+    }
+    if (summaryText && !String(existing.summary || "").trim()) {
+      update.summary = summaryText;
+    }
+    if (meeting.recordingUrl && !existing.recordingUrl) {
+      update.recordingUrl = meeting.recordingUrl;
+    }
+    if (meeting.shareUrl && !existing.shareUrl) update.shareUrl = meeting.shareUrl;
+    if (meeting.startTime && !existing.startTime) update.startTime = meeting.startTime;
+    if (meeting.endTime && !existing.endTime) update.endTime = meeting.endTime;
+    if (meeting.durationSeconds && !existing.duration) {
+      update.duration = meeting.durationSeconds;
+    }
+    if (meeting.organizerEmail && !existing.organizerEmail) {
+      update.organizerEmail = meeting.organizerEmail;
+    }
+    if (participants.length) {
+      const mergedAttendees = ingestHelpers.mergeMeetingPeopleLists(
+        existing.attendees,
+        participants
+      );
+      if (mergedAttendees.length) update.attendees = mergedAttendees;
+    }
+    if (actionItems.length && !Array.isArray(existing.providerActionItems)) {
+      update.providerActionItems = actionItems;
+    }
+
+    await meetingsCollection.updateOne({ _id: existing._id }, { $set: update });
+
+    if (Array.isArray(existing.extractedTasks) && existing.extractedTasks.length) {
+      await runMeetingIngestionCommand(db, {
+        mode: "flagged-event",
+        eventType: "meeting.updated",
+        userId,
+        correlationId: correlationId || null,
+        payload: {
+          meetingId: String(existing._id),
+          workspaceId: existing.workspaceId || workspaceId || null,
+          title: existing.title || "Meeting",
+          attendees: ingestHelpers.mergeMeetingPeopleLists(
+            existing.attendees,
+            participants
+          ),
+          extractedTasks: existing.extractedTasks as ExtractedTaskSchema[],
+        },
+      });
+    }
+
+    logger?.info?.("meeting-providers.ingest.duplicate", {
+      provider,
+      meetingId: String(existing._id),
+    });
     return { status: "duplicate", meetingId: String(existing._id) };
   }
 
-  const transcriptText = resolveProviderTranscriptText(meeting.transcript);
-  if (!transcriptText) return { status: "no_transcript" };
+  if (!transcriptText) {
+    return { status: "no_transcript" };
+  }
 
-  const extracted = await extractFathomMeetingTasks({
-    userId,
-    transcript: transcriptText,
-    organizerEmail: meeting.organizerEmail,
-    participants: meeting.participants,
-  });
-
-  const extractedTasks: ExtractedTaskSchema[] = Array.isArray(extracted?.tasks)
-    ? extracted.tasks
-    : [];
-  const extractedAttendees = Array.isArray(extracted?.attendees) ? extracted.attendees : [];
-  const combinedAttendees = ingestHelpers.mergeParticipantsWithExtractedAttendees(
-    meeting.participants,
-    extractedAttendees
-  );
-
-  const records = buildCreatedFathomMeetingRecords({
+  // Shared LLM task extraction (same flow the fathom path uses; provider
+  // participants ride in through the payload's attendees).
+  const taskExtraction = await extractFathomMeetingTasks({
+    db,
+    user,
     userId,
     workspaceId,
-    recordingIdHash,
-    connectionId,
-    sourceId: externalId,
-    title: meeting.title,
-    transcript: transcriptText,
+    payload: { attendees: participants },
+    transcriptText,
+    summaryText,
+    meetingTitleFromPayload: meeting.title,
+  });
+
+  const defaultTitle = PROVIDER_DEFAULT_TITLES[provider];
+  const meetingTitle =
+    ingestHelpers.pickFirst(
+      meeting.title,
+      taskExtraction.analysisResult?.sessionTitle,
+      defaultTitle
+    ) || defaultTitle;
+
+  const dedupeFingerprints = ingestHelpers.buildMeetingDedupeFingerprints({
+    title: meetingTitle,
+    recordingUrl: meeting.recordingUrl,
+    shareUrl: meeting.shareUrl,
     startTime: meeting.startTime,
     endTime: meeting.endTime,
-    duration: meeting.durationSeconds,
+    durationSeconds: meeting.durationSeconds,
+  });
+
+  const now = new Date();
+  const { meeting: meetingDoc, planningSession } = buildCreatedFathomMeetingRecords({
+    now,
+    userId,
+    workspaceId,
+    connectionId: connectionId || null,
+    providerSourceId: externalId,
+    meetingTitle,
+    meetingSummary: taskExtraction.meetingSummary,
+    transcriptText,
+    startTime: meeting.startTime,
+    endTime: meeting.endTime,
+    durationSeconds: meeting.durationSeconds,
+    uniquePeople: taskExtraction.uniquePeople,
+    finalizedTasks: taskExtraction.finalizedTasks,
+    sanitizedTasks: taskExtraction.sanitizedTasks,
+    sanitizedTaskLevels: taskExtraction.sanitizedTaskLevels,
+    analysisResult: taskExtraction.analysisResult,
+    recordingIdHash,
+    candidateRecordingHashes: [recordingIdHash],
+    dedupeFingerprints,
     recordingUrl: meeting.recordingUrl,
     shareUrl: meeting.shareUrl,
     organizerEmail: meeting.organizerEmail,
-    attendees: combinedAttendees,
-    summary: extracted?.summary || meeting.summary || null,
-    extractedTasks,
-    defaultTitle: PROVIDER_DEFAULT_TITLES[provider],
     ingestSource: provider,
+    defaultTitle,
   });
 
-  const providerActionItems = Array.isArray(meeting.actionItems)
-    ? meeting.actionItems.filter((item) => typeof item === "string" && item.trim())
-    : [];
-  if (providerActionItems.length) {
-    (records.meeting as any).providerActionItems = providerActionItems;
+  if (actionItems.length) {
+    (meetingDoc as Record<string, any>).providerActionItems = actionItems;
   }
-  (records.meeting as any).providerSourceId = externalId;
-  (records.meeting as any).provider = provider;
 
   const { insertedMeeting, canonicalMeetingId } = await upsertMeetingIdempotently({
     meetingsCollection,
-    filter: dedupeMatcher,
-    meeting: records.meeting as any,
+    filter: dedupeFilter,
+    meeting: meetingDoc,
   });
+
   if (!insertedMeeting) {
     return { status: "duplicate", meetingId: canonicalMeetingId };
   }
 
-  await db.collection("planningSessions").updateOne(
-    { _id: records.planningSession._id },
-    { $setOnInsert: records.planningSession },
-    { upsert: true }
-  );
+  planningSession.sourceMeetingId = canonicalMeetingId;
+  await db.collection("planningSessions").insertOne(planningSession);
 
-  await runMeetingIngestionCommand({
-    db,
-    userId,
-    workspaceId,
-    meetingId: canonicalMeetingId,
-    meeting: { ...(records.meeting as any), _id: canonicalMeetingId },
+  await runMeetingIngestionCommand(db, {
+    mode: "flagged-event",
     eventType: "meeting.ingested",
-    correlationId: correlationId || undefined,
-    logger,
+    userId,
+    correlationId: correlationId || null,
+    payload: {
+      meetingId: canonicalMeetingId,
+      workspaceId,
+      title: meetingTitle,
+      attendees: taskExtraction.uniquePeople,
+      extractedTasks: taskExtraction.finalizedTasks,
+    },
   });
 
-  try {
-    await postMeetingAutomationToSlack({
-      userId,
-      workspaceId,
-      meetingId: canonicalMeetingId,
-      meetingTitle: records.meeting.title || PROVIDER_DEFAULT_TITLES[provider],
-      summary: records.meeting.summary || null,
-      extractedTasks,
-      transcript: transcriptText,
-    });
-  } catch (error) {
-    logger?.warn?.("meeting.provider.slack_automation_failed", {
-      provider,
-      meetingId: canonicalMeetingId,
-      error: error instanceof Error ? error.message : String(error),
-    });
-  }
+  await postMeetingAutomationToSlack({
+    user,
+    meetingTitle: meetingTitle || "Meeting",
+    meetingSummary: taskExtraction.meetingSummary,
+    tasks: taskExtraction.finalizedTasks,
+  });
 
+  logger?.info?.("meeting-providers.ingest.created", {
+    provider,
+    meetingId: canonicalMeetingId,
+  });
   return { status: "created", meetingId: canonicalMeetingId };
 };
