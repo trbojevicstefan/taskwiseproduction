@@ -1,17 +1,12 @@
-/**
- * Phase 7 — meeting-provider registry.
- *
- * `getMeetingProviderAdapter(id)` resolves an adapter by provider id (null
- * for unknown ids); `listMeetingProviders()` returns all registered
- * adapters. Fathom is registered with `legacyWebhook: true` — its traffic
- * stays on the bespoke `/api/fathom/*` routes, so the generic
- * `/api/webhooks/[provider]` and `/api/integrations/[provider]` routes must
- * 404 for it (check `adapter.legacyWebhook`).
- */
+/** Meeting-provider registry. */
 
 import { fathomMeetingProvider } from "@/lib/meeting-providers/fathom";
 import { firefliesMeetingProvider } from "@/lib/meeting-providers/fireflies";
 import { grainMeetingProvider } from "@/lib/meeting-providers/grain";
+import { tldvMeetingProvider } from "@/lib/meeting-providers/tldv";
+import { otterMeetingProvider } from "@/lib/meeting-providers/otter";
+import { meetgeekMeetingProvider } from "@/lib/meeting-providers/meetgeek";
+import { readMeetingProvider } from "@/lib/meeting-providers/read";
 import type {
   MeetingProviderAdapter,
   MeetingProviderId,
@@ -24,7 +19,9 @@ export {
 } from "@/lib/meeting-providers/types";
 export type {
   MeetingProviderAdapter,
+  MeetingProviderCapabilities,
   MeetingProviderConnection,
+  MeetingProviderConnectionMode,
   MeetingProviderId,
   NormalizedProviderMeeting,
   NormalizedProviderParticipant,
@@ -32,10 +29,31 @@ export type {
   ParsedProviderWebhook,
 } from "@/lib/meeting-providers/types";
 
+const withDefaultCapabilities = (
+  adapter: MeetingProviderAdapter
+): MeetingProviderAdapter => ({
+  ...adapter,
+  capabilities:
+    adapter.capabilities ||
+    (adapter.legacyWebhook
+      ? undefined
+      : {
+          connectionMode: "api-key",
+          manualSync:
+            typeof adapter.listMeetings === "function" &&
+            typeof adapter.fetchMeeting === "function",
+          supportsWebhookSecret: true,
+        }),
+});
+
 const MEETING_PROVIDER_REGISTRY: Record<MeetingProviderId, MeetingProviderAdapter> = {
   fathom: fathomMeetingProvider,
-  fireflies: firefliesMeetingProvider,
-  grain: grainMeetingProvider,
+  fireflies: withDefaultCapabilities(firefliesMeetingProvider),
+  grain: withDefaultCapabilities(grainMeetingProvider),
+  tldv: tldvMeetingProvider,
+  otter: otterMeetingProvider,
+  meetgeek: meetgeekMeetingProvider,
+  read: readMeetingProvider,
 };
 
 export const getMeetingProviderAdapter = (

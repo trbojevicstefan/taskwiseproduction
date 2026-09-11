@@ -1,11 +1,3 @@
-/**
- * Phase 7 — on-demand backfill sync for adapter-based meeting providers.
- *
- * POST /api/integrations/[provider]/sync { since? } -> enqueues a
- * `meeting-provider-sync` job and kicks the worker; answers 202. Fathom and
- * unknown providers 404 (fathom has its own /api/fathom/sync).
- */
-
 import { z } from "zod";
 import {
   apiError,
@@ -26,27 +18,16 @@ import { resolveWorkspaceScopeForUser } from "@/lib/workspace-scope";
 const ROUTE = "/api/integrations/[provider]/sync";
 
 const syncRequestSchema = z
-  .object({
-    since: z.string().datetime().optional().nullable(),
-  })
+  .object({ since: z.string().datetime().optional().nullable() })
   .optional()
   .nullable();
 
 export async function POST(
   request: Request,
-  {
-    params,
-  }: {
-    params: { provider: string } | Promise<{ provider: string }>;
-  }
+  { params }: { params: { provider: string } | Promise<{ provider: string }> }
 ) {
-  const routeContext = createRouteRequestContext({
-    request,
-    route: ROUTE,
-    method: "POST",
-  });
-  const { correlationId, logger, durationMs, setMetricUserId, emitMetric } =
-    routeContext;
+  const routeContext = createRouteRequestContext({ request, route: ROUTE, method: "POST" });
+  const { correlationId, logger, durationMs, setMetricUserId, emitMetric } = routeContext;
 
   try {
     const { provider: rawProvider } = await Promise.resolve(params);
@@ -56,13 +37,24 @@ export async function POST(
       emitMetric(404, "error", { reason: "unknown_provider" });
       return apiError(404, "not_found", "Unknown integration provider.");
     }
+    const manualSync =
+      adapter.capabilities?.manualSync ??
+      (typeof adapter.listMeetings === "function" && typeof adapter.fetchMeeting === "function");
+    if (!manualSync) {
+      emitMetric(422, "error", { reason: "sync_not_supported", provider: adapter.provider });
+      return apiError(
+        422,
+        "request_error",
+        `${adapter.displayName} is webhook-only and does not support manual backfill sync.`,
+        undefined,
+        { correlationId }
+      );
+    }
 
     const userId = await getSessionUserId();
     if (!userId) {
       emitMetric(401, "error", { reason: "unauthorized" });
-      return apiError(401, "request_error", "Unauthorized", undefined, {
-        correlationId,
-      });
+      return apiError(401, "request_error", "Unauthorized", undefined, { correlationId });
     }
     setMetricUserId(userId);
 
@@ -71,8 +63,6 @@ export async function POST(
       minimumRole: "member",
       adminVisibilityKey: "integrations",
     });
-
-    // Body is optional; tolerate an empty body.
     const body = await parseJsonBody(request, syncRequestSchema).catch(() => null);
 
     const connection = await findMeetingConnectionForWorkspace(

@@ -59,6 +59,10 @@ const PROVIDER_DEFAULT_TITLES: Record<MeetingProviderId, string> = {
   fathom: "Fathom Meeting",
   fireflies: "Fireflies Meeting",
   grain: "Grain Meeting",
+  tldv: "tl;dv Meeting",
+  otter: "Otter.ai Meeting",
+  meetgeek: "MeetGeek Meeting",
+  read: "Read AI Meeting",
 };
 
 export const isDuplicateKeyError = (error: any) => {
