@@ -99,8 +99,9 @@ const PROVIDER_COPY: Record<MeetingProviderCardProviderId, ProviderCopy> = {
     icon: Bot,
     connectionMode: "api-key",
     manualSync: true,
-    supportsWebhookSecret: false,
+    supportsWebhookSecret: true,
     apiKeyHint: "Paste your MeetGeek API key. Make sure it matches your MeetGeek API region.",
+    webhookSecretHint: "Recommended: paste the MeetGeek webhook secret used to verify X-MG-Signature HMAC-SHA256.",
     availabilityNote: "MeetGeek API keys are region-specific; Taskwise defaults to the standard API endpoint.",
   },
   read: {
