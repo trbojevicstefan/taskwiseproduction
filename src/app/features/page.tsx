@@ -2,10 +2,14 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import {
   ArrowRight,
+  Bot,
   CalendarDays,
+  ListChecks,
   MessagesSquare,
   NotebookPen,
+  Share2,
   Sparkles,
+  Users,
   Wand2,
 } from "lucide-react";
 
@@ -16,47 +20,62 @@ import { MarketingSection } from "@/components/landing/MarketingSection";
 import { productFlowSteps } from "@/components/landing/marketing-content";
 
 export const metadata: Metadata = {
-  title: "Features | TaskwiseAI",
+  title: "AI Meeting Workflow Features",
   description:
-    "Explore AI chat, cleanup tasks, prioritization, planning, calendar, people, and reminders in TaskwiseAI.",
+    "Explore transcript chat, reviewed task extraction, Swipe Sweep, priorities, automations, People and Clients, calendar planning, sharing, Slack follow-through, and MCP in TaskwiseAI.",
+  alternates: { canonical: "/features" },
 };
 
 const featureCards = [
   {
     icon: MessagesSquare,
-    title: "AI chat",
-    body:
-      "Ask grounded questions over meetings, tasks, people, and clients with answers tied to workspace sources.",
+    title: "Transcript chat",
+    body: "Ask grounded questions across captured meetings to recover decisions, commitments, owners, people, and unresolved work.",
+  },
+  {
+    icon: ListChecks,
+    title: "Reviewed task extraction",
+    body: "Let AI propose meeting-derived work, then confirm evidence, ownership, scope, and timing before it becomes authoritative.",
   },
   {
     icon: Wand2,
-    title: "task cleanup",
-    body:
-      "Clean up noisy drafts, remove duplicates, and turn messy outputs into reviewed work the team can trust.",
+    title: "Swipe Sweep",
+    body: "Clear stale, noisy, or low-value backlog items quickly so the board keeps the work that still deserves attention.",
   },
   {
     icon: ArrowRight,
-    title: "Deterministic prioritization",
-    body:
-      "Keep board ordering stable and explainable so the team can review priorities without guesswork.",
-  },
-  {
-    icon: NotebookPen,
-    title: "Planning workspace",
-    body:
-      "Use the planning workspace to turn reviewed work into a clear next-step plan for the team.",
-  },
-  {
-    icon: CalendarDays,
-    title: "Calendar and people/client views",
-    body:
-      "Move between calendar context, people surfaces, and client views without leaving the execution flow.",
+    title: "Explainable prioritization",
+    body: "Keep ordering stable and reviewable instead of allowing an opaque AI score to reshuffle the team's work without context.",
   },
   {
     icon: Sparkles,
-    title: "Slack reminders",
-    body:
-      "Keep follow-through alive with scheduled Slack reminders that keep reviewed work visible and stateful.",
+    title: "Automations",
+    body: "Turn reviewed work into repeatable follow-through so routine next steps happen consistently after the meeting ends.",
+  },
+  {
+    icon: Users,
+    title: "People and Clients",
+    body: "Keep the people, clients, meetings, and tasks that belong together visible as connected operating context.",
+  },
+  {
+    icon: CalendarDays,
+    title: "Calendar and planning",
+    body: "Move from meeting context into a clearer weekly plan while keeping upcoming commitments and due work visible.",
+  },
+  {
+    icon: Share2,
+    title: "Shareable meeting follow-up",
+    body: "Share the useful output from a meeting without forcing someone else to reconstruct decisions from the raw transcript.",
+  },
+  {
+    icon: NotebookPen,
+    title: "Slack follow-through",
+    body: "Keep reviewed work visible with Slack-oriented reminders and updates closer to where the team communicates.",
+  },
+  {
+    icon: Bot,
+    title: "MCP operator controls",
+    body: "Expose scoped meeting-memory and task capabilities to compatible AI clients while keeping operator-visible control in Taskwise.",
   },
 ];
 
@@ -67,41 +86,32 @@ export default function FeaturesPage() {
         label="Product tour"
         title={
           <>
-            The feature set behind <span className="text-white/90">TaskwiseAI</span>
+            From meeting memory to <span className="text-white/90">reviewed execution</span>
           </>
         }
         subtitle={
           <>
-            TaskwiseAI turns meetings into reviewed work with grounded AI chat, cleanup,
-            deterministic prioritization, planning, calendar context, people and client views, and
-            Slack reminders that keep execution moving.
+            TaskwiseAI keeps transcript context, task review, people, priorities, planning, cleanup,
+            sharing, automations, and follow-through in one connected workflow.
           </>
         }
         primaryHref="/signup"
         primaryLabel="Get started"
-        secondaryHref="/"
-        secondaryLabel="Back to home"
+        secondaryHref="/use-cases/ai-meeting-notes-to-tasks"
+        secondaryLabel="See the workflow"
       />
 
       <MarketingSection
         id="capabilities"
         title={
           <>
-            Core capabilities for{" "}
+            Built for the work that happens{" "}
             <span className="bg-gradient-to-r from-[#FFB257] via-[#FF8A3D] to-[#FF2E97] bg-clip-text text-transparent">
-              reviewed execution
+              after the meeting
             </span>
           </>
         }
-        subtitle={
-          <span>
-            These are the surfaces the public story should emphasize:{" "}
-            <span className="text-white/88">chat</span>,{" "}
-            <span className="text-white/88">cleanup</span>,{" "}
-            <span className="text-white/88">prioritization</span>, planning, calendar context,
-            people and client views, and reminders.
-          </span>
-        }
+        subtitle="Search what happened, review what needs doing, organize what matters, and keep follow-through connected to its source context."
       >
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
           {featureCards.map((card) => {
@@ -127,19 +137,13 @@ export default function FeaturesPage() {
         id="flow"
         title={
           <>
-            The launch story in{" "}
+            One operating loop from{" "}
             <span className="bg-gradient-to-r from-[#FF5C4D] via-[#FF9900] to-[#FFB257] bg-clip-text text-transparent">
-              four steps
+              capture to follow-through
             </span>
           </>
         }
-        subtitle={
-          <span>
-            This page reuses the shared launch-copy flow so the public navigation stays aligned
-            with the homepage, while the{" "}
-            <span className="text-white/88">execution language</span> still feels distinct.
-          </span>
-        }
+        subtitle="The same review-first workflow works across supported meeting sources, so downstream execution stays consistent even when teams use different recorders."
       >
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
           {productFlowSteps.map((step, index) => (
@@ -164,32 +168,25 @@ export default function FeaturesPage() {
         id="cta"
         title={
           <>
-            Ready to see the workflow in{" "}
+            Keep the context. Move the{" "}
             <span className="bg-gradient-to-r from-[#FFB257] via-[#FF9900] to-[#FF2E97] bg-clip-text text-transparent">
-              action
+              work
             </span>
-            ?
+            .
           </>
         }
-        subtitle={
-          <span>
-            Use the launch page, explore the feature story, or move on to{" "}
-            <span className="text-white/88">integrations</span> and{" "}
-            <span className="text-white/88">MCP</span> when you want the deeper platform
-            surfaces.
-          </span>
-        }
+        subtitle="Explore supported meeting sources or start with a concrete workflow for turning meeting notes into reviewed tasks."
       >
         <div className="rounded-[2rem] border border-white/10 bg-gradient-to-br from-white/10 via-white/[0.06] to-white/[0.03] p-6 shadow-2xl shadow-black/30 sm:p-8">
           <div className="flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between">
             <div className="max-w-2xl space-y-3">
-              <p className="text-xs uppercase tracking-[0.22em] text-white/45">Launch CTA</p>
+              <p className="text-xs uppercase tracking-[0.22em] text-white/45">Meeting to execution</p>
               <h2 className="text-3xl font-semibold tracking-tight text-white sm:text-4xl">
-                Start with the features page, then move into the rest of the product story.
+                Make the meeting useful after everyone closes the call.
               </h2>
               <p className="text-base leading-7 text-white/68">
-                TaskwiseAI gives teams one place to capture work, clean it up, prioritize it, and
-                keep it moving with reminders and operator-grade controls.
+                TaskwiseAI connects meeting memory to reviewed tasks, ownership, planning, cleanup,
+                automations, and team follow-through.
               </p>
             </div>
 
@@ -207,7 +204,7 @@ export default function FeaturesPage() {
                 className="border border-white/10 bg-white/10 text-white hover:bg-white/20"
                 asChild
               >
-                <Link href="/">Home</Link>
+                <Link href="/integrations">Meeting sources</Link>
               </Button>
             </div>
           </div>
