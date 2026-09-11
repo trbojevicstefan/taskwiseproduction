@@ -48,6 +48,20 @@ export const normalizeParticipants = (raw: unknown): NormalizedProviderParticipa
   if (!Array.isArray(raw)) return [];
   const byKey = new Map<string, NormalizedProviderParticipant>();
   for (const value of raw) {
+    if (typeof value === "string") {
+      const email = cleanEmail(value);
+      const text = cleanString(value);
+      const name = email
+        ? email.split("@")[0].replace(/[._-]+/g, " ")
+        : text;
+      if (!name) continue;
+      const participant: NormalizedProviderParticipant = {
+        name,
+        ...(email ? { email } : {}),
+      };
+      byKey.set(participantKey(participant), participant);
+      continue;
+    }
     if (!value || typeof value !== "object") continue;
     const entry = value as Record<string, unknown>;
     const nestedUser =
@@ -139,11 +153,7 @@ export const normalizeTranscriptSegments = (
       }
     }
 
-    segments.push({
-      speaker,
-      text,
-      offsetSeconds,
-    });
+    segments.push({ speaker, text, offsetSeconds });
   }
   return segments;
 };
