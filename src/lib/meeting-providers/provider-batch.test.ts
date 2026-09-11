@@ -36,8 +36,18 @@ describe("tl;dv provider", () => {
   it("validates x-api-key credentials and can list meeting ids", async () => {
     const fetchMock = jest
       .fn()
-      .mockResolvedValueOnce(response({ data: [{ id: "m-1" }], nextPageToken: null }))
-      .mockResolvedValueOnce(response({ data: [{ id: "m-2" }, { id: "m-1" }] }));
+      .mockResolvedValueOnce(
+        response({ page: 0, pages: 1, total: 0, pageSize: 1, results: [] })
+      )
+      .mockResolvedValueOnce(
+        response({
+          page: 0,
+          pages: 1,
+          total: 2,
+          pageSize: 2,
+          results: [{ id: "m-2" }, { id: "m-1" }],
+        })
+      );
     global.fetch = fetchMock as any;
 
     await expect(tldvMeetingProvider.validateCredentials({ apiKey: "abc" })).resolves.toMatchObject({
