@@ -269,7 +269,8 @@ export async function GET(request?: Request) {
     const snapshot: AdaptiveDashboardSnapshot = {
       recentMeetingCount: pastMeetingDocs.length,
       meetingsNeedingReview: recentMeetings.filter(
-        (meeting) => meeting.suggestedTaskCount > 0
+        (meeting: AdaptiveDashboardSnapshot["recentMeetings"][number]) =>
+          meeting.suggestedTaskCount > 0
       ).length,
       upcomingMeetingCount,
       urgentTaskCount: taskDocs.filter(
