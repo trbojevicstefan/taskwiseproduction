@@ -48,6 +48,7 @@ import {
   type UpcomingMeeting,
 } from "./planning-overview";
 import UpcomingMeetingsSection from "./UpcomingMeetingsSection";
+import AdaptiveDashboardLayer from "./AdaptiveDashboardLayer";
 import { useChatHistory } from "@/contexts/ChatHistoryContext";
 
 const PLANNER_CHAT_SCOPE = { type: "planner" } as const;
@@ -451,6 +452,7 @@ export default function PlanningWorkspacePageContent() {
       </DashboardHeader>
 
       <div className="flex-1 overflow-y-auto p-4 sm:p-6">
+        <AdaptiveDashboardLayer className="mb-4" />
         <div className="flex flex-col gap-6 xl:flex-row xl:items-start">
           <div className="min-w-0 flex-1 space-y-4">
             <UpcomingMeetingsSection
