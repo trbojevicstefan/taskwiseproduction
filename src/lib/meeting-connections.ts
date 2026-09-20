@@ -138,7 +138,7 @@ export const upsertMeetingConnection = async (
     workspaceId: string;
     userId: string;
     provider: MeetingProviderId;
-    apiKey: string;
+    apiKey: string | null;
     accountName?: string | null;
     webhookSecret?: string | null;
   }

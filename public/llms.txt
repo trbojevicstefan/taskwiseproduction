@@ -1,0 +1,37 @@
+# TaskwiseAI
+
+TaskwiseAI is a meeting-memory-to-execution workspace. It helps teams turn captured conversations into searchable meeting memory, reviewed tasks, ownership, priorities, planning, automations, and follow-through.
+
+## Core capabilities
+
+- Import supported meetings and preserve transcript context.
+- Chat with meeting transcripts to recover decisions, commitments, people, and unresolved work.
+- Propose meeting-derived tasks for human review before they become authoritative work.
+- Organize accepted tasks with ownership, priorities, planning, and Swipe Sweep backlog cleanup.
+- Use Automations for repeatable follow-through after work is reviewed.
+- Keep People and Clients context connected to meetings and tasks.
+- Share meeting-derived context and execution updates.
+- Expose scoped Taskwise capabilities to compatible AI clients through MCP.
+
+## Meeting sources
+
+- Fathom: primary meeting-source experience.
+- Fireflies: supported meeting import.
+- Grain: supported meeting import.
+- tl;dv: API-key sync plus meeting events.
+- Otter.ai: Public API connection for eligible Enterprise workspaces.
+- MeetGeek: API sync plus signed completion webhooks.
+- Read AI: webhook-first integration using signed meeting reports; manual sync is not currently exposed.
+
+## Public pages
+
+- https://www.taskwise.ai/
+- https://www.taskwise.ai/features
+- https://www.taskwise.ai/integrations
+- https://www.taskwise.ai/use-cases
+- https://www.taskwise.ai/mcp
+- https://www.taskwise.ai/docs
+
+## Important product behavior
+
+Taskwise is positioned around reviewed execution. AI can help surface tasks and meeting context, but teams retain the confirmation step for ownership, scope, and timing before proposed work becomes authoritative.

@@ -5,14 +5,14 @@ import {
 } from "@/components/landing/marketing-content";
 
 describe("marketing content", () => {
-  it("covers the new public launch story", () => {
+  it("covers the current public product story", () => {
     expect(marketingNavItems.map((item) => item.href)).toEqual([
       "/",
       "/features",
       "/integrations",
+      "/use-cases",
       "/mcp",
       "/docs",
-      "/signup",
     ]);
     expect(productFlowSteps.map((step) => step.title)).toEqual([
       "Capture",
@@ -24,6 +24,10 @@ describe("marketing content", () => {
       "Fathom",
       "Fireflies",
       "Grain",
+      "tl;dv",
+      "Otter.ai",
+      "MeetGeek",
+      "Read AI",
       "Slack",
       "Google Workspace",
       "Trello",

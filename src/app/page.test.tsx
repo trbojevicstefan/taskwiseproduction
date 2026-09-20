@@ -14,31 +14,32 @@ jest.mock("@/components/ui/logo", () => ({
 }));
 
 describe("homepage marketing refresh", () => {
-  it("surfaces the new launch story and section coverage", () => {
+  it("surfaces meeting memory, reviewed execution, current providers, and operator controls", () => {
     const consoleError = jest.spyOn(console, "error").mockImplementation(() => {});
     const html = renderToStaticMarkup(React.createElement(HomePage));
     consoleError.mockRestore();
 
-    expect(html).toContain("Turn meetings into");
-    expect(html).toContain("prioritized, reviewed execution");
+    expect(html).toContain("meeting memory");
+    expect(html).toContain("reviewed execution");
+    expect(html).toContain("Transcript chat");
+    expect(html).toContain("Swipe Sweep");
+    expect(html).toContain("Planning and automations");
     expect(html).toContain("Fathom");
     expect(html).toContain("Fireflies");
     expect(html).toContain("Grain");
-    expect(html).toContain("AI that ingests your meetings");
-    expect(html).toContain("deterministic prioritization");
-    expect(html).toContain("Review-first workflow");
-    expect(html).toContain("MCP operator layer");
-    expect(html).toContain("MCP keys");
-    expect(html).toContain("audit logs");
-    expect(html).toContain("workflow replay");
-    expect(html).toContain("workflow delivery");
-    expect(html).toContain("Board sync");
-    expect(html).toContain("Trello");
+    expect(html).toContain("tl;dv");
+    expect(html).toContain("Otter.ai");
+    expect(html).toContain("MeetGeek");
+    expect(html).toContain("Read AI");
+    expect(html).toContain("Scoped MCP keys");
+    expect(html).toContain("Audit visibility");
+    expect(html).toContain("Workflow replay and delivery");
 
     expect(html).toContain('href="/signup"');
     expect(html).toContain('href="/login"');
     expect(html).toContain('href="/features"');
     expect(html).toContain('href="/integrations"');
+    expect(html).toContain('href="/use-cases"');
     expect(html).toContain('href="/mcp"');
   });
 });

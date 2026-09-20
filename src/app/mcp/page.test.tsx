@@ -16,15 +16,17 @@ jest.mock("@/components/ui/logo", () => ({
 }));
 
 describe("mcp page", () => {
-  it("explains the operator layer and guardrails", () => {
+  it("explains scoped operator access and guardrails", () => {
     const html = renderToStaticMarkup(React.createElement(MCPPage));
 
     expect(html).toContain("MCP");
-    expect(html).toContain("API keys");
-    expect(html).toContain("audit logs");
+    expect(html).toContain("Scoped MCP keys");
+    expect(html).toContain("Audit visibility");
     expect(html).toContain("Workflow replay");
-    expect(html).toContain("deliveries");
+    expect(html).toContain("Operator controls");
+    expect(html).toContain("compatible AI clients");
     expect(html).toContain('href="/signup"');
     expect(html).toContain('href="/integrations"');
+    expect(html).toContain('href="/use-cases/mcp-for-meeting-memory"');
   });
 });
