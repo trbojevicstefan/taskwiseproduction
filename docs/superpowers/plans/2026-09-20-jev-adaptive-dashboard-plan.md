@@ -90,36 +90,36 @@ The code validates the response and applies confidence thresholds before selecti
 ## Implementation checkpoints
 
 ### CP1 — Decision model + tests
-- [ ] RED: add tests for deterministic fallback, Jev request shape, confidence gating, and response validation.
-- [ ] Implement `src/lib/jev-dashboard.ts`.
-- [ ] Verify focused tests GREEN.
+- [x] RED: add tests for deterministic fallback, Jev request shape, confidence gating, and response validation.
+- [x] Implement `src/lib/jev-dashboard.ts`.
+- [x] Verify focused tests GREEN.
 
 ### CP2 — Workspace-scoped dashboard state + route
-- [ ] RED: route tests for unauthorized access, state minimization, and fallback behavior.
-- [ ] Add `GET /api/dashboard/adaptive`.
-- [ ] Query active workspace only using existing workspace-scope helpers.
-- [ ] Query recent meetings/open tasks with narrow projections and hard caps.
-- [ ] Derive people signals without sending email addresses.
-- [ ] Add route to smoke-test coverage if the repository convention requires explicit registration.
-- [ ] Verify route tests GREEN.
+- [x] RED: route tests for unauthorized access, state minimization, and fallback behavior.
+- [x] Add `GET /api/dashboard/adaptive`.
+- [x] Query active workspace only using existing workspace-scope helpers.
+- [x] Query recent meetings/open tasks with narrow projections and hard caps.
+- [x] Derive people signals without sending email addresses.
+- [x] Add route to smoke-test coverage if the repository convention requires explicit registration.
+- [x] Verify route tests GREEN.
 
 ### CP3 — Adaptive dashboard UI
-- [ ] RED: component tests for modal/popover/inline/quiet and dismissal behavior.
-- [ ] Add `AdaptiveDashboardLayer` using existing Radix/shadcn Dialog, Popover, Card, Badge and Button primitives.
-- [ ] Mount it on `/planning` without changing the existing Planning layout/system.
-- [ ] Link interventions to existing routes: Review, Meetings, Planning agendas, People, Settings integrations.
-- [ ] Never auto-mutate tasks/meetings/people from a Jev decision.
-- [ ] Verify component/page tests GREEN.
+- [x] RED: component tests for modal/popover/inline/quiet and dismissal behavior.
+- [x] Add `AdaptiveDashboardLayer` using existing Radix/shadcn Dialog, Popover, Card, Badge and Button primitives.
+- [x] Mount it on `/planning` without changing the existing Planning layout/system.
+- [x] Link interventions to existing routes: Review, Meetings, Planning agendas, People, Settings integrations.
+- [x] Never auto-mutate tasks/meetings/people from a Jev decision.
+- [x] Verify component/page tests GREEN.
 
 ### CP4 — Release verification
-- [ ] Run focused tests.
-- [ ] Run full Jest suite.
-- [ ] Run lint.
-- [ ] Run typecheck.
-- [ ] Run production build.
-- [ ] Run route smoke tests.
-- [ ] Verify exact-head GitHub/Vercel status.
-- [ ] Create PR and merge only when release gates are green.
+- [x] Run focused tests.
+- [x] Run full Jest suite.
+- [x] Run lint.
+- [x] Run typecheck.
+- [x] Run production build.
+- [x] Run route smoke tests.
+- [x] Verify exact-head GitHub/Vercel status.
+- [x] Create PR and merge only when release gates are green.
 
 ## Environment
 
