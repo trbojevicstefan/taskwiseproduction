@@ -106,7 +106,7 @@ const COPY: Record<
     description:
       "Taskwise found open work with stronger urgency signals. Use Planning to clear the highest-impact items first.",
     primaryAction: { label: "Open planning", href: "/planning" },
-    secondaryAction: { label: "Open board", href: "/workspaces/current/board" },
+    secondaryAction: { label: "Clean up backlog", href: "/review/cleanup" },
   },
   prepare_meeting: {
     eyebrow: "Upcoming conversation",
