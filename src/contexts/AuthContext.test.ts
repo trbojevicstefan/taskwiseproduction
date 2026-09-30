@@ -16,3 +16,10 @@ describe("isPublicPath", () => {
     expect(isPublicPath("/chat")).toBe(false);
   });
 });
+it("allows public blog pages without making similarly named or dashboard routes public", () => {
+  expect(isPublicPath("/blog")).toBe(true);
+  expect(isPublicPath("/blog/meeting-actions")).toBe(true);
+  expect(isPublicPath("/blogger")).toBe(false);
+  expect(isPublicPath("/meetings")).toBe(false);
+  expect(isPublicPath("/settings")).toBe(false);
+});
