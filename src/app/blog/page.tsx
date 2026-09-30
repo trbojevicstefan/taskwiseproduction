@@ -3,6 +3,8 @@ import Link from "next/link";
 import { MarketingPageShell } from "@/components/landing/MarketingPageShell";
 import { BLOG_ORIGIN, getBlogPosts, type BlogPost } from "@/lib/blog";
 
+export const revalidate = 60;
+
 export const metadata: Metadata = {
   title: "Taskwise Blog | Meetings to meaningful work",
   description:

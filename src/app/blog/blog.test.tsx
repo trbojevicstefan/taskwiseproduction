@@ -1,8 +1,8 @@
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import BlogIndex from "./page";
+import BlogIndex, { revalidate as blogRevalidate } from "./page";
 import Article, { generateMetadata } from "./[slug]/page";
-import sitemap from "../sitemap";
+import sitemap, { dynamic as sitemapDynamic } from "../sitemap";
 import { getBlogPosts, getBlogPost } from "@/lib/blog";
 const post = {
   slug: "meeting-actions",
@@ -24,8 +24,10 @@ jest.mock("@/lib/blog", () => ({
 }));
 jest.mock("next/link", () => ({
   __esModule: true,
-  default: ({ href, children, prefetch: _prefetch, ...props }: any) =>
-    React.createElement("a", { href, ...props }, children),
+  default: ({ href, children, ...props }: any) => {
+    delete props.prefetch;
+    return React.createElement("a", { href, ...props }, children);
+  },
 }));
 jest.mock("@/components/ui/logo", () => ({
   Logo: () => React.createElement("span", null, "logo"),
@@ -103,4 +105,9 @@ it("index gives a useful unavailable state", async () => {
   expect(renderToStaticMarkup(await BlogIndex())).toContain(
     "temporarily unavailable",
   );
+});
+
+it("recovers the index after feed failures and defers sitemap to requests", () => {
+  expect(blogRevalidate).toBe(60);
+  expect(sitemapDynamic).toBe("force-dynamic");
 });
