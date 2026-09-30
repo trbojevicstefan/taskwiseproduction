@@ -56,7 +56,7 @@ it.each(["/blog", "/blog/meeting-actions"])(
           </article>
         </Providers>,
       ),
-    ).toMatch(/<article>.*<img/s);
+    ).toMatch(/<article>[\s\S]*<img/);
   },
 );
 it.each(["/meetings", "/settings/integrations", "/blogger", "/", null])(
@@ -87,4 +87,5 @@ it.each(["/blog", "/blog/meeting-actions"])(
     expect(SessionProvider).not.toHaveBeenCalled();
   },
 );
+
 
