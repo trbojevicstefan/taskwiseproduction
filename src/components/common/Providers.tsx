@@ -17,6 +17,7 @@ import { MeetingHistoryProvider } from '@/contexts/MeetingHistoryContext';
 
 export function Providers({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+  const isBlogRoute = pathname === "/blog" || Boolean(pathname?.startsWith("/blog/"));
   const dashboardPrefixes = [
     "/meetings",
     "/review",
@@ -33,6 +34,15 @@ export function Providers({ children }: { children: React.ReactNode }) {
     (prefix) => pathname === prefix || pathname?.startsWith(`${prefix}/`)
   );
   const needsTaskContext = pathname === "/reports" || pathname?.startsWith("/reports/");
+
+  // Public articles must reach the server HTML without authentication or storage mount gates.
+  if (isBlogRoute) {
+    return (
+      <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>
+        {children}
+      </ThemeProvider>
+    );
+  }
 
   return (
     <ThemeProvider
