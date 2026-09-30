@@ -80,6 +80,7 @@ export function MarketingPageShell({
               </pre>
             </div>
             <div className="flex w-full flex-col items-center gap-3 border-t border-white/10 pt-5">
+              <Link href="/blog" className="text-sm text-white/65 hover:text-white">Read the Taskwise blog</Link>
               <p className="max-w-2xl text-sm leading-6 text-white/55">
                 Turn meetings into reviewed execution with grounded AI, clear prioritization, and
                 operator-grade workflow.
@@ -94,3 +95,4 @@ export function MarketingPageShell({
     </div>
   );
 }
+

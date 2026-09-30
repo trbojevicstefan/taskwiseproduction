@@ -10,6 +10,7 @@ export const marketingNavItems: MarketingNavItem[] = [
   { label: "Integrations", href: "/integrations" },
   { label: "MCP", href: "/mcp" },
   { label: "Docs", href: "/docs" },
+  { label: "Blog", href: "/blog" },
   { label: "Get started", href: "/signup" },
 ];
 
@@ -78,3 +79,4 @@ export const integrationCards: MarketingCard[] = [
     iconAlt: "MCP icon",
   },
 ];
+
