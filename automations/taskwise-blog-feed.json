@@ -1,0 +1,131 @@
+{
+  "name": "Taskwise - Public Blog Feed",
+  "nodes": [
+    {
+      "id": "2499dfa5-9a21-4cee-9f32-135f39725e96",
+      "name": "Taskwise Blog Feed",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        0
+      ],
+      "webhookId": "4ae23000-c07c-4325-a49e-8a575c35045e",
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "taskwise-blog-feed",
+        "responseMode": "responseNode",
+        "options": {}
+      }
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "operation": "getAll",
+        "projectId": "=taskwiseai-v0",
+        "collection": "taskwise_blog_posts",
+        "returnAll": true
+      },
+      "type": "n8n-nodes-base.googleFirebaseCloudFirestore",
+      "typeVersion": 1.1,
+      "position": [
+        250,
+        0
+      ],
+      "id": "92791308-377f-4748-95b3-68c94d615b78",
+      "name": "Read Taskwise Published Posts",
+      "credentials": {
+        "googleApi": {
+          "id": "t1RCn6HyppgCgHUg",
+          "name": "Taskwise Blog Firestore"
+        }
+      },
+      "notes": "Read only the taskwise_blog_posts collection in the existing n8nauts default database.",
+      "alwaysOutputData": true
+    },
+    {
+      "id": "dd58ca0f-01a5-4038-bb89-d19551d32a4c",
+      "name": "Select Public Taskwise Posts",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        500,
+        0
+      ],
+      "parameters": {
+        "jsCode": "const validSlug = s => /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(String(s || ''));\nconst posts = $input.all().map(item => item.json || {}).filter(post => post.status === 'published' && post.site === 'https://www.taskwise.ai' && validSlug(post.slug));\nconst requested = String($('Taskwise Blog Feed').first().json.query?.slug || '').trim();\nif (requested) {\n  const post = validSlug(requested) ? posts.find(item => item.slug === requested) : null;\n  return [{json: {post: post ? {slug: post.slug, title: post.title || post.metatitle || '', shortsummary: post.shortsummary || '', subheading: post.subheading || '', content: post.content || '', coverimage: post.coverimage || '', inlineimage: post.inlineimage || '', category: post.categorylabel || post.category || '', authorname: post.authorname || 'Taskwise Team', authorbio: post.authorbio || '', authoravatar: post.authoravatar || '', createdAt: post.createdAt || post.date || ''} : null}}];\n}\nreturn [{json: {posts: posts.map(post => ({slug: post.slug, title: post.title || post.metatitle || '', shortsummary: post.shortsummary || '', subheading: post.subheading || '', coverimage: post.coverimage || '', category: post.categorylabel || post.category || '', authorname: post.authorname || 'Taskwise Team', createdAt: post.createdAt || post.date || ''}))}}];"
+      }
+    },
+    {
+      "id": "1fe5c39d-dcc6-4c69-8797-7c84e9c85e10",
+      "name": "Return Taskwise Blog JSON",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        750,
+        0
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json) }}",
+        "options": {
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Access-Control-Allow-Origin",
+                "value": "*"
+              },
+              {
+                "name": "Cache-Control",
+                "value": "public, max-age=60"
+              },
+              {
+                "name": "X-Content-Type-Options",
+                "value": "nosniff"
+              }
+            ]
+          }
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Taskwise Blog Feed": {
+      "main": [
+        [
+          {
+            "node": "Read Taskwise Published Posts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Taskwise Published Posts": {
+      "main": [
+        [
+          {
+            "node": "Select Public Taskwise Posts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Select Public Taskwise Posts": {
+      "main": [
+        [
+          {
+            "node": "Return Taskwise Blog JSON",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Europe/Belgrade"
+  }
+}

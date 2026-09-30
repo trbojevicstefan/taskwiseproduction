@@ -1,0 +1,1123 @@
+{
+  "name": "Taskwise - Blog Writer",
+  "nodes": [
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "vca-site",
+              "name": "site",
+              "value": "https://www.taskwise.ai",
+              "type": "string"
+            },
+            {
+              "id": "vca-collection",
+              "name": "collection",
+              "value": "taskwise_blog_posts",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "id": "b374906e-f391-4155-a73d-4203cb4d7846",
+      "name": "Workflow Configuration",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        14704,
+        4512
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const rows = $('Collect Blog Topics').first().json.topics || [];\nconst published = new Set($('Fetch Blog Index').all().map(item => item.json?.slug).filter(Boolean));\nconst now = Date.now();\nconst selected = rows.find(row => {\n  const slug = String(row.Slug || '').trim();\n  const status = String(row.Status || '').trim().toLowerCase();\n  const due = String(row['Publish After'] || '').trim();\n  return ['ready', 'queued'].includes(status) && /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug)\n    && !published.has(slug) && (!due || (Number.isFinite(Date.parse(due)) && Date.parse(due) <= now));\n});\nif (!selected) return [];\nconst title = String(selected['Blog Title'] || '').trim();\nconst type = String(selected.Type || 'Guide').trim();\nif (!title || !['Guide', 'Comparison', 'Listicle'].includes(type)) return [];\nconst safeUrl = (value, fallback) => {\n  const url = String(value || '').trim();\n  return /^https:\\/\\/[^\\s<>\\\"']+$/.test(url) ? url : fallback;\n};\nconst escape = value => String(value).replace(/[&<>\"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',\"'\":'&#39;'}[char]));\nconst coverImageUrl = safeUrl(selected['Cover Image URL'], '');\nconst inlineImageUrl = safeUrl(selected['Inline Image URL'], '');\nif (!coverImageUrl || !inlineImageUrl || coverImageUrl === inlineImageUrl) throw new Error('Two distinct HTTPS image URLs are required in the selected Google Sheet row');\nconst inlineImageHtml = `<figure><img src=\"${escape(inlineImageUrl)}\" alt=\"${escape('Visual guide: ' + title)}\" loading=\"lazy\"><figcaption>${escape('Conceptual illustration of the workflow described in this guide.')}</figcaption></figure>`;\nreturn [{json: {...selected, slug: String(selected.Slug).trim(), type, 'Blog Title ': title,\n  'Key Points': String(selected['Key Points'] || '').trim(), Author: String(selected['Author Name'] || 'Taskwise').trim(),\n  coverImageUrl, inlineImageUrl, inlineImageHtml}}];"
+      },
+      "id": "87178c22-8e83-470a-9151-f13396d364ee",
+      "name": "Select Taskwise Topic",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        15376,
+        4512
+      ]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.type }}",
+                    "rightValue": "Listicle",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "a51cbb19-f6b2-42ff-b2ef-ef15724a9aff"
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.type }}",
+                    "rightValue": "Comparison",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "08f79ac5-d231-4bd4-be1c-42f852fbbff4"
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.type }}",
+                    "rightValue": "Guide",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "d04f049e-5d13-4989-a3b2-7e066fcba42d"
+                  }
+                ],
+                "combinator": "and"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "8e05fab0-172f-4cb2-b52a-cc3996c706e6",
+      "name": "Route by Blog Type",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.3,
+      "position": [
+        15600,
+        4496
+      ],
+      "executeOnce": true
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Blog Title: {{ $json[\"Blog Title \"] }}\nKey Points: {{ $json[\"Key Points\"] }}\nSubheading: {{ $json[\"Subheading\"] }}\nAudience: {{ $json[\"Audience\"] }}\nTarget Keyword: {{ $json[\"Target Keyword\"] }}\nCategory: {{ $json[\"Category\"] }}\nAuthor: {{ $json[\"Author\"] }}\nSources supplied by editor: {{ $json[\"Source URLs\"] }}",
+        "hasOutputParser": true,
+        "options": {
+          "systemMessage": "You write for TaskwiseAI (https://www.taskwise.ai), a meeting-to-execution platform. It imports notes/transcripts and Fathom meetings, produces suggested task drafts reviewed by people, supports prioritization and a planning workspace, grounded AI chat over meeting/workspace context, Slack reminders and workspace-scoped MCP access. Ground Taskwise-specific claims in the verified product description above and the editor-provided key points. Supplied URLs are source references, not evidence that you have fetched their current content. Never invent automatic integrations, security guarantees, pricing, benchmarks or current version claims. Write practical original English, specific steps, tradeoffs, a verification checklist and FAQ. 1400-2200 words, semantic HTML beginning with paragraph and h2 sections. No h1, scripts, styles, iframes, images or event attributes. Images are inserted from the editorial Sheet. Use editor's author/category and return exactly attached structured object. Never claim conceptual illustrations are real product screenshots. Marketing invitation only at end.\n\nWrite a substantive listicle. Each item must explain the situation, implementation, benefit, and limitation. Avoid thin lists."
+        }
+      },
+      "id": "e6f008f7-704c-48cb-b9e3-6348b94aaa4a",
+      "name": "Listicle Writer AI Agent",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3,
+      "position": [
+        15824,
+        4048
+      ],
+      "retryOnFail": true,
+      "waitBetweenTries": 5000,
+      "maxTries": 5
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Blog Title: {{ $json[\"Blog Title \"] }}\nKey Points: {{ $json[\"Key Points\"] }}\nSubheading: {{ $json[\"Subheading\"] }}\nAudience: {{ $json[\"Audience\"] }}\nTarget Keyword: {{ $json[\"Target Keyword\"] }}\nCategory: {{ $json[\"Category\"] }}\nAuthor: {{ $json[\"Author\"] }}\nSources supplied by editor: {{ $json[\"Source URLs\"] }}",
+        "hasOutputParser": true,
+        "options": {
+          "systemMessage": "You write for TaskwiseAI (https://www.taskwise.ai), a meeting-to-execution platform. It imports notes/transcripts and Fathom meetings, produces suggested task drafts reviewed by people, supports prioritization and a planning workspace, grounded AI chat over meeting/workspace context, Slack reminders and workspace-scoped MCP access. Ground Taskwise-specific claims in the verified product description above and the editor-provided key points. Supplied URLs are source references, not evidence that you have fetched their current content. Never invent automatic integrations, security guarantees, pricing, benchmarks or current version claims. Write practical original English, specific steps, tradeoffs, a verification checklist and FAQ. 1400-2200 words, semantic HTML beginning with paragraph and h2 sections. No h1, scripts, styles, iframes, images or event attributes. Images are inserted from the editorial Sheet. Use editor's author/category and return exactly attached structured object. Never claim conceptual illustrations are real product screenshots. Marketing invitation only at end.\n\nWrite a step-by-step guide with prerequisites, implementation steps, a test checklist, edge cases, and a clear next action."
+        }
+      },
+      "id": "6317f266-64e0-43b2-8fb3-87391846b26e",
+      "name": "Guide Writer AI Agent",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3,
+      "position": [
+        15824,
+        4960
+      ],
+      "retryOnFail": true,
+      "maxTries": 5,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Blog Title: {{ $json[\"Blog Title \"] }}\nKey Points: {{ $json[\"Key Points\"] }}\nSubheading: {{ $json[\"Subheading\"] }}\nAudience: {{ $json[\"Audience\"] }}\nTarget Keyword: {{ $json[\"Target Keyword\"] }}\nCategory: {{ $json[\"Category\"] }}\nAuthor: {{ $json[\"Author\"] }}\nSources supplied by editor: {{ $json[\"Source URLs\"] }}",
+        "hasOutputParser": true,
+        "options": {
+          "systemMessage": "You write for TaskwiseAI (https://www.taskwise.ai), a meeting-to-execution platform. It imports notes/transcripts and Fathom meetings, produces suggested task drafts reviewed by people, supports prioritization and a planning workspace, grounded AI chat over meeting/workspace context, Slack reminders and workspace-scoped MCP access. Ground Taskwise-specific claims in the verified product description above and the editor-provided key points. Supplied URLs are source references, not evidence that you have fetched their current content. Never invent automatic integrations, security guarantees, pricing, benchmarks or current version claims. Write practical original English, specific steps, tradeoffs, a verification checklist and FAQ. 1400-2200 words, semantic HTML beginning with paragraph and h2 sections. No h1, scripts, styles, iframes, images or event attributes. Images are inserted from the editorial Sheet. Use editor's author/category and return exactly attached structured object. Never claim conceptual illustrations are real product screenshots. Marketing invitation only at end.\n\nWrite a fair comparison with decision criteria, strengths, limits, example scenarios, and a recommendation by use case. Do not declare a universal winner."
+        }
+      },
+      "id": "c1c73b3e-3ffd-4ea1-b2a2-18c1be0c2537",
+      "name": "Comparison Writer AI Agent",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3,
+      "position": [
+        15824,
+        4512
+      ],
+      "retryOnFail": true,
+      "waitBetweenTries": 5000,
+      "maxTries": 5
+    },
+    {
+      "parameters": {
+        "modelName": "models/gemini-3.1-pro-preview",
+        "options": {
+          "maxOutputTokens": 50000
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1,
+      "position": [
+        15792,
+        4304
+      ],
+      "id": "c69a60d4-c9f5-4a15-982d-5ceabb9b4acc",
+      "name": "Google Gemini Chat Model",
+      "credentials": {
+        "googlePalmApi": {
+          "id": "74JKffT3Lk8jYUVC",
+          "name": "Blog Writer"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 12 * * 1,3,5"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        14480,
+        4416
+      ],
+      "id": "829c1d82-61cc-422d-aebc-a792ddfd525d",
+      "name": "Schedule Trigger1"
+    },
+    {
+      "parameters": {
+        "jsonSchemaExample": "{\n\t\"category\": \"Technology\",\n\t\"content\": \"Full blog article content with HTML formatting\",\n\t\"createdAt\": \"DYNAMIC_DATE_PLACEHOLDER\",\n\t\"hero\": \"https://via.placeholder.com/1200x600\",\n\t\"metatitle\": \"SEO optimized meta title\",\n\t\"readingtime\": \"5\",\n\t\"slug\": \"blog-post-url-slug\",\n\t\"tags\": \"tag1, tag2, tag3\",\n\t\"title\": \"Blog Post Title\",\n\t\"authoravatar\": \"https://via.placeholder.com/150\",\n\t\"authorname\": \"Jovan\",\n\t\"categorylabel\": \"Technology\",\n\t\"coverimage\": \"https://via.placeholder.com/1200x600\",\n\t\"date\": \"DYNAMIC_DATE_PLACEHOLDER\",\n\t\"shortsummary\": \"Brief summary of the article\"\n}"
+      },
+      "id": "4cac6fd5-b7e4-421e-8d8b-34b4c80b9ad9",
+      "name": "Structured Output Parser",
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.3,
+      "position": [
+        15968,
+        4272
+      ]
+    },
+    {
+      "parameters": {
+        "jsonSchemaExample": "{\n\t\"category\": \"Technology\",\n\t\"content\": \"Full blog article content with HTML formatting\",\n\t\"createdAt\": \"DYNAMIC_DATE_PLACEHOLDER\",\n\t\"hero\": \"https://via.placeholder.com/1200x600\",\n\t\"metatitle\": \"SEO optimized meta title\",\n\t\"readingtime\": \"5\",\n\t\"slug\": \"blog-post-url-slug\",\n\t\"tags\": \"tag1, tag2, tag3\",\n\t\"title\": \"Blog Post Title\",\n\t\"authoravatar\": \"https://via.placeholder.com/150\",\n\t\"authorname\": \"Jovan\",\n\t\"categorylabel\": \"Technology\",\n\t\"coverimage\": \"https://via.placeholder.com/1200x600\",\n\t\"date\": \"DYNAMIC_DATE_PLACEHOLDER\",\n\t\"shortsummary\": \"Brief summary of the article\"\n}"
+      },
+      "id": "d15e36a3-2992-4b14-ad61-d7bb37250c84",
+      "name": "Structured Output Parser 2",
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.3,
+      "position": [
+        15904,
+        4672
+      ]
+    },
+    {
+      "parameters": {
+        "jsonSchemaExample": "{\n\t\"category\": \"Technology\",\n\t\"content\": \"Full blog article content with HTML formatting\",\n\t\"createdAt\": \"DYNAMIC_DATE_PLACEHOLDER\",\n\t\"hero\": \"https://via.placeholder.com/1200x600\",\n\t\"metatitle\": \"SEO optimized meta title\",\n\t\"readingtime\": \"5\",\n\t\"slug\": \"blog-post-url-slug\",\n\t\"tags\": \"tag1, tag2, tag3\",\n\t\"title\": \"Blog Post Title\",\n\t\"authoravatar\": \"https://via.placeholder.com/150\",\n\t\"authorname\": \"Jovan\",\n\t\"categorylabel\": \"Technology\",\n\t\"coverimage\": \"https://via.placeholder.com/1200x600\",\n\t\"date\": \"DYNAMIC_DATE_PLACEHOLDER\",\n\t\"shortsummary\": \"Brief summary of the article\"\n}"
+      },
+      "id": "af10fb6a-4c43-4373-a287-3c53dc014aac",
+      "name": "Structured Output Parser 3",
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.3,
+      "position": [
+        15904,
+        5184
+      ]
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        14480,
+        4608
+      ],
+      "id": "4e6788a5-ae4c-4e3b-a575-5aedcfbc0089",
+      "name": "When clicking ‘Execute workflow’"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Improve the following Taskwise article for search and reader usefulness. Preserve factual claims only if supported by the supplied article. Keep content as valid semantic HTML and preserve the article's practical detail. Return the exact attached output schema. Use this canonical slug exactly: {{ $('Select Taskwise Topic').first().json.slug }}. Use this topic title as the basis for the meta title: {{ $('Select Taskwise Topic').first().json[\"Blog Title \"] }}. Article type: {{ $('Select Taskwise Topic').first().json.type }}. Article: {{ JSON.stringify($json.output) }}",
+        "hasOutputParser": true,
+        "messages": {
+          "messageValues": [
+            {
+              "message": "You are a careful SEO editor for Taskwise, the meeting-to-execution platform. Improve clarity, intent match, descriptive headings, and meta fields without fabricating facts, citations, or links. Keep the content in English. Do not include a top-level h1 in the HTML content. Preserve the original article topic and all useful sections. Return only the object required by the structured output parser."
+            }
+          ]
+        },
+        "batching": {}
+      },
+      "id": "8f717782-35c4-4504-aa4f-288c7814a582",
+      "name": "SEO Agent",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.9,
+      "position": [
+        16192,
+        4528
+      ],
+      "retryOnFail": true,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "jsonSchemaExample": "{\n\t\"category\": \"Technology\",\n\t\"content\": \"Full blog article content with HTML formatting\",\n\t\"createdAt\": \"DYNAMIC_DATE_PLACEHOLDER\",\n\t\"hero\": \"https://via.placeholder.com/1200x600\",\n\t\"metatitle\": \"SEO optimized meta title\",\n\t\"readingtime\": \"5\",\n\t\"slug\": \"blog-post-url-slug\",\n\t\"tags\": \"tag1, tag2, tag3\",\n\t\"title\": \"Blog Post Title\",\n\t\"authoravatar\": \"https://via.placeholder.com/150\",\n\t\"authorname\": \"Stefan\",\n\t\"categorylabel\": \"Technology\",\n\t\"coverimage\": \"https://via.placeholder.com/1200x600\",\n\t\"date\": \"DYNAMIC_DATE_PLACEHOLDER\",\n\t\"shortsummary\": \"Brief summary of the article\"\n}"
+      },
+      "id": "27527c42-7c4c-4da7-b527-9532b4bf5ad9",
+      "name": "Structured Output Parser SEO",
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.3,
+      "position": [
+        16256,
+        4784
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "id-1",
+              "name": "category",
+              "value": "={{ $(\"Select Taskwise Topic\").first().json[\"Category\"] || $json.output.category }}",
+              "type": "string"
+            },
+            {
+              "id": "id-2",
+              "name": "content",
+              "value": "={{ String($json.output.content || \"\") + $(\"Select Taskwise Topic\").first().json.inlineImageHtml }}",
+              "type": "string"
+            },
+            {
+              "id": "id-3",
+              "name": "createdAt",
+              "value": "={{ $now.toISO() }}",
+              "type": "string"
+            },
+            {
+              "id": "id-4",
+              "name": "hero",
+              "value": "={{ $(\"Select Taskwise Topic\").first().json.coverImageUrl }}",
+              "type": "string"
+            },
+            {
+              "id": "id-5",
+              "name": "metatitle",
+              "value": "={{ $json.output.metatitle || $(\"Select Taskwise Topic\").first().json[\"Blog Title \"] }}",
+              "type": "string"
+            },
+            {
+              "id": "id-6",
+              "name": "readingtime",
+              "value": "={{ Number($json.output.readingtime) || 0 }}",
+              "type": "number"
+            },
+            {
+              "id": "id-7",
+              "name": "slug",
+              "value": "={{ $(\"Select Taskwise Topic\").first().json.slug }}",
+              "type": "string"
+            },
+            {
+              "id": "id-8",
+              "name": "tags",
+              "value": "={{ $(\"Select Taskwise Topic\").first().json[\"Tags\"] || $json.output.tags }}",
+              "type": "string"
+            },
+            {
+              "id": "id-9",
+              "name": "title",
+              "value": "={{ $(\"Select Taskwise Topic\").first().json[\"Blog Title \"] }}",
+              "type": "string"
+            },
+            {
+              "id": "id-10",
+              "name": "authoravatar",
+              "value": "={{ $(\"Select Taskwise Topic\").first().json[\"Author Avatar URL\"] || \"\" }}",
+              "type": "string"
+            },
+            {
+              "id": "id-11",
+              "name": "authorname",
+              "value": "={{ $(\"Select Taskwise Topic\").first().json[\"Author\"] }}",
+              "type": "string"
+            },
+            {
+              "id": "id-12",
+              "name": "categorylabel",
+              "value": "={{ $(\"Select Taskwise Topic\").first().json[\"Category\"] || $json.output.categorylabel }}",
+              "type": "string"
+            },
+            {
+              "id": "id-13",
+              "name": "coverimage",
+              "value": "={{ $(\"Select Taskwise Topic\").first().json.coverImageUrl }}",
+              "type": "string"
+            },
+            {
+              "id": "id-14",
+              "name": "date",
+              "value": "={{ $now.toISO() }}",
+              "type": "string"
+            },
+            {
+              "id": "id-15",
+              "name": "shortsummary",
+              "value": "={{ $(\"Select Taskwise Topic\").first().json[\"Summary\"] || $json.output.shortsummary }}",
+              "type": "string"
+            },
+            {
+              "id": "id-16",
+              "name": "originalBlogTitle",
+              "value": "={{ $json.originalBlogTitle }}",
+              "type": "string"
+            },
+            {
+              "id": "vca-status",
+              "name": "status",
+              "value": "published",
+              "type": "string"
+            },
+            {
+              "id": "b9b71fff-57c7-405a-82ce-57d6c92024b6",
+              "name": "subheading",
+              "value": "={{ $(\"Select Taskwise Topic\").first().json[\"Subheading\"] || $json.output.shortsummary }}",
+              "type": "string"
+            },
+            {
+              "id": "b2254e25-f397-4505-85f0-721bdd429388",
+              "name": "authorbio",
+              "value": "={{ $(\"Select Taskwise Topic\").first().json[\"Author Bio\"] || \"\" }}",
+              "type": "string"
+            },
+            {
+              "id": "a2c3eedb-50ec-4ed5-a543-23568c7ff512",
+              "name": "sourceurls",
+              "value": "={{ $(\"Select Taskwise Topic\").first().json[\"Source URLs\"] || \"\" }}",
+              "type": "string"
+            },
+            {
+              "id": "cc7f73aa-2df3-48ea-b80d-c768ecff4988",
+              "name": "targetkeyword",
+              "value": "={{ $(\"Select Taskwise Topic\").first().json[\"Target Keyword\"] || \"\" }}",
+              "type": "string"
+            },
+            {
+              "id": "61f88136-a78f-4df6-98f7-c951f5549388",
+              "name": "audience",
+              "value": "={{ $(\"Select Taskwise Topic\").first().json[\"Audience\"] || \"\" }}",
+              "type": "string"
+            },
+            {
+              "id": "65d14c29-bb44-48db-8f66-166670a30f75",
+              "name": "inlineimage",
+              "value": "={{ $(\"Select Taskwise Topic\").first().json.inlineImageUrl }}",
+              "type": "string"
+            },
+            {
+              "id": "taskwise-site",
+              "name": "site",
+              "value": "https://www.taskwise.ai",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "372c33d0-140c-4ed3-ad90-029dee89ada1",
+      "name": "Format for Firebase",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        18896,
+        4560
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "preserve-1",
+              "name": "output",
+              "value": "={{ $json.output }}",
+              "type": "object"
+            },
+            {
+              "id": "preserve-2",
+              "name": "originalBlogTitle",
+              "value": "={{ $(\"Select Taskwise Topic\").first().json[\"Blog Title \"] }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "5793c1ba-c775-4c8b-98f5-1f6a21da890c",
+      "name": "Preserve Article Data",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        17328,
+        4560
+      ]
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "operation": "getAll",
+        "projectId": "=taskwiseai-v0",
+        "collection": "taskwise_blog_posts",
+        "returnAll": true
+      },
+      "type": "n8n-nodes-base.googleFirebaseCloudFirestore",
+      "typeVersion": 1.1,
+      "position": [
+        14928,
+        4512
+      ],
+      "id": "08a4e0d5-dc8a-467d-a9e9-00583b0509db",
+      "name": "Fetch Blog Index",
+      "credentials": {
+        "googleApi": {
+          "id": "t1RCn6HyppgCgHUg",
+          "name": "Taskwise Blog Firestore"
+        }
+      },
+      "notes": "Svi postojeci blogovi iz Firestore.",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const BASE = 'https://www.taskwise.ai';\nconst blogs=$input.all().map(it=>it.json||{}).filter(j=>j.slug && j.status==='published').map(j=>({url:BASE+'/blog/'+j.slug,type:'blog',title:j.title||j.slug,summary:j.shortsummary||'',tags:j.tags||'',primary_keyword:j.targetkeyword||j.title||j.slug}));\nconst pages=[{url:BASE+'/',type:'product',title:'TaskwiseAI',summary:'Turn meeting memory into reviewed action.',tags:'meetings, tasks, execution'},{url:BASE+'/features',type:'product',title:'Taskwise features',summary:'Capture, understand, review and execute meeting follow-ups.',tags:'meeting memory, task review, planning'},{url:BASE+'/integrations',type:'product',title:'Taskwise integrations',summary:'Meeting capture and connected follow-up tools.',tags:'Fathom, Slack, calendar, Trello'},{url:BASE+'/mcp',type:'product',title:'Taskwise MCP',summary:'Scoped agent access to workspace meeting memory and tasks.',tags:'MCP, workspace, agent'}];\nreturn [{json:{candidates:[...blogs,...pages],candidateCount:blogs.length+pages.length}}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        15152,
+        4512
+      ],
+      "id": "3deefd9f-ba65-4ca2-b566-c6c7e649d3bf",
+      "name": "Build Candidate List",
+      "notes": "Blogovi + service/industry/landing stranice."
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const seo = {...($json.output || {}), slug: $('Select Taskwise Topic').first().json.slug};\nconst all = $('Build Candidate List').first().json.candidates || [];\nconst MAX_CANDIDATES = 40;\n\nconst STOP = new Set(['the','and','for','with','your','you','how','what','why','are','from','that','this','into','best','guide','using','can','n8n','ai']);\nconst words = (s) => String(s || '').toLowerCase().match(/[a-z0-9]{3,}/g) || [];\nconst bag = new Set(words(seo.title + ' ' + seo.tags + ' ' + seo.category + ' ' + seo.shortsummary).filter(w => !STOP.has(w)));\n\nconst selfUrl = 'https://www.taskwise.ai/blog/' + (seo.slug || '');\n\nconst scored = all\n  .filter(c => c.url !== selfUrl)\n  .map(c => {\n    const cw = new Set(words(c.title + ' ' + c.tags + ' ' + c.summary + ' ' + c.primary_keyword).filter(w => !STOP.has(w)));\n    let score = 0;\n    for (const w of cw) if (bag.has(w)) score++;\n    return { c, score };\n  });\n\n// sve ne-blog stranice uvek ostaju, blogovi se seku na MAX_CANDIDATES\nconst pages = scored.filter(x => x.c.type !== 'blog').map(x => x.c);\nconst blogs = scored.filter(x => x.c.type === 'blog' && x.score > 0)\n  .sort((a, b) => b.score - a.score)\n  .slice(0, MAX_CANDIDATES)\n  .map(x => x.c);\n\nconst candidates = [...blogs, ...pages];\n\nreturn {\n  json: {\n    slug: seo.slug || '',\n    title: seo.title || '',\n    category: seo.category || '',\n    tags: seo.tags || '',\n    shortsummary: seo.shortsummary || '',\n    content: seo.content || '',\n    candidate_urls: JSON.stringify(candidates, null, 1),\n    candidateCount: candidates.length\n  }\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        16528,
+        4544
+      ],
+      "id": "1771415d-c346-43a0-9e95-95246a4c81aa",
+      "name": "Prep Interlink Input",
+      "notes": "Ravna polja koja user message ocekuje: slug, title, category, tags, shortsummary, content, candidate_urls."
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Verifikuje ono sto je model vratio. Ako provera padne, linkovi se primenjuju\n// deterministicki na originalni HTML. Clanak ne moze da bude ostecen.\n\nconst seo = {...$('SEO Agent').item.json.output, slug: $('Select Taskwise Topic').first().json.slug};\nconst original = String($('Prep Interlink Input').item.json.content || '');\nconst modelOut = $json.output || {};\nconst modelContent = String(modelOut.content || '');\nconst linksAdded = Array.isArray(modelOut.links_added) ? modelOut.links_added : [];\nconst skippedReason = modelOut.links_skipped_reason || '';\n\nconst cands = $('Build Candidate List').first().json.candidates || [];\nconst whitelist = new Set(cands.map(c => String(c.url).replace(/\\/+$/, '')));\nconst selfUrl = ('https://www.taskwise.ai/blog/' + (seo.slug || '')).replace(/\\/+$/, '');\n\nconst count = (s, re) => (s.match(re) || []).length;\nconst hrefs = (s) => (s.match(/<a\\b[^>]*href=\"([^\"]+)\"/gi) || [])\n  .map(m => (m.match(/href=\"([^\"]+)\"/i) || [])[1])\n  .map(u => String(u).replace(/\\/+$/, ''));\n\nconst originalHrefs = new Set(hrefs(original));\nconst failures = [];\n\nif (!modelContent) failures.push('model nije vratio content');\n\nif (modelContent) {\n  for (const [label, re] of [['h2', /<h2\\b/gi], ['h3', /<h3\\b/gi], ['li', /<li\\b/gi], ['tr', /<tr\\b/gi], ['table', /<table\\b/gi]]) {\n    if (count(modelContent, re) !== count(original, re)) failures.push('broj ' + label + ' se ne poklapa');\n  }\n  if (modelContent.length < original.length) failures.push('content je kraci od originala');\n  if (/<a\\b[^>]*>(?:(?!<\\/a>)[\\s\\S])*?<a\\b/i.test(modelContent)) failures.push('ugnjezden <a> tag');\n\n  const newHrefs = hrefs(modelContent).filter(u => !originalHrefs.has(u));\n  const seenH = new Set();\n  for (const u of newHrefs) {\n    if (!whitelist.has(u)) failures.push('URL van liste kandidata: ' + u);\n    if (u === selfUrl) failures.push('self link: ' + u);\n    if (seenH.has(u)) failures.push('duplikat URL: ' + u);\n    seenH.add(u);\n  }\n  if (newHrefs.length > 7) failures.push('vise od 7 novih linkova');\n\n  const firstH2 = modelContent.search(/<h2\\b/i);\n  if (firstH2 > 0) {\n    const introNew = hrefs(modelContent.slice(0, firstH2)).filter(u => !originalHrefs.has(u));\n    if (introNew.length > 2) failures.push('vise od 2 linka u introu');\n  }\n}\n\nif (failures.length === 0) {\n  return {\n    json: {\n      output: { ...seo, content: modelContent },\n      interlinkMode: 'model',\n      interlinks: linksAdded,\n      interlinkCount: linksAdded.length,\n      interlinkSkippedReason: skippedReason,\n      interlinkFailures: []\n    }\n  };\n}\n\n// ---------- FALLBACK: deterministicko ubacivanje na osnovu links_added ----------\nconst escapeRe = (s) => s.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&');\nconst BLOCKED = /^<\\/?(a|h1|h2|h3|h4|h5|h6|code|pre|script|style)\\b/i;\n\nfunction insertLink(source, anchor, url) {\n  if (!anchor || anchor.length < 3) return { html: source, ok: false, matched: null };\n  const re = new RegExp('(?<![\\\\w-])' + escapeRe(anchor) + '(?![\\\\w-])');\n  const parts = source.split(/(<[^>]+>)/g);\n  let depth = 0;\n  for (let k = 0; k < parts.length; k++) {\n    const p = parts[k];\n    if (p.startsWith('<')) {\n      if (BLOCKED.test(p)) depth += p.startsWith('</') ? -1 : 1;\n      if (depth < 0) depth = 0;\n      continue;\n    }\n    if (depth > 0 || !p.trim()) continue;\n    const m = p.match(re);\n    if (m) {\n      parts[k] = p.replace(re, '<a href=\"' + url + '\">' + m[0] + '</a>');\n      return { html: parts.join(''), ok: true, matched: m[0] };\n    }\n  }\n  return { html: source, ok: false, matched: null };\n}\n\nconst firstH2 = original.search(/<h2\\b/i);\nconst lastH2 = original.search(/<h2\\b(?![\\s\\S]*<h2\\b)/i);\nlet intro = firstH2 > 0 ? original.slice(0, firstH2) : '';\nlet body  = firstH2 > 0 ? (lastH2 > firstH2 ? original.slice(firstH2, lastH2) : original.slice(firstH2)) : original;\nlet concl = (firstH2 > 0 && lastH2 > firstH2) ? original.slice(lastH2) : '';\n\nconst get = { intro: () => intro, body: () => body, conclusion: () => concl };\nconst set = (n, v) => { if (n === 'intro') intro = v; else if (n === 'body') body = v; else concl = v; };\n\nconst usedUrls = new Set(originalHrefs);\nconst usedAnchors = new Set();\nconst applied = [];\nconst rejected = [];\nlet introCount = 0;\n\nfor (const l of linksAdded) {\n  if (applied.length >= 7) break;\n  const url = String(l.url || '').trim().replace(/\\/+$/, '');\n  const anchor = String(l.anchor_text || '').trim();\n  const key = anchor.toLowerCase();\n  if (!url || url === selfUrl) { rejected.push({ url, why: 'self/prazan' }); continue; }\n  if (!whitelist.has(url)) { rejected.push({ url, why: 'van liste kandidata' }); continue; }\n  if (usedUrls.has(url)) { rejected.push({ url, why: 'duplikat URL' }); continue; }\n  if (usedAnchors.has(key)) { rejected.push({ url, anchor, why: 'duplikat anchora' }); continue; }\n\n  const want = ['intro', 'body', 'conclusion'].includes(l.placement) ? l.placement : 'body';\n  const order = [want, ...['body', 'conclusion', 'intro'].filter(r => r !== want)];\n  let done = false;\n  for (const region of order) {\n    if (region === 'intro' && introCount >= 2) continue;\n    const src = get[region]();\n    if (!src) continue;\n    const r = insertLink(src, anchor, url);\n    if (r.ok) {\n      set(region, r.html);\n      usedUrls.add(url); usedAnchors.add(key);\n      if (region === 'intro') introCount++;\n      applied.push({ url, anchor_text: r.matched, placement: region, reason: l.reason || '' });\n      done = true;\n      break;\n    }\n  }\n  if (!done) rejected.push({ url, anchor, why: 'anchor nije nadjen u tekstu van headinga i van postojecih linkova' });\n}\n\nconst rebuilt = intro + body + concl;\nconst structureOk =\n  count(rebuilt, /<h2\\b/gi) === count(original, /<h2\\b/gi) &&\n  count(rebuilt, /<h3\\b/gi) === count(original, /<h3\\b/gi) &&\n  count(rebuilt, /<li\\b/gi) === count(original, /<li\\b/gi) &&\n  count(rebuilt, /<tr\\b/gi) === count(original, /<tr\\b/gi) &&\n  rebuilt.length >= original.length;\n\nreturn {\n  json: {\n    output: { ...seo, content: structureOk ? rebuilt : original },\n    interlinkMode: structureOk ? 'fallback' : 'original',\n    interlinks: structureOk ? applied : [],\n    interlinkCount: structureOk ? applied.length : 0,\n    interlinkSkippedReason: skippedReason,\n    interlinkFailures: failures,\n    interlinksRejected: rejected\n  }\n};\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        17104,
+        4560
+      ],
+      "id": "6eb80526-50f6-48dd-91f6-23ee6225ab9d",
+      "name": "Validate Interlinks",
+      "notes": "Provera strukture + fallback na deterministicko ubacivanje."
+    },
+    {
+      "parameters": {
+        "modelName": "models/gemini-3.1-pro-preview",
+        "options": {
+          "maxOutputTokens": 32000
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1,
+      "position": [
+        16768,
+        4784
+      ],
+      "id": "a376c72e-5682-4971-a60a-e3230dc8d0e8",
+      "name": "Google Gemini Chat Model1",
+      "credentials": {
+        "googlePalmApi": {
+          "id": "74JKffT3Lk8jYUVC",
+          "name": "Blog Writer"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsonSchemaExample": "{\n  \"slug\": \"article-slug\",\n  \"content\": \"Full HTML article content with internal links added\",\n  \"links_added\": [\n    {\n      \"url\": \"https://www.taskwise.ai/blog/target-post-slug\",\n      \"anchor_text\": \"exact anchor phrase used\",\n      \"placement\": \"body\",\n      \"reason\": \"why this link is contextually relevant\"\n    }\n  ],\n  \"links_skipped_reason\": \"\"\n}"
+      },
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.3,
+      "position": [
+        16896,
+        4784
+      ],
+      "id": "90c4c569-f839-4900-820a-7f686f6ede85",
+      "name": "Structured Output Parser1"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Add contextually relevant internal links to the following Taskwise blog article, using only the candidate URLs listed below. Follow every rule in the system message. If the candidate pool does not contain strong matches, add fewer links or none — do not force links.\n\n## ARTICLE TO INTERLINK\n\nSlug: {{ $json.slug }}\n\nTitle: {{ $json.title }}\n\nCategory: {{ $json.category }}\n\nTags: {{ $json.tags }}\n\nShort summary: {{ $json.shortsummary }}\n\nFull HTML content:\n{{ $json.content }}\n\n## CANDIDATE INTERNAL URLS\n\nEach candidate below includes the destination URL, the page type, the title or purpose, a short description, and topical tags. Use these to judge relevance. Do not link to any URL outside this list.\n\n{{ $json.candidate_urls }}\n\nExpected candidate format (for reference):\n[\n  {\n    \"url\": \"https://www.taskwise.ai/blog/[slug]\",\n    \"type\": \"blog | service | industry | landing | contact\",\n    \"title\": \"Page title\",\n    \"summary\": \"1-2 sentence description of what the page covers\",\n    \"tags\": \"comma-separated topical tags\",\n    \"primary_keyword\": \"main keyword or topic the page targets\"\n  }\n]\n\n## YOUR TASK\n\n1. Read the article carefully and identify the paragraphs where a reader would benefit from a linked next step.\n2. Match those paragraphs against the candidate list using the relevance standard in the system message.\n3. Select anchor phrases that already exist inside the article's sentences — do not invent new sentences or add words to the article.\n4. Insert <a href=\"...\"> tags directly into the HTML, respecting the placement caps (max 2 in intro, plus body, plus optional conclusion).\n5. Return the full updated article and a structured record of every link you added.\n\nReturn only the JSON object specified in the system message.",
+        "hasOutputParser": true,
+        "options": {
+          "systemMessage": "You are the Interlinking Agent for Taskwise (www.taskwise.ai), a meeting memory and task execution platform. Your job is to add high-quality, contextually relevant internal links to an already-published blog article, using a provided list of candidate URLs from the Taskwise website (other blog articles, product pages, product pages, and landing pages).\n\n## YOUR ROLE\nYou do not write, rewrite, restructure, or expand the article. You do not touch meta fields, headings, tables, lists, FAQ items, or existing content structure. You are additive-only: you insert anchor tags around existing words or short phrases in the article body where a genuinely relevant link fits naturally.\n\n## ABSOLUTE OUTPUT RULES\n\n1. PRESERVE 100% OF THE ARTICLE. Every H1, H2, H3, paragraph, list, table, FAQ, code block, and HTML comment from the input must appear in the output, unchanged in wording and order. The only allowed edit is wrapping existing text in <a href=\"...\"> tags.\n\n2. DO NOT INVENT URLS. Only link to URLs from the candidate list provided in the user message. If a URL is not in that list, you cannot use it. Never fabricate a link, and never modify the URL string.\n\n3. DO NOT DUPLICATE. The same URL must not be linked more than once in the entire article. If a URL is already linked in the input HTML, do not link it again.\n\n4. DO NOT OVER-LINK. Never wrap the same visible anchor phrase twice. Never nest an <a> tag inside another <a> tag. Never link headings — anchors go inside paragraph or list text only.\n\n5. NEVER FORCE A LINK. If no candidate is a strong contextual match for the article, return the article unchanged with zero links added. Adding links for the sake of adding them is a failure. Quality over quantity is non-negotiable.\n\n## RELEVANCE STANDARD\nA link is only justified when the linked page is a natural, useful next step for a reader engaged with the current paragraph. Test each candidate against this bar before linking:\n\n- Topic overlap: The candidate page directly extends, deepens, or clarifies what the paragraph is discussing (same industry, same workflow type, same tool stack, same problem domain, or same buyer journey stage).\n- Reader intent match: A reader interested in the paragraph would plausibly want to click through to the linked page. If it feels like a stretch, skip it.\n- No cannibalization: Do not link to a candidate that competes with the current article for the same primary keyword or covers substantially the same ground.\n\nIf you are unsure whether a link belongs, do not add it.\n\n## PLACEMENT RULES\n\nIntro (first 2-3 paragraphs before the first H2):\n- Maximum 2 internal links total in the introduction. This is a hard cap.\n- Prioritize the strongest contextual match here — the intro is the highest-value placement.\n- If only 1 strong match exists for the intro, add 1. If none exists, add 0.\n\nBody (between the first H2 and the conclusion):\n- Add links where a paragraph specifically discusses a topic, workflow, industry, or concept that a candidate page covers in depth.\n- Prefer placing links where the linked destination would answer a question the paragraph raises or provide the \"how\" behind a \"what.\"\n- Typically 2-4 body links for a 2,500-3,500 word article. Fewer is better if the matches are weak.\n\nConclusion (final section, wrap-up, or CTA area):\n- Optional single link to a product page, product page, or a next-step guide that matches the article's business outcome.\n- Only add if it fits the natural flow of the conclusion. Do not append linked sentences that were not in the original.\n\nTotal internal links per article: aim for 3-6 links when the candidate pool supports it. Never exceed 7. If the pool is thin or off-topic, return fewer (or zero) links.\n\n## ANCHOR TEXT RULES\n\n- Anchor text must accurately describe what the reader will find on the linked page. If a reader could not guess the destination from the anchor alone, rewrite the anchor selection or skip the link.\n- Anchor text must read naturally inside the sentence — do not force a keyword into a sentence where it does not already exist.\n- Use descriptive phrases, not generic labels. Never use \"click here,\" \"read more,\" \"this article,\" \"learn more,\" or \"here.\"\n- Prefer 3-6 word anchors. Never anchor a single word unless that word is the exact name of the destination (e.g., a service, product, or platform name).\n- Do not repeat the exact same anchor phrase for different destinations, and do not link two different anchors to the same destination.\n- When linking to an product page, use the industry framing already in the sentence (for example, \"n8n workflows for property managers\" if that phrase is already in the paragraph).\n- When linking to a product page, use outcome-based or capability-based anchor phrasing that already appears in the paragraph (for example, \"meeting follow-up planning\" or \"meeting task review\").\n- When linking to another blog guide, use a descriptive phrase that signals the depth of the resource (for example, \"step-by-step guide to building RAG systems in n8n\").\n\n## HTML EDITING RULES\n\n- Wrap existing text with <a href=\"URL\">existing text</a>. Do not add new sentences, transitions, parenthetical asides, or \"learn more\" tag-ons.\n- All links must be root-relative or absolute URLs exactly as provided in the candidate list. Do not add tracking parameters, fragments, or trailing slashes that were not in the source URL.\n- Add rel=\"noopener\" only if the candidate is marked as external in the candidate list. Internal www.taskwise.ai URLs need no rel attribute.\n- Preserve all whitespace, indentation, and existing HTML comments (including SEO comments from the SEO agent).\n- Do not break inline formatting: if the anchor phrase is inside a <strong>, <em>, or other inline tag, place the <a> outside that tag so the link wraps the styled text (for example, <a href=\"...\"><strong>anchor</strong></a>).\n\n## VALIDATION BEFORE OUTPUT\n\nBefore returning the JSON, verify:\n- The updated content has the same number of H2 tags as the input.\n- The updated content has the same number of H3 tags, list items, table rows, and FAQ items as the input.\n- The updated content character length is equal to or greater than the input (only anchor tags added).\n- Every href attribute value appears in the candidate list.\n- No URL is linked more than once.\n- The intro contains no more than 2 links.\n- Every anchor is a natural, descriptive phrase that already existed in the article text.\n\nIf any check fails, redo the work before responding.\n\n## OUTPUT FORMAT\n\nReturn ONLY a valid JSON object. No preamble, no markdown code fences, no commentary.\n\n{\n  \"slug\": \"string — the article slug, unchanged from input\",\n  \"content\": \"string — the full HTML article content with internal links added, preserving 100% of the original structure\",\n  \"links_added\": [\n    {\n      \"url\": \"string — the destination URL from the candidate list\",\n      \"anchor_text\": \"string — the exact anchor phrase used\",\n      \"placement\": \"string — one of: intro, body, conclusion\",\n      \"reason\": \"string — one sentence explaining why this link is contextually relevant\"\n    }\n  ],\n  \"links_skipped_reason\": \"string — if fewer than 3 links were added, briefly explain why (thin candidate pool, weak topical overlap, etc.). Empty string if not applicable.\"\n}\n\n## CRITICAL JSON RULES\n- Response must start with { and end with }.\n- No text before or after the JSON.\n- No markdown code blocks.\n- Properly escape all quotes, newlines, and special characters inside the HTML content field.\n- If zero links are added, return the article unchanged in the content field and set links_added to an empty array with an honest links_skipped_reason."
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [
+        16720,
+        4560
+      ],
+      "id": "cb47b82c-b6bf-4dab-8a6a-cc1c16b071ce",
+      "name": "Interlinking agent",
+      "retryOnFail": true,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "operation": "upsert",
+        "projectId": "=taskwiseai-v0",
+        "collection": "taskwise_blog_posts",
+        "updateKey": "slug",
+        "columns": "category, content, createdAt, hero, metatitle, readingtime, slug, tags, title, authoravatar, authorname, categorylabel, coverimage, date, shortsummary, status, subheading, authorbio, sourceurls, targetkeyword, audience, inlineimage, site"
+      },
+      "id": "ef9ec853-a7c9-4695-860c-13be79a0c8df",
+      "name": "Create Firebase Document",
+      "type": "n8n-nodes-base.googleFirebaseCloudFirestore",
+      "typeVersion": 1.1,
+      "position": [
+        19056,
+        4560
+      ],
+      "credentials": {
+        "googleApi": {
+          "id": "t1RCn6HyppgCgHUg",
+          "name": "Taskwise Blog Firestore"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "1qD8QJqWTJ8-MSxtP--tvaSzB4tXqajQJ9C_x-8jp71s",
+          "mode": "list",
+          "cachedResultName": "Taskwise Blog Topics",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1qD8QJqWTJ8-MSxtP--tvaSzB4tXqajQJ9C_x-8jp71s/edit"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "Sheet1",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1qD8QJqWTJ8-MSxtP--tvaSzB4tXqajQJ9C_x-8jp71s/edit#gid=0"
+        },
+        "options": {}
+      },
+      "id": "fa16ef68-1e3c-4b94-823d-e5b102e6e9ef",
+      "name": "Read Blog Topics",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        14848,
+        4240
+      ],
+      "executeOnce": false,
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "C6Xu9QhyT1kBxRa7",
+          "name": "Google Sheets Matejanovi"
+        }
+      }
+    },
+    {
+      "id": "4618fad2-26d4-4bfb-975c-23979771b011",
+      "name": "Collect Blog Topics",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        15072,
+        4240
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const topics = $input.all().map(item => item.json || {}).filter(row => row.Slug && row['Blog Title']);\nreturn [{json: {topics, topicCount: topics.length}}];"
+      }
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "1qD8QJqWTJ8-MSxtP--tvaSzB4tXqajQJ9C_x-8jp71s",
+          "mode": "list",
+          "cachedResultName": "Taskwise Blog Topics",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1qD8QJqWTJ8-MSxtP--tvaSzB4tXqajQJ9C_x-8jp71s/edit"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "Sheet1",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1qD8QJqWTJ8-MSxtP--tvaSzB4tXqajQJ9C_x-8jp71s/edit#gid=0"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Slug": "={{ $(\"Select Taskwise Topic\").first().json.slug }}",
+            "Status": "Published",
+            "Published URL": "={{ \"https://www.taskwise.ai/blog/\" + $(\"Select Taskwise Topic\").first().json.slug }}",
+            "Published At": "={{ $now.toISO() }}"
+          },
+          "matchingColumns": [
+            "Slug"
+          ],
+          "schema": [
+            {
+              "id": "Slug",
+              "displayName": "Slug",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Status",
+              "displayName": "Status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Published URL",
+              "displayName": "Published URL",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Published At",
+              "displayName": "Published At",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "6cba05b7-9aab-445f-909d-92fb1bdbc5f9",
+      "name": "Mark Blog Topic Published",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        19280,
+        4560
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "C6Xu9QhyT1kBxRa7",
+          "name": "Google Sheets Matejanovi"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Schedule Trigger1": {
+      "main": [
+        [
+          {
+            "node": "Workflow Configuration",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "When clicking ‘Execute workflow’": {
+      "main": [
+        [
+          {
+            "node": "Workflow Configuration",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Workflow Configuration": {
+      "main": [
+        [
+          {
+            "node": "Read Blog Topics",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Blog Index": {
+      "main": [
+        [
+          {
+            "node": "Build Candidate List",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Candidate List": {
+      "main": [
+        [
+          {
+            "node": "Select Taskwise Topic",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Select Taskwise Topic": {
+      "main": [
+        [
+          {
+            "node": "Route by Blog Type",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route by Blog Type": {
+      "main": [
+        [
+          {
+            "node": "Listicle Writer AI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Comparison Writer AI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Guide Writer AI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Listicle Writer AI Agent": {
+      "main": [
+        [
+          {
+            "node": "SEO Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Guide Writer AI Agent": {
+      "main": [
+        [
+          {
+            "node": "SEO Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Comparison Writer AI Agent": {
+      "main": [
+        [
+          {
+            "node": "SEO Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Gemini Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Comparison Writer AI Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          },
+          {
+            "node": "Listicle Writer AI Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          },
+          {
+            "node": "Guide Writer AI Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          },
+          {
+            "node": "SEO Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Structured Output Parser": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "Listicle Writer AI Agent",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Structured Output Parser 2": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "Comparison Writer AI Agent",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Structured Output Parser 3": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "Guide Writer AI Agent",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "SEO Agent": {
+      "main": [
+        [
+          {
+            "node": "Prep Interlink Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Structured Output Parser SEO": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "SEO Agent",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prep Interlink Input": {
+      "main": [
+        [
+          {
+            "node": "Interlinking agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Interlinking agent": {
+      "main": [
+        [
+          {
+            "node": "Validate Interlinks",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Gemini Chat Model1": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Interlinking agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Structured Output Parser1": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "Interlinking agent",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Interlinks": {
+      "main": [
+        [
+          {
+            "node": "Preserve Article Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preserve Article Data": {
+      "main": [
+        [
+          {
+            "node": "Format for Firebase",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format for Firebase": {
+      "main": [
+        [
+          {
+            "node": "Create Firebase Document",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Blog Topics": {
+      "main": [
+        [
+          {
+            "node": "Collect Blog Topics",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Collect Blog Topics": {
+      "main": [
+        [
+          {
+            "node": "Fetch Blog Index",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Firebase Document": {
+      "main": [
+        [
+          {
+            "node": "Mark Blog Topic Published",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Europe/Belgrade"
+  }
+}
