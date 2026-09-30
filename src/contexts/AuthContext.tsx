@@ -116,6 +116,8 @@ export const isPublicPath = (pathname?: string | null) => {
     pathname === "/features" ||
     pathname === "/integrations" ||
     pathname === "/mcp" ||
+    pathname === "/blog" ||
+    pathname.startsWith("/blog/") ||
     pathname === "/privacy" ||
     pathname === "/terms" ||
     pathname.startsWith("/invite/") ||
@@ -387,3 +389,4 @@ export const useAuth = () => {
   }
   return context;
 };
+

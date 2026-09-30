@@ -94,6 +94,21 @@ export function sanitizeBlogHtml(html: string): string {
   });
 }
 
+/** Parse image attributes, including HTML entities; text and hyperlinks do not count. */
+export function blogHtmlHasImage(html: string, imageUrl: string): boolean {
+  let found = false;
+  sanitizeHtml(html, {
+    exclusiveFilter: (frame) => {
+      if (frame.tag === "img" && frame.attribs.src === imageUrl) found = true;
+      return false;
+    },
+    allowedTags: ["img"],
+    allowedAttributes: { img: ["src"] },
+    allowedSchemes: ["https"],
+  });
+  return found;
+}
+
 async function fetchFeed(slug?: string): Promise<unknown> {
   const url = new URL(
     process.env.TASKWISE_BLOG_FEED_URL ||

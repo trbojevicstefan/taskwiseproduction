@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { MarketingPageShell } from "@/components/landing/MarketingPageShell";
-import { BLOG_ORIGIN, getBlogPost } from "@/lib/blog";
+import { BLOG_ORIGIN, getBlogPost, blogHtmlHasImage } from "@/lib/blog";
 
 type Props = { params: Promise<{ slug: string }> };
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
@@ -100,7 +100,8 @@ export default async function Article({ params }: Props) {
           className="mt-12 text-lg leading-8 text-white/80 [&_p]:my-6 [&_h2]:mb-4 [&_h2]:mt-12 [&_h2]:text-3xl [&_h2]:font-semibold [&_h2]:text-white [&_h3]:mb-3 [&_h3]:mt-8 [&_h3]:text-2xl [&_h3]:font-semibold [&_ul]:my-6 [&_ul]:list-disc [&_ul]:pl-6 [&_ol]:my-6 [&_ol]:list-decimal [&_ol]:pl-6 [&_li]:my-2 [&_a]:text-[#FFB257] [&_a]:underline [&_blockquote]:border-l-2 [&_blockquote]:border-[#FF8F73] [&_blockquote]:pl-6 [&_img]:rounded-xl [&_pre]:overflow-x-auto [&_pre]:rounded-xl [&_pre]:bg-white/5 [&_pre]:p-5 [&_table]:block [&_table]:overflow-x-auto"
           dangerouslySetInnerHTML={{ __html: post.content || "" }}
         />
-        {post.inlineimage && !post.content?.includes(post.inlineimage) ? (
+        {post.inlineimage &&
+        !blogHtmlHasImage(post.content || "", post.inlineimage) ? (
           <figure className="mt-10">
             <img
               src={post.inlineimage}

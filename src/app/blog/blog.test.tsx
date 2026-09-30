@@ -111,3 +111,23 @@ it("recovers the index after feed failures and defers sitemap to requests", () =
   expect(blogRevalidate).toBe(60);
   expect(sitemapDynamic).toBe("force-dynamic");
 });
+it("renders the supporting image when its URL only appears as a hyperlink", async () => {
+  (getBlogPost as jest.Mock).mockResolvedValue({
+    ...post,
+    content: `<p><a href="${post.inlineimage}">View illustration</a></p>`,
+  });
+  const html = renderToStaticMarkup(
+    await Article({ params: Promise.resolve({ slug: post.slug }) }),
+  );
+  expect(html).toContain(`src="${post.inlineimage}"`);
+});
+it("does not duplicate the supporting image already present in article HTML", async () => {
+  (getBlogPost as jest.Mock).mockResolvedValue({
+    ...post,
+    content: `<figure><img src="${post.inlineimage}" alt="Illustration"></figure>`,
+  });
+  const html = renderToStaticMarkup(
+    await Article({ params: Promise.resolve({ slug: post.slug }) }),
+  );
+  expect(html.split(`src="${post.inlineimage}"`).length - 1).toBe(1);
+});
